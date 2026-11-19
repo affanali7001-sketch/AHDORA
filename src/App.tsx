@@ -1,9 +1,36 @@
 import SalahTracker from './components/SalahTracker';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Onboarding from './components/Onboarding';
 import { emptyProfile, type UserProfile } from './types/profile';
 import { loadProfile, saveProfile } from './lib/profileApi';
 import { fetchPrayerTimes, type PrayerTimesResponse } from './lib/prayerApi';
+import {
+  abandonPomodoro,
+  completePomodoro,
+  createSubject,
+  createTask,
+  deleteSubject,
+  deleteTask,
+  fetchActivePomodoro,
+  fetchPomodoroHistory,
+  fetchStudyStats,
+  fetchSubjects,
+  fetchTasks,
+  fetchToday,
+  pausePomodoro,
+  resumePomodoro,
+  setTaskStatus,
+  startPomodoro,
+  updateSubject,
+  updateTask,
+  type PomodoroSession,
+  type StudySchedule,
+  type StudyStats,
+  type StudySubject,
+  type StudyTask,
+  type TaskPriority,
+  type TaskStatus,
+} from './lib/studyApi';
 import { sleepDurationLabel } from './types/profile';
 import type { CSSProperties, ReactNode, FormEvent } from 'react';
 import {
@@ -115,9 +142,14 @@ function App() {
   const [salahToday, setSalahToday] = useState<Record<string, { status: string }>>({});
   const [focusEnabled, setFocusEnabled] = useState(true);
   const [youtubeAllowed, setYoutubeAllowed] = useState(true);
-  const [showAddTask, setShowAddTask] = useState(false);
-  const [newTask, setNewTask] = useState('');
-  const [tasks, setTasks] = useState<{ name: string; time: string; status: string; color: string }[]>([]);
+  const [subjects, setSubjects] = useState<StudySubject[]>([]);
+  const [tasks, setTasks] = useState<StudyTask[]>([]);
+  const [todayTasks, setTodayTasks] = useState<StudyTask[]>([]);
+  const [todaySchedule, setTodaySchedule] = useState<StudySchedule | null>(null);
+  const [studyStats, setStudyStats] = useState<StudyStats | null>(null);
+  const [activePomodoro, setActivePomodoro] = useState<PomodoroSession | null>(null);
+  const [pomodoroHistory, setPomodoroHistory] = useState<PomodoroSession[]>([]);
+  const [studyError, setStudyError] = useState('');
 
   const notify = (message: string) => {
     setToast(message);
@@ -154,6 +186,36 @@ function App() {
     }
   }
 
+  // Study data lives in MongoDB; every load re-fetches it so a refresh,
+  // logout, or device change shows the same real records.
+  async function refreshStudy() {
+    if (!authUser || guestMode) return;
+    const results = await Promise.allSettled([
+      fetchSubjects(),
+      fetchTasks(),
+      fetchToday(),
+      fetchStudyStats(),
+      fetchActivePomodoro(),
+      fetchPomodoroHistory(1, 20),
+    ]);
+    const [subjectsResult, tasksResult, todayResult, statsResult, activeResult, historyResult] = results;
+    if (subjectsResult.status === 'fulfilled') setSubjects(subjectsResult.value);
+    if (tasksResult.status === 'fulfilled') setTasks(tasksResult.value);
+    if (todayResult.status === 'fulfilled') {
+      setTodayTasks(todayResult.value.tasks);
+      setTodaySchedule(todayResult.value.schedule);
+    }
+    if (statsResult.status === 'fulfilled') setStudyStats(statsResult.value);
+    if (activeResult.status === 'fulfilled') setActivePomodoro(activeResult.value);
+    if (historyResult.status === 'fulfilled') setPomodoroHistory(historyResult.value.sessions);
+    const failed = results.find((r) => r.status === 'rejected');
+    setStudyError(
+      failed && failed.status === 'rejected'
+        ? failed.reason instanceof Error ? failed.reason.message : 'Study data could not be loaded.'
+        : '',
+    );
+  }
+
   async function loadPrayerTimes() {
     if (!authUser) return;
     setPrayerStatus('loading');
@@ -184,8 +246,19 @@ function App() {
     if (screen === 'app' && authUser && !guestMode && page === 'dashboard') {
       refreshSalahToday();
     }
+    if (screen === 'app' && authUser && !guestMode && (page === 'dashboard' || page === 'study' || page === 'analytics')) {
+      refreshStudy();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
+
+  // Load study data once the user is in the app (not for guests).
+  useEffect(() => {
+    if (screen === 'app' && authUser && !guestMode) {
+      refreshStudy();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, authUser, guestMode]);
 
   useEffect(() => {
     let active = true;
@@ -277,6 +350,14 @@ function App() {
     setPrayerTimes(null);
     setPrayerStatus('idle');
     setSalahToday({});
+    setSubjects([]);
+    setTasks([]);
+    setTodayTasks([]);
+    setTodaySchedule(null);
+    setStudyStats(null);
+    setActivePomodoro(null);
+    setPomodoroHistory([]);
+    setStudyError('');
     setScreen('welcome');
     setPage('dashboard');
   }
@@ -309,20 +390,19 @@ function App() {
         <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{navItems.find((item) => item.id === page)?.label}</strong></div><div className="topbar-actions"><span className="demo-pill"><span />{authUser ? 'SECURE SESSION' : 'GUEST PREVIEW'}</span><button className="icon-button search-trigger" onClick={() => setSearchOpen(!searchOpen)} aria-label="Search"><Search size={18} /></button><button className="icon-button notification-button" onClick={() => notify('You are all caught up.')} aria-label="Notifications"><Bell size={18} /><i /></button><button className="top-avatar" onClick={() => goTo('profile')}>{initials}</button></div></header>
         {searchOpen && <div className="search-popover"><Search size={17} /><input autoFocus placeholder="Search AHDORA pages..." value={query} onChange={(e) => setQuery(e.target.value)} /><button onClick={() => { setQuery(''); setSearchOpen(false); }}><X size={16} /></button><div className="search-results">{filteredNav.map((item) => <button key={item.id} onClick={() => goTo(item.id)}>{item.label}<ArrowUpRight size={14} /></button>)}</div></div>}
         <div className="page-content">
-          {page === 'dashboard' && <Dashboard userName={profileName || 'there'} onNavigate={goTo} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} onPrayerToggle={() => goTo('deen')} tasks={tasks} />}
+          {page === 'dashboard' && <Dashboard userName={profileName || 'there'} onNavigate={goTo} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} onPrayerToggle={() => goTo('deen')} subjects={subjects} todayTasks={todayTasks} studyStats={studyStats} guestMode={guestMode} />}
           {page === 'deen' && <Deen onNotify={notify} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} />}
-          {page === 'study' && <Study tasks={tasks} onAdd={() => setShowAddTask(true)} onNotify={notify} />}
+          {page === 'study' && <Study subjects={subjects} tasks={tasks} todayTasks={todayTasks} schedule={todaySchedule} stats={studyStats} activeSession={activePomodoro} history={pomodoroHistory} studyError={studyError} guestMode={guestMode} profile={newUser} onRefresh={refreshStudy} onNotify={notify} />}
           {page === 'challenges' && <Challenges onNotify={notify} />}
           {page === 'guidance' && <Guidance onNotify={notify} />}
           {page === 'focus' && <Focus sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} focusEnabled={focusEnabled} setFocusEnabled={setFocusEnabled} youtubeAllowed={youtubeAllowed} setYoutubeAllowed={setYoutubeAllowed} onNotify={notify} />}
-          {page === 'analytics' && <Analytics />}
+          {page === 'analytics' && <Analytics stats={studyStats} guestMode={guestMode} />}
           {page === 'profile' && <Profile onNotify={notify} user={authUser} guestMode={guestMode} onLogout={handleLogout} />}
         </div>
         <footer className="app-footer"><span>© 2026 AHDORA</span><span>Built around what matters.</span><button onClick={() => notify('Help centre will be connected in a later phase.')}><CircleHelp size={14} /> Help & feedback</button></footer>
       </main>
       {mobileNav && <button className="mobile-backdrop" onClick={() => setMobileNav(false)} aria-label="Close navigation" />}
       {toast && <div className="toast"><Check size={16} />{toast}</div>}
-      {showAddTask && <div className="modal-backdrop" onClick={() => setShowAddTask(false)}><div className="modal-card" onClick={(e) => e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">STUDY PLANNER</span><h3>Add a study task</h3></div><button className="icon-button" onClick={() => setShowAddTask(false)}><X size={18} /></button></div><label className="field-label">Task name</label><input className="form-input" value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="e.g. Revise calculus" /><button className="primary-button full-width" onClick={() => { if (newTask.trim()) { setTasks((prev) => [...prev, { name: newTask.trim(), time: 'Not scheduled', status: 'Upcoming', color: 'mint' }]); setNewTask(''); setShowAddTask(false); notify('Task added for this session. Persistence is not enabled yet.'); } }}>Add task <ArrowRight size={16} /></button><p className="modal-note">Tasks are currently session-only until the study planner API is connected.</p></div></div>}
     </div>
   );
 }
@@ -683,7 +763,10 @@ function Dashboard({
   prayerError,
   salahToday,
   onPrayerToggle,
-  tasks,
+  subjects,
+  todayTasks,
+  studyStats,
+  guestMode,
 }: {
   userName: string;
   onNavigate: (page: Page) => void;
@@ -692,7 +775,10 @@ function Dashboard({
   prayerError: string;
   salahToday: Record<string, { status: string }>;
   onPrayerToggle: (name: string) => void;
-  tasks: { name: string; time: string; status: string; color: string }[];
+  subjects: StudySubject[];
+  todayTasks: StudyTask[];
+  studyStats: StudyStats | null;
+  guestMode: boolean;
 }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -710,6 +796,11 @@ function Dashboard({
     month: 'long',
     year: 'numeric',
   });
+  const tasksCompletedToday = studyStats?.tasksCompletedToday ?? 0;
+  const todayFocusMinutes = studyStats?.todayFocusMinutes ?? 0;
+  const streak = studyStats?.streak ?? 0;
+  const hasActivity = prayedCount > 0 || tasksCompletedToday > 0 || todayFocusMinutes > 0;
+  const subjectById = new Map(subjects.map((s) => [s.id, s]));
 
   return (
     <>
@@ -748,12 +839,16 @@ function Dashboard({
           </div>
           <div className="progress-main">
             <div>
-              <strong>Your activity will appear here.</strong>
-              <span>Complete a Salah check-in or add a study task to start tracking progress.</span>
-              <small><ArrowUpRight size={13} /> No activity recorded yet</small>
+              <strong>{hasActivity ? 'Today so far' : 'Your activity will appear here.'}</strong>
+              <span>
+                {hasActivity
+                  ? `${prayedCount} of 5 prayers · ${tasksCompletedToday} task${tasksCompletedToday === 1 ? '' : 's'} completed · ${todayFocusMinutes}m focused`
+                  : 'Complete a Salah check-in or add a study task to start tracking progress.'}
+              </span>
+              <small><ArrowUpRight size={13} /> {hasActivity ? (streak > 0 ? `${streak}-day streak — a day counts when a focus session finishes or a task is completed.` : 'No streak yet — finish a focus session or a task.') : 'No activity recorded yet'}</small>
             </div>
           </div>
-          <div className="progress-footer"><span>Keep showing up.</span><span>Not enough data</span></div>
+          <div className="progress-footer"><span>Keep showing up.</span><span>{hasActivity ? `${completionPct}% prayers` : 'Not enough data'}</span></div>
         </section>
 
         <section className="panel prayer-panel">
@@ -826,22 +921,33 @@ function Dashboard({
               Open planner <ArrowUpRight size={13} />
             </button>
           </div>
-          <div className="study-stat-row">
-            <div><strong>{tasks.length}</strong><span>Tasks in this session</span></div>
-            <div className="study-stat-divider" />
-            <div><strong>Not tracked</strong><span>Focused time</span></div>
-          </div>
-          <div className="task-list compact">
-            {tasks.slice(0, 3).map((task) => (
-              <div className="task-row" key={task.name}>
-                <span className={`task-dot ${task.color}`} />
-                <div><strong>{task.name}</strong><small>{task.time}</small></div>
-                <span className={`status-tag ${task.status === 'Completed' ? 'status-done' : task.status === 'In progress' ? 'status-live' : ''}`}>
-                  {task.status}
-                </span>
+          {guestMode ? (
+            <p className="onboarding-help">Sign in to track your study tasks and focus time.</p>
+          ) : (
+            <>
+              <div className="study-stat-row">
+                <div><strong>{tasksCompletedToday}</strong><span>Completed today</span></div>
+                <div className="study-stat-divider" />
+                <div><strong>{todayFocusMinutes}m</strong><span>Focused today</span></div>
+                <div className="study-stat-divider" />
+                <div><strong>{streak}d</strong><span>Day streak</span></div>
               </div>
-            ))}
-          </div>
+              <div className="task-list compact">
+                {todayTasks.length === 0 && (
+                  <p className="onboarding-help">No tasks for today yet. Add one from the Study planner.</p>
+                )}
+                {todayTasks.slice(0, 3).map((task) => (
+                  <div className="task-row" key={task.id}>
+                    <span className={`task-dot ${subjectById.get(task.subjectId ?? '')?.colour ?? 'mint'}`} />
+                    <div><strong>{task.title}</strong><small>{task.startTime ? formatTime12h(task.startTime) : 'Not scheduled'}{task.subjectId ? ` · ${subjectById.get(task.subjectId)?.name ?? 'No subject'}` : ''}</small></div>
+                    <span className={`status-tag ${task.status === 'Completed' ? 'status-done' : task.status === 'In Progress' ? 'status-live' : ''}`}>
+                      {task.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </section>
 
         <section className="panel habits-panel">
@@ -962,17 +1068,346 @@ function QuickTile({ icon: Icon, title, text, onClick }: { icon: IconType; title
   );
 }
 
+const subjectColours = ['mint', 'gold', 'blue', 'rose', 'violet'];
+
+/** Remaining time for a live session, derived exactly like the server does. */
+function remainingForSession(session: PomodoroSession, nowMs: number): number {
+  const started = new Date(session.startedAt).getTime();
+  const end =
+    session.status === 'paused' && session.pausedAt
+      ? new Date(session.pausedAt).getTime()
+      : nowMs;
+  const elapsed = Math.max(0, end - started - session.pausedTotalMs);
+  return Math.max(0, session.plannedMinutes * 60_000 - elapsed);
+}
+
+function formatCountdown(ms: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
 function Study({
+  subjects,
   tasks,
-  onAdd,
+  todayTasks,
+  schedule,
+  stats,
+  activeSession,
+  history,
+  studyError,
+  guestMode,
+  profile,
+  onRefresh,
   onNotify,
 }: {
-  tasks: { name: string; time: string; status: string; color: string }[];
-  onAdd: () => void;
+  subjects: StudySubject[];
+  tasks: StudyTask[];
+  todayTasks: StudyTask[];
+  schedule: StudySchedule | null;
+  stats: StudyStats | null;
+  activeSession: PomodoroSession | null;
+  history: PomodoroSession[];
+  studyError: string;
+  guestMode: boolean;
+  profile: UserProfile;
+  onRefresh: () => Promise<void>;
   onNotify: (message: string) => void;
 }) {
-  const [timerRunning, setTimerRunning] = useState(false);
-  const [selectedDuration, setSelectedDuration] = useState('25:00');
+  const subjectById = new Map(subjects.map((s) => [s.id, s]));
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [timerMode, setTimerMode] = useState<'focus' | 'break'>('focus');
+  const breakDefault = useMemo(() => {
+    const parsed = Number.parseInt(profile.studyBreakMinutes ?? '', 10);
+    return Number.isFinite(parsed) && parsed >= 1 && parsed <= 60 ? parsed : 5;
+  }, [profile.studyBreakMinutes]);
+  const [selectedMinutes, setSelectedMinutes] = useState(25);
+  const [focusTaskId, setFocusTaskId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const completingRef = useRef(false);
+
+  const [showSubjects, setShowSubjects] = useState(false);
+  const [subjectForm, setSubjectForm] = useState<{ id: string | null; name: string; label: string; colour: string }>({ id: null, name: '', label: '', colour: 'mint' });
+  const [confirmDeleteSubjectId, setConfirmDeleteSubjectId] = useState<string | null>(null);
+  const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState<string | null>(null);
+
+  const [taskModal, setTaskModal] = useState<null | { task: StudyTask | null }>(null);
+  const [taskTitle, setTaskTitle] = useState('');
+  const [taskSubjectId, setTaskSubjectId] = useState('');
+  const [taskDescription, setTaskDescription] = useState('');
+  const [taskPriority, setTaskPriority] = useState<TaskPriority>('Medium');
+  const [taskDueDate, setTaskDueDate] = useState('');
+  const [taskStartTime, setTaskStartTime] = useState('');
+  const [taskDuration, setTaskDuration] = useState('');
+
+  const remainingMs = activeSession ? remainingForSession(activeSession, nowMs) : null;
+
+  // Tick the countdown once a second while a session is live.
+  useEffect(() => {
+    if (!activeSession) return;
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [activeSession]);
+
+  // When a running session reaches zero, complete it on the server once.
+  useEffect(() => {
+    if (!activeSession || activeSession.status !== 'active' || remainingMs === null || remainingMs > 0) return;
+    if (completingRef.current) return;
+    completingRef.current = true;
+    completePomodoro(activeSession.id)
+      .then(async () => {
+        onNotify(activeSession.mode === 'focus' ? 'Focus session complete. Well done.' : 'Break complete.');
+        await onRefresh();
+      })
+      .catch((error) => onNotify(error instanceof Error ? error.message : 'Session could not be completed.'))
+      .finally(() => { completingRef.current = false; });
+  }, [activeSession, remainingMs, onNotify, onRefresh]);
+
+  if (guestMode) {
+    return (
+      <>
+        <PageHeading
+          eyebrow="ILM · LEARNING SYSTEM"
+          title="Make your focus count."
+          text="Plan your study sessions, protect your attention and keep your learning visible."
+        />
+        <section className="panel" style={{ padding: 28 }}>
+          <span className="eyebrow">SIGN IN TO TRACK</span>
+          <h3>Your study planner lives in your account</h3>
+          <p className="onboarding-help">
+            Sign in to save subjects, tasks and focus sessions. Nothing is tracked in guest preview.
+          </p>
+        </section>
+      </>
+    );
+  }
+
+  const scheduleLines: string[] = [];
+  if (schedule?.collegeStartTime && schedule?.collegeEndTime) {
+    scheduleLines.push(`College: ${formatTime12h(schedule.collegeStartTime)} – ${formatTime12h(schedule.collegeEndTime)}`);
+  }
+  if (schedule?.studyStartTime && schedule?.studyEndTime) {
+    scheduleLines.push(`Study window: ${formatTime12h(schedule.studyStartTime)} – ${formatTime12h(schedule.studyEndTime)}`);
+  }
+  if (schedule?.dailyStudyTarget) scheduleLines.push(`Daily target: ${schedule.dailyStudyTarget}`);
+  if (schedule?.dailyStudyHours) scheduleLines.push(`Daily study hours: ${schedule.dailyStudyHours}`);
+  if (schedule?.studyBreakMinutes) scheduleLines.push(`Break: ${schedule.studyBreakMinutes} min`);
+  if (schedule?.preferredStudyDays?.length) scheduleLines.push(`Study days: ${schedule.preferredStudyDays.join(', ')}`);
+
+  const upcomingTasks = tasks
+    .filter((t) => t.status !== 'Completed' && t.dueDate && t.dueDate > todayKey())
+    .sort((a, b) => (a.dueDate ?? '') < (b.dueDate ?? '') ? -1 : 1);
+
+  function subjectStats(subject: StudySubject) {
+    const fromStats = stats?.subjectBreakdown.find((b) => b.subjectId === subject.id);
+    if (fromStats) return fromStats;
+    const subjectTasks = tasks.filter((t) => t.subjectId === subject.id);
+    return {
+      subjectId: subject.id,
+      name: subject.name,
+      label: subject.label,
+      colour: subject.colour,
+      tasksDone: subjectTasks.filter((t) => t.status === 'Completed').length,
+      tasksTotal: subjectTasks.length,
+      focusMinutesWeek: 0,
+    };
+  }
+
+  function openTaskModal(task?: StudyTask) {
+    if (task) {
+      setTaskTitle(task.title);
+      setTaskSubjectId(task.subjectId ?? '');
+      setTaskDescription(task.description);
+      setTaskPriority(task.priority);
+      setTaskDueDate(task.dueDate ?? '');
+      setTaskStartTime(task.startTime ?? '');
+      setTaskDuration(task.durationMinutes ? String(task.durationMinutes) : '');
+      setTaskModal({ task });
+    } else {
+      setTaskTitle('');
+      setTaskSubjectId('');
+      setTaskDescription('');
+      setTaskPriority('Medium');
+      setTaskDueDate(todayKey());
+      setTaskStartTime('');
+      setTaskDuration('');
+      setTaskModal({ task: null });
+    }
+  }
+
+  async function saveTask() {
+    if (!taskTitle.trim()) {
+      onNotify('Task ka naam likhna zaroori hai.');
+      return;
+    }
+    const duration = taskDuration.trim() ? Number.parseInt(taskDuration, 10) : null;
+    if (duration !== null && (!Number.isFinite(duration) || duration < 1 || duration > 480)) {
+      onNotify('Duration 1 se 480 minutes ke beech rakho.');
+      return;
+    }
+    const input = {
+      title: taskTitle.trim(),
+      subjectId: taskSubjectId || null,
+      description: taskDescription.trim(),
+      priority: taskPriority,
+      dueDate: taskDueDate || null,
+      startTime: taskStartTime || null,
+      durationMinutes: duration,
+    };
+    setBusy(true);
+    try {
+      if (taskModal?.task) {
+        await updateTask(taskModal.task.id, input);
+        onNotify('Task updated.');
+      } else {
+        await createTask(input);
+        onNotify('Task saved.');
+      }
+      setTaskModal(null);
+      await onRefresh();
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : 'Task save nahi ho payi.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changeStatus(task: StudyTask, status: TaskStatus) {
+    try {
+      await setTaskStatus(task.id, status);
+      await onRefresh();
+      onNotify(status === 'Completed' ? 'Task completed.' : `Task marked ${status}.`);
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : 'Task update nahi ho paya.');
+    }
+  }
+
+  async function removeTask(task: StudyTask) {
+    try {
+      await deleteTask(task.id);
+      setConfirmDeleteTaskId(null);
+      await onRefresh();
+      onNotify('Task deleted.');
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : 'Task delete nahi ho paya.');
+    }
+  }
+
+  async function saveSubject() {
+    if (!subjectForm.name.trim()) {
+      onNotify('Subject ka naam likhna zaroori hai.');
+      return;
+    }
+    setBusy(true);
+    try {
+      if (subjectForm.id) {
+        await updateSubject(subjectForm.id, { name: subjectForm.name.trim(), label: subjectForm.label.trim(), colour: subjectForm.colour });
+        onNotify('Subject updated.');
+      } else {
+        await createSubject({ name: subjectForm.name.trim(), label: subjectForm.label.trim(), colour: subjectForm.colour });
+        onNotify('Subject added.');
+      }
+      setSubjectForm({ id: null, name: '', label: '', colour: 'mint' });
+      await onRefresh();
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : 'Subject save nahi ho paya.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeSubject(subject: StudySubject) {
+    try {
+      await deleteSubject(subject.id);
+      setConfirmDeleteSubjectId(null);
+      await onRefresh();
+      onNotify('Subject deleted. Its tasks are now unassigned.');
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : 'Subject delete nahi ho paya.');
+    }
+  }
+
+  async function handleStartTimer() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const task = timerMode === 'focus' && focusTaskId ? tasks.find((t) => t.id === focusTaskId) : undefined;
+      await startPomodoro({
+        mode: timerMode,
+        plannedMinutes: selectedMinutes,
+        taskId: task?.id ?? null,
+        subjectId: task?.subjectId ?? null,
+      });
+      setConfirmReset(false);
+      await onRefresh();
+      onNotify(timerMode === 'focus' ? 'Focus session started.' : 'Break started.');
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : 'Timer could not be started.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handlePauseTimer() {
+    if (!activeSession || busy) return;
+    setBusy(true);
+    try {
+      await pausePomodoro(activeSession.id);
+      await onRefresh();
+      onNotify('Session paused.');
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : 'Session pause nahi ho paya.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleResumeTimer() {
+    if (!activeSession || busy) return;
+    setBusy(true);
+    try {
+      await resumePomodoro(activeSession.id);
+      await onRefresh();
+      onNotify('Session resumed.');
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : 'Session resume nahi ho paya.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCompleteTimer() {
+    if (!activeSession || busy) return;
+    setBusy(true);
+    try {
+      await completePomodoro(activeSession.id);
+      await onRefresh();
+      onNotify('Session finished.');
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : 'Session complete nahi ho paya.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleAbandonTimer() {
+    if (!activeSession || busy) return;
+    setBusy(true);
+    try {
+      await abandonPomodoro(activeSession.id);
+      setConfirmReset(false);
+      await onRefresh();
+      onNotify('Session reset. It stays in history as abandoned (0 min).');
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : 'Session reset nahi ho paya.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const breakPresets = Array.from(new Set([breakDefault, 5, 10, 15])).sort((a, b) => a - b);
 
   return (
     <>
@@ -980,8 +1415,14 @@ function Study({
         eyebrow="ILM · LEARNING SYSTEM"
         title="Make your focus count."
         text="Plan your study sessions, protect your attention and keep your learning visible."
-        action={<button className="primary-button" onClick={onAdd}><Plus size={16} /> Add study task</button>}
+        action={<button className="primary-button" onClick={() => openTaskModal()}><Plus size={16} /> Add study task</button>}
       />
+
+      {studyError && (
+        <section className="panel" style={{ padding: 16, marginBottom: 15 }}>
+          <p className="salah-error">{studyError}</p>
+        </section>
+      )}
 
       <div className="study-page-grid">
         <section className="panel schedule-card">
@@ -993,57 +1434,252 @@ function Study({
             <div className="date-chip small-date"><CalendarDays size={14} /> Today</div>
           </div>
 
+          {scheduleLines.length > 0 ? (
+            <div className="schedule-summary">
+              {scheduleLines.map((line) => <span key={line}>{line}</span>)}
+            </div>
+          ) : (
+            <p className="onboarding-help">No college or study schedule saved yet. Add it during onboarding or in Profile to see it here.</p>
+          )}
+
           <div className="task-list full-task-list">
-            {tasks.map((task, index) => (
-              <div className="task-row large-task" key={`${task.name}-${index}`}>
-                <span className={`task-dot ${task.color}`} />
-                <div><strong>{task.name}</strong><small>{task.time}</small></div>
-                <span className={`status-tag ${task.status === 'Completed' ? 'status-done' : task.status === 'In progress' ? 'status-live' : ''}`}>
-                  {task.status}
-                </span>
-                <button className="icon-button task-more" onClick={() => onNotify('Task actions will be available when tasks are stored in your account.')}>
-                  <MoreHorizontal size={17} />
-                </button>
-              </div>
-            ))}
+            {todayTasks.length === 0 && (
+              <p className="onboarding-help">No tasks for today yet. Add your first task to start tracking.</p>
+            )}
+            {todayTasks.map((task) => {
+              const subject = task.subjectId ? subjectById.get(task.subjectId) : undefined;
+              return (
+                <div className="task-row large-task" key={task.id}>
+                  <span className={`task-dot ${subject?.colour ?? 'mint'}`} />
+                  <div>
+                    <strong>{task.title}</strong>
+                    <small>
+                      {task.startTime ? formatTime12h(task.startTime) : 'Not scheduled'}
+                      {task.dueDate ? ` · Due ${task.dueDate}` : ''}
+                      {subject ? ` · ${subject.name}` : ' · No subject'}
+                      {task.durationMinutes ? ` · ${task.durationMinutes}m` : ''}
+                    </small>
+                    {task.description && <small>{task.description}</small>}
+                  </div>
+                  <span className={`status-tag ${task.status === 'Completed' ? 'status-done' : task.status === 'In Progress' ? 'status-live' : ''}`}>
+                    {task.status}
+                  </span>
+                  <div className="task-actions">
+                    {task.status !== 'Completed' && (
+                      <>
+                        {task.status !== 'In Progress' && <button onClick={() => changeStatus(task, 'In Progress')}>Start</button>}
+                        <button onClick={() => changeStatus(task, 'Completed')}>Complete</button>
+                      </>
+                    )}
+                    {task.status === 'Completed' && <button onClick={() => changeStatus(task, 'Pending')}>Reopen</button>}
+                    <button onClick={() => openTaskModal(task)}>Edit</button>
+                    {confirmDeleteTaskId === task.id ? (
+                      <button onClick={() => removeTask(task)}>Confirm?</button>
+                    ) : (
+                      <button onClick={() => setConfirmDeleteTaskId(task.id)}>Delete</button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
-          <button className="add-row" onClick={onAdd}><Plus size={15} /> Add another session</button>
+          {upcomingTasks.length > 0 && (
+            <>
+              <h4 className="upcoming-heading">Upcoming</h4>
+              <div className="task-list">
+                {upcomingTasks.map((task) => {
+                  const subject = task.subjectId ? subjectById.get(task.subjectId) : undefined;
+                  return (
+                    <div className="task-row" key={task.id}>
+                      <span className={`task-dot ${subject?.colour ?? 'mint'}`} />
+                      <div><strong>{task.title}</strong><small>Due {task.dueDate}{subject ? ` · ${subject.name}` : ' · No subject'}</small></div>
+                      <span className="status-tag">{task.status}</span>
+                      <button className="task-action-link" onClick={() => openTaskModal(task)}>Edit</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          <button className="add-row" onClick={() => openTaskModal()}><Plus size={15} /> Add another session</button>
+          <p className="modal-note">Streak rule: a day counts when a focus session finishes or a task is completed.</p>
         </section>
 
         <section className="panel timer-card">
           <span className="eyebrow">POMODORO · FOCUS TIMER</span>
           <div className="timer-circle">
             <div>
-              <strong>{selectedDuration}</strong>
-              <span>{timerRunning ? 'Focus session' : 'Ready when you are'}</span>
+              <strong>{activeSession ? formatCountdown(remainingMs ?? 0) : `${String(selectedMinutes).padStart(2, '0')}:00`}</strong>
+              <span>
+                {activeSession
+                  ? activeSession.status === 'paused'
+                    ? 'Paused'
+                    : activeSession.mode === 'focus' ? 'Focus session' : 'Break'
+                  : 'Ready when you are'}
+              </span>
             </div>
           </div>
-          <div className="timer-presets">
-            {['25:00', '45:00', '50:00'].map((v) => (
-              <button
-                key={v}
-                className={selectedDuration === v ? 'preset-selected' : ''}
-                onClick={() => { setSelectedDuration(v); setTimerRunning(false); }}
-              >
-                {v}
+          {activeSession && (
+            <p className="muted-footnote">
+              {activeSession.mode === 'focus' ? `${activeSession.plannedMinutes}-minute focus` : `${activeSession.plannedMinutes}-minute break`}
+              {activeSession.taskId ? ` · ${tasks.find((t) => t.id === activeSession.taskId)?.title ?? ''}` : ''}
+              {' · '}Saved on the server — a refresh won&apos;t stop the timer.
+            </p>
+          )}
+          {!activeSession && (
+            <>
+              <div className="timer-presets">
+                <button className={timerMode === 'focus' ? 'preset-selected' : ''} onClick={() => { setTimerMode('focus'); setSelectedMinutes(25); }}>Focus</button>
+                <button className={timerMode === 'break' ? 'preset-selected' : ''} onClick={() => { setTimerMode('break'); setSelectedMinutes(breakDefault); }}>Break</button>
+              </div>
+              <div className="timer-presets">
+                {(timerMode === 'focus' ? [25, 45, 60] : breakPresets).map((v) => (
+                  <button
+                    key={v}
+                    className={selectedMinutes === v ? 'preset-selected' : ''}
+                    onClick={() => setSelectedMinutes(v)}
+                  >
+                    {v} min
+                  </button>
+                ))}
+              </div>
+              {timerMode === 'focus' && (
+                <>
+                  <label className="field-label">Focus on a task (optional)</label>
+                  <select className="form-input" value={focusTaskId} onChange={(e) => setFocusTaskId(e.target.value)}>
+                    <option value="">No specific task</option>
+                    {tasks.filter((t) => t.status !== 'Completed').map((t) => (
+                      <option key={t.id} value={t.id}>{t.title}</option>
+                    ))}
+                  </select>
+                </>
+              )}
+              {timerMode === 'break' && (
+                <small className="muted-footnote">Break default ({breakDefault} min) comes from your onboarding study settings.</small>
+              )}
+              <button className="primary-button full-width" disabled={busy} onClick={handleStartTimer}>
+                Start {timerMode === 'focus' ? 'focus' : 'break'} session <ArrowRight size={15} />
               </button>
-            ))}
-          </div>
-          <button className="primary-button full-width" onClick={() => setTimerRunning(!timerRunning)}>
-            {timerRunning ? 'Pause session' : 'Start focus session'}
-            {timerRunning ? <Timer size={15} /> : <ArrowRight size={15} />}
-          </button>
-          <small className="muted-footnote">Timer interaction preview. Background timing and notifications are not connected yet.</small>
+            </>
+          )}
+          {activeSession && (
+            <div className="timer-actions">
+              {activeSession.status === 'active' ? (
+                <button className="primary-button full-width" disabled={busy} onClick={handlePauseTimer}>
+                  <Timer size={15} /> Pause session
+                </button>
+              ) : (
+                <button className="primary-button full-width" disabled={busy} onClick={handleResumeTimer}>
+                  Resume session <ArrowRight size={15} />
+                </button>
+              )}
+              <button className="outline-button full-width" disabled={busy} onClick={handleCompleteTimer}>
+                Finish now
+              </button>
+              {confirmReset ? (
+                <button className="outline-button full-width" disabled={busy} onClick={handleAbandonTimer}>
+                  Confirm reset — session stays in history as abandoned (0 min)
+                </button>
+              ) : (
+                <button className="text-button" disabled={busy} onClick={() => setConfirmReset(true)}>
+                  Reset timer
+                </button>
+              )}
+            </div>
+          )}
+          <small className="muted-footnote">The server stores the start time, so refreshing, logging out, or switching devices keeps the timer running.</small>
         </section>
 
         <section className="panel subjects-card">
-          <SectionTitle title="Your subjects" action="Manage subjects" />
-          <div className="subject-list">
-            <SubjectRow name="Applied Mathematics" label="312301" value={72} color="mint" />
-            <SubjectRow name="Computer Science" label="Core subject" value={54} color="gold" />
-            <SubjectRow name="C Programming" label="Practical" value={38} color="blue" />
+          <div className="panel-top">
+            <div>
+              <span className="eyebrow">YOUR SUBJECTS</span>
+              <h3>Your subjects</h3>
+            </div>
+            <button className="subtle-action" onClick={() => setShowSubjects(!showSubjects)}>
+              {showSubjects ? 'Done' : 'Manage subjects'} <ArrowUpRight size={13} />
+            </button>
           </div>
+          {showSubjects && (
+            <div className="subject-form">
+              <label className="field-label">Subject name</label>
+              <input className="form-input" value={subjectForm.name} onChange={(e) => setSubjectForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Applied Mathematics" />
+              <label className="field-label">Label / code (optional)</label>
+              <input className="form-input" value={subjectForm.label} onChange={(e) => setSubjectForm((f) => ({ ...f, label: e.target.value }))} placeholder="e.g. 312301" />
+              <label className="field-label">Colour</label>
+              <div className="colour-picker">
+                {subjectColours.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={`colour-dot colour-${c} ${subjectForm.colour === c ? 'selected' : ''}`}
+                    onClick={() => setSubjectForm((f) => ({ ...f, colour: c }))}
+                    aria-label={c}
+                  />
+                ))}
+              </div>
+              <button className="primary-button" disabled={busy} onClick={saveSubject}>
+                {subjectForm.id ? 'Save subject' : 'Add subject'}
+              </button>
+              {subjectForm.id && (
+                <button className="text-button" onClick={() => setSubjectForm({ id: null, name: '', label: '', colour: 'mint' })}>
+                  Cancel edit
+                </button>
+              )}
+              <p className="modal-note">Deleting a subject keeps its tasks — they become “No subject”.</p>
+            </div>
+          )}
+          <div className="subject-list">
+            {subjects.length === 0 && (
+              <p className="onboarding-help">No subjects yet. Add your first subject to organise tasks and focus time.</p>
+            )}
+            {subjects.map((subject) => {
+              const row = subjectStats(subject);
+              return (
+                <div key={subject.id}>
+                  <SubjectRow name={subject.name} label={subject.label} tasksDone={row.tasksDone} tasksTotal={row.tasksTotal} focusMinutes={row.focusMinutesWeek} colour={subject.colour} />
+                  {showSubjects && (
+                    <div className="subject-actions">
+                      <button onClick={() => setSubjectForm({ id: subject.id, name: subject.name, label: subject.label, colour: subject.colour })}>Edit</button>
+                      {confirmDeleteSubjectId === subject.id ? (
+                        <button onClick={() => removeSubject(subject)}>Confirm delete?</button>
+                      ) : (
+                        <button onClick={() => setConfirmDeleteSubjectId(subject.id)}>Delete</button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="panel history-card">
+          <SectionTitle title="Focus history" />
+          {history.length === 0 ? (
+            <p className="onboarding-help">No focus sessions yet. Finished and abandoned sessions will appear here with their real minutes.</p>
+          ) : (
+            <div className="history-list">
+              {history.slice(0, 10).map((session) => (
+                <div className="history-row" key={session.id}>
+                  <div>
+                    <strong>{session.mode === 'focus' ? 'Focus' : 'Break'} · {session.plannedMinutes} min</strong>
+                    <small>
+                      {session.completedAt
+                        ? new Date(session.completedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+                        : ''}
+                      {session.taskId ? ` · ${tasks.find((t) => t.id === session.taskId)?.title ?? ''}` : ''}
+                    </small>
+                  </div>
+                  <span className={`status-tag ${session.status === 'completed' ? 'status-done' : ''}`}>
+                    {session.status === 'completed' ? `${session.focusMinutesEarned}m earned` : 'Abandoned · 0m'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="panel study-tip">
@@ -1055,18 +1691,74 @@ function Study({
           </div>
         </section>
       </div>
+
+      {taskModal && (
+        <div className="modal-backdrop" onClick={() => setTaskModal(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <div><span className="eyebrow">STUDY PLANNER</span><h3>{taskModal.task ? 'Edit task' : 'Add a study task'}</h3></div>
+              <button className="icon-button" onClick={() => setTaskModal(null)}><X size={18} /></button>
+            </div>
+            <label className="field-label">Task name</label>
+            <input className="form-input" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="e.g. Revise calculus" />
+            <label className="field-label">Subject</label>
+            <select className="form-input" value={taskSubjectId} onChange={(e) => setTaskSubjectId(e.target.value)}>
+              <option value="">No subject</option>
+              {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <label className="field-label">Description</label>
+            <textarea className="form-input form-textarea" value={taskDescription} onChange={(e) => setTaskDescription(e.target.value)} placeholder="What exactly needs doing?" rows={3} />
+            <div className="form-row">
+              <div>
+                <label className="field-label">Priority</label>
+                <select className="form-input" value={taskPriority} onChange={(e) => setTaskPriority(e.target.value as TaskPriority)}>
+                  <option value="Low">Low</option>
+                  <option value="Medium">Medium</option>
+                  <option value="High">High</option>
+                </select>
+              </div>
+              <div>
+                <label className="field-label">Duration (minutes)</label>
+                <input className="form-input" type="number" min={1} max={480} value={taskDuration} onChange={(e) => setTaskDuration(e.target.value)} placeholder="e.g. 60" />
+              </div>
+            </div>
+            <div className="form-row">
+              <div>
+                <label className="field-label">Due date</label>
+                <input className="form-input" type="date" value={taskDueDate} onChange={(e) => setTaskDueDate(e.target.value)} />
+              </div>
+              <div>
+                <label className="field-label">Start time</label>
+                <input className="form-input" type="time" value={taskStartTime} onChange={(e) => setTaskStartTime(e.target.value)} />
+              </div>
+            </div>
+            <button className="primary-button full-width" disabled={busy} onClick={saveTask}>
+              {taskModal.task ? 'Save changes' : 'Add task'} <ArrowRight size={16} />
+            </button>
+            <p className="modal-note">Tasks are saved to your account in MongoDB and stay in sync across devices.</p>
+          </div>
+        </div>
+      )}
     </>
   );
 }
 
-function SubjectRow({ name, label, value, color }: { name: string; label: string; value: number; color: string }) {
+function SubjectRow({ name, label, tasksDone, tasksTotal, focusMinutes, colour }: {
+  name: string;
+  label: string;
+  tasksDone: number;
+  tasksTotal: number;
+  focusMinutes: number;
+  colour: string;
+}) {
+  const pct = tasksTotal > 0 ? Math.round((tasksDone / tasksTotal) * 100) : 0;
   return (
     <div className="subject-row">
       <div>
-        <div><strong>{name}</strong><span>{label}</span></div>
-        <b>{value}%</b>
+        <div><strong>{name}</strong><span>{label || 'No label'}</span></div>
+        <b>{tasksDone}/{tasksTotal} tasks · {focusMinutes}m this week</b>
       </div>
-      <div className="progress-track"><span className={`fill-${color}`} style={{ width: `${value}%` }} /></div>
+      <div className="progress-track"><span className={`fill-${colour}`} style={{ width: `${pct}%` }} /></div>
     </div>
   );
 }
@@ -1380,7 +2072,50 @@ function InfoIcon() {
   return <span className="info-icon">i</span>;
 }
 
-function Analytics() {
+function Analytics({ stats, guestMode }: { stats: StudyStats | null; guestMode: boolean }) {
+  if (guestMode) {
+    return (
+      <>
+        <PageHeading
+          eyebrow="DISCIPLINE · REFLECTION"
+          title="Notice the progress you're making."
+          text="Look at patterns, celebrate consistency and find where a small adjustment could help."
+          action={<div className="date-chip"><CalendarDays size={15} /> Activity history</div>}
+        />
+        <section className="panel" style={{ padding: 28 }}>
+          <span className="eyebrow">SIGN IN TO TRACK</span>
+          <h3>Your progress lives in your account</h3>
+          <p className="onboarding-help">
+            Sign in to see analytics from your saved study activity. Nothing is tracked in guest preview.
+          </p>
+        </section>
+      </>
+    );
+  }
+
+  if (!stats) {
+    return (
+      <>
+        <PageHeading
+          eyebrow="DISCIPLINE · REFLECTION"
+          title="Notice the progress you're making."
+          text="Look at patterns, celebrate consistency and find where a small adjustment could help."
+          action={<div className="date-chip"><CalendarDays size={15} /> Activity history</div>}
+        />
+        <section className="panel" style={{ padding: 28 }}>
+          <span className="eyebrow">PRIVATE ACTIVITY DATA</span>
+          <h3>Loading your progress…</h3>
+        </section>
+      </>
+    );
+  }
+
+  const hasActivity =
+    stats.todayFocusMinutes > 0 ||
+    stats.weekFocusMinutes > 0 ||
+    stats.tasksCompletedToday > 0 ||
+    stats.subjectBreakdown.some((s) => s.tasksTotal > 0);
+
   return (
     <>
       <PageHeading
@@ -1389,14 +2124,63 @@ function Analytics() {
         text="Look at patterns, celebrate consistency and find where a small adjustment could help."
         action={<div className="date-chip"><CalendarDays size={15} /> Activity history</div>}
       />
-      <section className="panel" style={{ padding: 28 }}>
-        <span className="eyebrow">PRIVATE ACTIVITY DATA</span>
-        <h3>No analytics available yet</h3>
-        <p className="onboarding-help">
-          Analytics will be calculated from persisted Salah, study, and habit activity once those tracking systems are connected.
-          AHDORA will not display invented scores or public rankings.
-        </p>
-      </section>
+      {!hasActivity ? (
+        <section className="panel" style={{ padding: 28 }}>
+          <span className="eyebrow">PRIVATE ACTIVITY DATA</span>
+          <h3>No analytics available yet</h3>
+          <p className="onboarding-help">
+            Complete a study task or finish a focus session and your real numbers will appear here.
+            AHDORA will not display invented scores or public rankings.
+          </p>
+        </section>
+      ) : (
+        <>
+          <div className="analytics-grid">
+            <div className="panel metric-card">
+              <span className="eyebrow">FOCUSED TODAY</span>
+              <strong>{stats.todayFocusMinutes}<small> min</small></strong>
+              <span className="metric-trend"><Clock3 size={13} /> From finished focus sessions</span>
+            </div>
+            <div className="panel metric-card">
+              <span className="eyebrow">FOCUSED THIS WEEK</span>
+              <strong>{stats.weekFocusMinutes}<small> min</small></strong>
+              <span className="metric-trend"><Clock3 size={13} /> Last 7 days, finished sessions only</span>
+            </div>
+            <div className="panel metric-card">
+              <span className="eyebrow">TASKS COMPLETED TODAY</span>
+              <strong>{stats.tasksCompletedToday}</strong>
+              <span className="metric-trend"><Check size={13} /> From your saved tasks</span>
+            </div>
+            <div className="panel metric-card">
+              <span className="eyebrow">DAY STREAK</span>
+              <strong>{stats.streak}<small> day{stats.streak === 1 ? '' : 's'}</small></strong>
+              <span className="metric-trend"><Flame size={13} /> A day counts when a focus session finishes or a task is completed</span>
+            </div>
+          </div>
+          <section className="panel progress-breakdown" style={{ marginTop: 14 }}>
+            <SectionTitle title="Subjects this week" />
+            {stats.subjectBreakdown.length === 0 ? (
+              <p className="onboarding-help">No subjects yet. Add one from the Study planner.</p>
+            ) : (
+              stats.subjectBreakdown.map((subject) => (
+                <SubjectRow
+                  key={subject.subjectId}
+                  name={subject.name}
+                  label={subject.label}
+                  tasksDone={subject.tasksDone}
+                  tasksTotal={subject.tasksTotal}
+                  focusMinutes={subject.focusMinutesWeek}
+                  colour={subject.colour}
+                />
+              ))
+            )}
+          </section>
+          <p className="analytics-footnote">
+            Study analytics are calculated only from your saved tasks and finished focus sessions.
+            Salah and habit analytics are not connected yet — no scores are invented for them.
+          </p>
+        </>
+      )}
     </>
   );
 }

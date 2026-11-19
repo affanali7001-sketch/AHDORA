@@ -10,6 +10,7 @@ import { profileRouter } from './routes/profile.js';
 import { requireAuth } from './middleware/auth.js';
 import { salahRouter } from './routes/salah.js';
 import { prayerRouter } from './routes/prayer.js';
+import { studyRouter } from './routes/study.js';
 
 export const app = express();
 
@@ -36,7 +37,7 @@ app.use(cors({
     callback(new Error('Origin not allowed'));
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type'],
   maxAge: 600,
 }));
@@ -103,6 +104,18 @@ app.use(
     legacyHeaders: false,
   }),
   profileRouter,
+);
+
+app.use(
+  '/api/study',
+  requireAuth,
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 120,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  studyRouter,
 );
 
 app.use(

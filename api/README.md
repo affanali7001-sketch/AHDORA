@@ -25,6 +25,11 @@ Node.js + Express + TypeScript + MongoDB/Mongoose API starter.
 - `PUT /api/salah/day/:date` (authenticated)
 - `GET /api/salah/calendar/:month` (authenticated)
 - `GET /api/prayer/times?date=YYYY-MM-DD` (authenticated, rate limit 60/15 min) — live times from Aladhan for the user's saved city/country/method/Asr school. Returns timings, per-prayer time/deadline/reminder/source (`calculated` or `manual` when a time override is set), Hijri date, and the next prayer. `date` defaults to today.
+- `GET /api/study/subjects`, `POST /api/study/subjects`, `PUT /api/study/subjects/:id`, `DELETE /api/study/subjects/:id` (authenticated, rate limit 120/15 min) — per-user subjects. Deleting a subject unlinks its tasks (`subjectId` → null) instead of deleting them.
+- `GET /api/study/tasks` (optional `?status=&subjectId=&dueDate=`), `POST /api/study/tasks`, `GET /api/study/tasks/:id`, `PUT /api/study/tasks/:id`, `PATCH /api/study/tasks/:id/status`, `DELETE /api/study/tasks/:id` (authenticated, rate limit 120/15 min) — per-user tasks. Completing a task stamps `completedAt`.
+- `GET /api/study/today` (authenticated) — today's tasks (due today or earlier and not completed, unscheduled tasks included, completed-today tasks included) ordered by due date then start time, plus the college/study schedule from the user's profile.
+- `GET /api/study/stats` (authenticated) — today focus minutes, tasks completed today, week focus minutes, current streak, and a per-subject breakdown (tasks done/total, focus minutes this week).
+- `POST /api/study/pomodoro/start` (authenticated, `mode` focus/break, `plannedMinutes` 1–180, optional `taskId`/`subjectId`; 409 if a timer is already active), `GET /api/study/pomodoro/active`, `POST /api/study/pomodoro/:id/pause|resume|complete|abandon`, `GET /api/study/pomodoro/history?page=&limit=` (newest first, completed + abandoned only) — the server stores `startedAt` + `pausedTotalMs` and derives `remainingMs`, so the timer is the source of truth across refresh/logout/device change. Abandoned sessions stay in history with 0 minutes earned.
 
 Sessions use opaque random tokens. Only SHA-256 token hashes are stored in MongoDB; the browser cookie is HttpOnly, SameSite=Lax, and Secure in production. API mutations require the configured exact Origin. CORS is allowlisted. Helmet, JSON body size limits, Zod strict schemas, and auth rate limiting are enabled.
 
@@ -47,6 +52,26 @@ Error cases (no times are ever invented):
 - Bad `date` → `400 { error: "Date must be YYYY-MM-DD" }`
 - Aladhan unreachable, timeout (8s), or incomplete response → `502 { error: "Prayer times could not be loaded from Aladhan. Please try again later." }`
 - Times are not cached in the database.
+
+### Streak rule
+
+A day counts when a focus session finishes OR a task is completed. The streak is
+the run of consecutive active days ending today — or yesterday, if today has no
+activity yet.
+
+### Pomodoro resume
+
+The server stores `startedAt` and `pausedTotalMs`. Remaining time is
+`planned − (now − startedAt − pausedTotalMs − current pause)`. Pause stamps
+`pausedAt`; resume adds that stretch to `pausedTotalMs`. The client re-fetches
+the active session after a refresh, logout, or device change and the timer
+simply continues. Focus minutes earned are the whole minutes actually run when
+a focus session completes (0 for breaks and abandoned sessions).
+
+Error cases (no data is ever invented):
+- A second timer while one is active/paused → `409 { error: "A focus timer is already running. Pause or finish it first." }`
+- A subject/task/session id that is not the user's (or malformed) → `404` / `400`
+- Invalid task/subject/timer fields → `400 { error: "Invalid ..." }`
 
 ## Not production-ready yet
 
