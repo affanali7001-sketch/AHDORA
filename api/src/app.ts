@@ -15,6 +15,9 @@ import { challengesRouter } from './routes/challenges.js';
 import { rewardsRouter } from './routes/rewards.js';
 import { friendsRouter } from './routes/friends.js';
 import { notificationsRouter } from './routes/notifications.js';
+import { quranRouter } from './routes/quran.js';
+import { hijriRouter } from './routes/hijri.js';
+import { mosquesRouter } from './routes/mosques.js';
 
 export const app = express();
 
@@ -180,6 +183,42 @@ app.use(
     legacyHeaders: false,
   }),
   notificationsRouter,
+);
+
+app.use(
+  '/api/quran',
+  requireAuth,
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 120,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  quranRouter,
+);
+
+app.use(
+  '/api/hijri',
+  requireAuth,
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 60,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  hijriRouter,
+);
+
+app.use(
+  '/api/mosques',
+  requireAuth,
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 30,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  mosquesRouter,
 );
 
 app.use((_req, res) => {

@@ -249,6 +249,20 @@ const profileSchema = new Schema({
     default: '',
   },
 
+  hijriDayOffset: {
+    type: Number,
+    min: -2,
+    max: 2,
+    default: 0,
+  },
+
+  quranDailyTarget: {
+    type: Number,
+    min: 0,
+    max: 500,
+    default: 10,
+  },
+
   onboardingCompleted: {
     type: Boolean,
     default: false,

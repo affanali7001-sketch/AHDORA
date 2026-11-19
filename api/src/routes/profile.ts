@@ -65,6 +65,9 @@ const profileSchema = z.object({
   focusStartTime: z.string().max(10).optional(),
   focusEndTime: z.string().max(10).optional(),
 
+  hijriDayOffset: z.number().int().min(-2).max(2).optional(),
+  quranDailyTarget: z.number().int().min(0).max(500).optional(),
+
   onboardingCompleted: z.boolean().optional(),
 }).strict();
 

@@ -362,3 +362,75 @@
 .quiet-hours-inputs{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
 .quiet-hours-inputs label{display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--muted)}
 .quiet-hours-inputs .form-input{width:130px}
+
+/* ---- Phase 5: Quran, Hijri calendar, mosque finder ---- */
+.empty-note{font-size:12px;color:var(--muted);line-height:1.6}
+.danger-text{color:#e8a0a0}
+.dua-list{display:flex;flex-direction:column;gap:12px;margin-top:14px}
+.guidance-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:22px 0 14px}
+.guidance-tabs button{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:20px;padding:8px 16px;font-size:12px;font-weight:600}
+.guidance-tabs button.selected{background:linear-gradient(90deg,rgba(78,186,112,.25),rgba(78,186,112,.1));color:#a8f0b8;border-color:rgba(131,229,157,.4)}
+.quran-browser-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:14px}
+.quran-browser-head h3{margin:4px 0 6px;font-size:19px}
+.quran-browser-head p{margin:0;color:var(--muted);font-size:12px;line-height:1.6}
+.quran-browser-head>svg{color:var(--green);flex-shrink:0}
+.quran-source-line{font-size:11px;color:var(--muted);line-height:1.6}
+.quran-toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:14px 0}
+.quran-search{flex:1;min-width:220px;display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:0 12px}
+.quran-search svg{color:var(--muted);flex-shrink:0}
+.quran-search .form-input{border:0;background:transparent;padding:11px 0}
+.quran-surah-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin-top:12px}
+.quran-surah-card{display:flex;gap:12px;align-items:center;text-align:left;cursor:pointer;padding:14px}
+.quran-surah-card:hover{border-color:var(--line-strong)}
+.quran-surah-number{display:grid;place-items:center;width:36px;height:36px;flex-shrink:0;border-radius:50%;background:rgba(131,229,157,.12);color:var(--green);font-weight:700;font-size:13px}
+.quran-surah-names{display:flex;flex-direction:column;gap:2px;min-width:0}
+.quran-surah-names strong{font-size:13px}
+.quran-surah-names span{font-size:15px;color:var(--green)}
+.quran-surah-names small{font-size:11px;color:var(--muted)}
+.quran-reader{padding:20px}
+.quran-reader-head{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start;margin:12px 0}
+.quran-reader-head h3{margin:4px 0;font-size:20px}
+.quran-reader-head p{margin:0;color:var(--muted);font-size:12px}
+.quran-ayah-list{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+.quran-ayah{border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--panel2)}
+.quran-ayah-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.quran-ayah-number{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:rgba(131,229,157,.12);color:var(--green);font-weight:700;font-size:12px}
+.quran-ayah-actions{display:flex;gap:6px}
+.quran-arabic{font-size:24px;line-height:2;text-align:right;color:#f2f7f2;margin:0 0 10px}
+.quran-transliteration{font-size:13px;font-style:italic;color:#c4d6c9;line-height:1.7;margin:0 0 8px}
+.quran-translation{font-size:13px;color:var(--muted);line-height:1.7;margin:0}
+.quran-sajda{display:inline-block;margin-top:10px;font-size:11px;color:var(--gold);border:1px solid rgba(215,189,121,.4);border-radius:20px;padding:3px 10px}
+.quran-bookmarks{padding:16px;margin:12px 0}
+.quran-bookmarks h4{margin:0 0 10px}
+.quran-bookmark-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;font-size:13px}
+.quran-bookmark-list li{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.quran-progress{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:16px;margin:12px 0;align-items:flex-start}
+.quran-progress h4{margin:4px 0;font-size:15px}
+.quran-progress p{margin:0;color:var(--muted);font-size:12px}
+.quran-target-row{display:flex;gap:8px;margin-top:6px}
+.quran-target-row .form-input{width:90px}
+.quran-search-results{padding:16px;margin:12px 0}
+.quran-search-results h4{margin:0 0 10px}
+.quran-search-results ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.quran-search-results p{margin:4px 0 0;color:var(--muted);font-size:12px;line-height:1.6}
+.hijri-controls{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;align-items:flex-end;margin:14px 0}
+.hijri-nav{display:flex;gap:10px;align-items:center}
+.hijri-nav strong{font-size:15px}
+.hijri-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-top:12px}
+.hijri-weekday{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);text-align:center;padding:6px 0}
+.hijri-cell{border:1px solid var(--line);border-radius:10px;padding:8px;min-height:64px;display:flex;flex-direction:column;gap:2px;background:var(--panel)}
+.hijri-cell.blank{border-color:transparent;background:transparent}
+.hijri-cell strong{font-size:13px}
+.hijri-cell span{font-size:11px;color:var(--muted)}
+.hijri-cell small{font-size:10px;color:var(--gold);line-height:1.4}
+.hijri-cell.is-today{border-color:var(--green);background:rgba(131,229,157,.1)}
+.hijri-cell.has-holiday{border-color:rgba(215,189,121,.45)}
+.mosque-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin:14px 0}
+.mosque-controls .quran-search{flex:1;min-width:220px}
+.mosque-list{list-style:none;margin:14px 0 0;padding:0;display:flex;flex-direction:column;gap:10px}
+.mosque-card{display:flex;justify-content:space-between;gap:14px;align-items:center;padding:16px}
+.mosque-card>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.mosque-card strong{font-size:14px}
+.mosque-card span{font-size:12px;color:var(--muted);line-height:1.5}
+.mosque-card a{font-size:12px}
+@media (max-width:720px){.hijri-cell{min-height:52px;padding:6px}.hijri-cell span{display:none}.quran-arabic{font-size:20px}.mosque-card{flex-direction:column;align-items:flex-start}}

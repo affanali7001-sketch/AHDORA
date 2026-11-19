@@ -20,9 +20,12 @@ A React + TypeScript frontend and Node.js + Express + MongoDB API for AHDORA:
 The API persists accounts, profiles, sessions, Salah records, study subjects/tasks,
 Pomodoro sessions, challenges and participations, points transactions and badges in MongoDB.
 Analytics are calculated from saved study activity (focus minutes, tasks completed, streak)
-plus real challenge/points aggregates. Friend invites, notifications, and
-native Android focus controls are not implemented yet and must not be treated as
-persisted functionality. Live prayer times come
+plus real challenge/points aggregates. Native Android focus controls are not
+implemented yet and must not be treated as functionality. Quran text comes from AlQuran Cloud
+(Tanzil Uthmani Arabic text, transliteration, Saheeh International translation) and recitation
+audio streams from EveryAyah with the reciter credited; Hijri dates come from Aladhan (Umm
+al-Qura calendar) and mosque data from OpenStreetMap (Nominatim + Overpass). Upstream failures
+are honest errors — Quran text, Hijri dates and mosque results are never invented. Live prayer times come
 from Aladhan via `GET /api/prayer/times` using the city, country, calculation method and Asr
 school saved in onboarding; if the city is missing or Aladhan is unreachable, no times are
 invented — the UI shows an honest error state. Points are awarded server-side only, from real
@@ -86,12 +89,20 @@ npm run preview
 - Frontend: real Friends page (search, requests, friends list, invites, shared-progress view), a real notification bell (unread badge, panel, mark read / mark all read), socket client that refetches on events, and notification preferences in Profile & settings.
 - Timezone fix: `GET /api/study/today`, `/stats` and the study streak now use the user's profile timezone (new `startOfDayUtc` helper) instead of the server-local date — the Phase 3 leftover is fixed.
 
+## Phase 5 — done (2026-11-19, branch `phase-5-quran-hijri-mosques`)
+
+- Quran browser: `GET /api/quran/surahs` (all 114, public — reading needs no account), `GET /api/quran/surahs/:number` (Arabic + transliteration + translation merged by ayah, with reciter choice), `GET /api/quran/search?q=` (surah name/number matches plus real ayah-text matches from the upstream search endpoint). Arabic is the Tanzil Uthmani text, translation is Saheeh International, transliteration is the `en.transliteration` edition — all from AlQuran Cloud (`api.alquran.cloud/v1`), because the Aladhan Quran endpoints on `api.aladhan.com/v1` return 404 (verified live). The source/edition is shown on every reading view. Upstream failures are 502s, never fabricated text. Bookmarks (`GET/POST/DELETE /api/quran/bookmarks`), reading history and daily target (`GET /api/quran/history`, `POST /api/quran/read`, `PUT /api/quran/target`) are per-user; "ayahs opened today" counts forward progress through a surah only. The 4 curated duas are unchanged and shown as their own section.
+- Recitation audio streams from EveryAyah (`everyayah.com/data/<reciter>/<surah><ayah>.mp3`) with the reciter credited — Mishary Rashid Alafasy, Abdul Basit (Murattal), Mahmoud Khalil Al-Husary, Maher Al-Muaiqly (all four file URLs verified live, HTTP 200 audio/mpeg). The AlQuran Cloud audio CDN returned 403 from the build environment, so it is not used.
+- Hijri calendar: `GET /api/hijri/today` and `GET /api/hijri/month?year=&month=` from Aladhan (`gToHCalendar`, Umm al-Qura), with Ramadan/Eid markers taken only from the upstream per-day holiday lists (verified: 1st Day of Ramadan 08-02-2027, Lailat-ul-Qadr 28-02-2027). `GET/PUT /api/hijri/settings` stores a per-user day adjustment (-2..+2) for local moon-sighting differences; the source and convention are returned with every response and shown in the UI.
+- Mosque finder: `GET /api/mosques/nearby?lat&lng&radiusKm=`, `GET /api/mosques/search?city=`, `GET /api/mosques/near-me` (profile city). Geocoding via Nominatim and mosques via Overpass (`amenity=place_of_worship` + `religion=muslim`), sorted by haversine distance, with a Google Maps directions link. Phone/website appear only when OpenStreetMap tags provide them. Verified live for Pune (Makkah Masjid, Farog E Nabavi Masjid, Sadal Baba, …).
+- Frontend: Guidance is now a real Quran browser (searchable surah list, reader with Arabic + transliteration + translation + audio, bookmarks, reading target/history), with tabs for the curated duas, Hijri calendar and mosque finder. Deen quick tiles open the matching tab; the mood "Open verified reading" button opens Surah Ash-Sharh (94) or the duas tab. Guests can read; bookmarks/history/target need sign-in.
+
 ## Remaining phases
 
 1. Habit tracking and analytics derived from saved Salah/habit activity.
 2. Email verification, password recovery, session cleanup/rotation, and automated security tests.
-4. Verified Quran content workflow with attribution/licensing review.
-5. Capacitor/Kotlin native integrations for notifications and supported focus controls.
+3. Scholarly review workflow for Quran content (the curated duas keep their existing review-status wording; nothing is labelled reviewed without a real review).
+4. Capacitor/Kotlin native integrations for notifications and supported focus controls.
 
 ## Repository hygiene
 

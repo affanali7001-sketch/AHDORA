@@ -1,6 +1,10 @@
 import SalahTracker from './components/SalahTracker';
 import Friends from './components/Friends';
 import NotificationSettingsPanel from './components/NotificationSettings';
+import CuratedDuas from './components/QuranDuas';
+import QuranBrowser from './components/QuranBrowser';
+import HijriCalendar from './components/HijriCalendar';
+import MosqueFinder from './components/MosqueFinder';
 import { connectSocket, disconnectSocket } from './lib/socket';
 import {
   fetchNotifications,
@@ -101,6 +105,8 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<A
 }
 
 type Page = 'dashboard' | 'deen' | 'study' | 'challenges' | 'friends' | 'guidance' | 'focus' | 'analytics' | 'profile';
+
+type GuidanceTab = 'quran' | 'duas' | 'hijri' | 'mosques';
 type IconType = typeof Home;
 
 
@@ -161,6 +167,8 @@ function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [guestMode, setGuestMode] = useState(false);
   const [page, setPage] = useState<Page>('dashboard');
+  const [guidanceTab, setGuidanceTab] = useState<GuidanceTab>('quran');
+  const [guidanceSurah, setGuidanceSurah] = useState<number | null>(null);
   const [newUser, setNewUser] = useState<UserProfile>(() => emptyProfile());
   const [profileName, setProfileName] = useState('');
   const [mobileNav, setMobileNav] = useState(false);
@@ -424,6 +432,12 @@ function App() {
     setSearchOpen(false);
   };
 
+  const goToGuidance = (tab: GuidanceTab, surahNumber?: number) => {
+    setGuidanceTab(tab);
+    setGuidanceSurah(surahNumber ?? null);
+    goTo('guidance');
+  };
+
   async function handleLogin(email: string, password: string) {
     const result = await apiRequest<{ user: AuthUser }>('/api/auth/login', {
       method: 'POST', body: JSON.stringify({ email, password }),
@@ -525,11 +539,11 @@ function App() {
         {searchOpen && <div className="search-popover"><Search size={17} /><input autoFocus placeholder="Search AHDORA pages..." value={query} onChange={(e) => setQuery(e.target.value)} /><button onClick={() => { setQuery(''); setSearchOpen(false); }}><X size={16} /></button><div className="search-results">{filteredNav.map((item) => <button key={item.id} onClick={() => goTo(item.id)}>{item.label}<ArrowUpRight size={14} /></button>)}</div></div>}
         <div className="page-content">
           {page === 'dashboard' && <Dashboard userName={profileName || 'there'} onNavigate={goTo} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} onPrayerToggle={() => goTo('deen')} subjects={subjects} todayTasks={todayTasks} studyStats={studyStats} guestMode={guestMode} activeChallenges={activeChallenges} rewards={rewards} />}
-          {page === 'deen' && <Deen onNotify={notify} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} />}
+          {page === 'deen' && <Deen onNotify={notify} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} onOpenGuidance={goToGuidance} />}
           {page === 'study' && <Study subjects={subjects} tasks={tasks} todayTasks={todayTasks} schedule={todaySchedule} stats={studyStats} activeSession={activePomodoro} history={pomodoroHistory} studyError={studyError} guestMode={guestMode} profile={newUser} onRefresh={refreshStudy} onNotify={notify} />}
           {page === 'challenges' && <Challenges onNotify={notify} onRefresh={refreshChallenges} guestMode={guestMode} />}
           {page === 'friends' && <Friends onNotify={notify} refreshKey={friendsRefreshKey} guestMode={guestMode} />}
-          {page === 'guidance' && <Guidance onNotify={notify} />}
+          {page === 'guidance' && <Guidance onNotify={notify} tab={guidanceTab} onTabChange={setGuidanceTab} guestMode={guestMode} profileCity={newUser.city} initialSurah={guidanceSurah} onInitialSurahOpened={() => setGuidanceSurah(null)} onOpenSurah={(surahNumber) => goToGuidance('quran', surahNumber)} />}
           {page === 'focus' && <Focus sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} focusEnabled={focusEnabled} setFocusEnabled={setFocusEnabled} youtubeAllowed={youtubeAllowed} setYoutubeAllowed={setYoutubeAllowed} onNotify={notify} />}
           {page === 'analytics' && <Analytics stats={studyStats} guestMode={guestMode} rewards={rewards} activeChallenges={activeChallenges} challengeHistory={challengeHistory} />}
           {page === 'profile' && <Profile onNotify={notify} user={authUser} guestMode={guestMode} onLogout={handleLogout} />}
@@ -1162,11 +1176,12 @@ function QuranDuas() {
   );
 }
 
-function Deen({ onNotify, prayerTimes, prayerStatus, prayerError }: {
+function Deen({ onNotify, prayerTimes, prayerStatus, prayerError, onOpenGuidance }: {
   onNotify: (message: string) => void;
   prayerTimes: PrayerTimesResponse | null;
   prayerStatus: 'idle' | 'loading' | 'loaded' | 'error' | 'no-city';
   prayerError: string;
+  onOpenGuidance: (tab: GuidanceTab, surahNumber?: number) => void;
 }) {
   return (
     <>
@@ -1186,9 +1201,9 @@ function Deen({ onNotify, prayerTimes, prayerStatus, prayerError }: {
         <section className="panel deen-quick-card">
           <SectionTitle title="Your daily practice" />
           <div className="quick-grid">
-            <QuickTile icon={BookMarked} title="Duas" text="Verified supplications" onClick={() => onNotify('Verified dua library is planned for a later phase.')} />
-            <QuickTile icon={CalendarDays} title="Islamic calendar" text="Dates & occasions" onClick={() => onNotify('Islamic calendar is planned for a later phase.')} />
-            <QuickTile icon={Compass} title="Find a masjid" text="Nearby places" onClick={() => onNotify('Masjid finder will be connected later.')} />
+            <QuickTile icon={BookMarked} title="Duas" text="Verified supplications" onClick={() => onOpenGuidance('duas')} />
+            <QuickTile icon={CalendarDays} title="Islamic calendar" text="Dates & occasions" onClick={() => onOpenGuidance('hijri')} />
+            <QuickTile icon={Compass} title="Find a masjid" text="Nearby places" onClick={() => onOpenGuidance('mosques')} />
           </div>
         </section>
 
@@ -2512,8 +2527,30 @@ function Challenges({
   );
 }
 
-function Guidance({ onNotify }: { onNotify: (message: string) => void }) {
+function Guidance({ onNotify, tab, onTabChange, guestMode, profileCity, initialSurah, onInitialSurahOpened, onOpenSurah }: {
+  onNotify: (message: string) => void;
+  tab: GuidanceTab;
+  onTabChange: (tab: GuidanceTab) => void;
+  guestMode: boolean;
+  profileCity: string;
+  initialSurah: number | null;
+  onInitialSurahOpened: () => void;
+  onOpenSurah: (surahNumber: number) => void;
+}) {
   const [selected, setSelected] = useState('Feeling overwhelmed');
+
+  function openVerifiedReading() {
+    if (selected === 'Need a dua') {
+      onTabChange('duas');
+      return;
+    }
+    if (selected === 'Feeling overwhelmed') {
+      // Surah Ash-Sharh (94) — the reference already shown on this card.
+      onOpenSurah(94);
+      return;
+    }
+    onTabChange('quran');
+  }
 
   return (
     <>
@@ -2554,9 +2591,9 @@ function Guidance({ onNotify }: { onNotify: (message: string) => void }) {
             <h3>{guidanceCards.find((m) => m.mood === selected)?.category}</h3>
             <div className="reference-chip">{guidanceCards.find((m) => m.mood === selected)?.ref}</div>
             <p>
-              Verified Arabic text, translation, context and source attribution will be displayed here after review. This preview intentionally does not generate or reproduce Quranic text.
+              Verified Arabic text, translation, context and source attribution from the Qur'an browser below.
             </p>
-            <button className="primary-button" onClick={() => onNotify('Only verified Quran text and reviewed translations will be published here.')}>
+            <button className="primary-button" onClick={openVerifiedReading}>
               Open verified reading <ArrowRight size={15} />
             </button>
           </div>
@@ -2567,10 +2604,10 @@ function Guidance({ onNotify }: { onNotify: (message: string) => void }) {
             <div className="source-icon"><ShieldCheck size={20} /></div>
             <span className="eyebrow">OUR CONTENT PROMISE</span>
             <h3>Accuracy before quantity.</h3>
-            <p>Quranic Arabic, references and translations will come from verified sources and be reviewed before publication.</p>
+            <p>Quranic Arabic comes from the Tanzil Uthmani text via AlQuran Cloud, with translation attribution shown on every reading. Curated duas carry their exact surah, ayah, para and page references.</p>
             <div className="source-check"><CheckCheck size={14} /> Exact surah and ayah references</div>
             <div className="source-check"><CheckCheck size={14} /> Translation attribution</div>
-            <div className="source-check"><CheckCheck size={14} /> Scholarly review process</div>
+            <div className="source-check"><CheckCheck size={14} /> Source shown on every reading</div>
           </div>
 
           <div className="panel support-panel">
@@ -2583,6 +2620,39 @@ function Guidance({ onNotify }: { onNotify: (message: string) => void }) {
           </div>
         </aside>
       </div>
+
+      <div className="guidance-tabs" role="tablist" aria-label="Quranic guidance sections">
+        {([
+          ['quran', 'Read Qur\'an'],
+          ['duas', 'Curated duas'],
+          ['hijri', 'Hijri calendar'],
+          ['mosques', 'Find a masjid'],
+        ] as [GuidanceTab, string][]).map(([value, label]) => (
+          <button
+            key={value}
+            role="tab"
+            aria-selected={tab === value}
+            className={tab === value ? 'selected' : ''}
+            onClick={() => onTabChange(value)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'quran' && (
+        <QuranBrowser
+          onNotify={onNotify}
+          guestMode={guestMode}
+          initialSurah={initialSurah}
+          onInitialSurahOpened={onInitialSurahOpened}
+        />
+      )}
+      {tab === 'duas' && <CuratedDuas />}
+      {tab === 'hijri' && <HijriCalendar onNotify={onNotify} guestMode={guestMode} />}
+      {tab === 'mosques' && (
+        <MosqueFinder onNotify={onNotify} guestMode={guestMode} profileCity={profileCity} />
+      )}
     </>
   );
 }
