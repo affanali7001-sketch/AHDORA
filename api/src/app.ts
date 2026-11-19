@@ -4,27 +4,45 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { rateLimit } from 'express-rate-limit';
 
-import { config } from './config.js';
+import { allowedOrigins } from './config.js';
 import { authRouter } from './routes/auth.js';
 import { profileRouter } from './routes/profile.js';
 import { requireAuth } from './middleware/auth.js';
+import { requireCsrf } from './middleware/csrf.js';
+import { sanitizeInput } from './middleware/sanitize.js';
 import { salahRouter } from './routes/salah.js';
+import { prayerRouter } from './routes/prayer.js';
+import { studyRouter } from './routes/study.js';
+import { challengesRouter } from './routes/challenges.js';
+import { rewardsRouter } from './routes/rewards.js';
+import { friendsRouter } from './routes/friends.js';
+import { notificationsRouter } from './routes/notifications.js';
+import { quranRouter } from './routes/quran.js';
+import { hijriRouter } from './routes/hijri.js';
+import { mosquesRouter } from './routes/mosques.js';
 
 export const app = express();
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 
-app.use(helmet());
+// Helmet with a strict policy. The API serves JSON only (no HTML, no
+// inline scripts), so `default-src 'none'` + `frame-ancestors 'none'`
+// cannot break the app; Socket.IO is not routed through this
+// middleware, and the Vite frontend is a separate origin.
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+      baseUri: ["'none'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+}));
 
-// Allowed frontend addresses for local development
-const allowedOrigins = new Set([
-  config.FRONTEND_ORIGIN,
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  'http://10.47.228.16:5173',
-]);
-
+// CORS allowlist from env (CORS_ORIGINS + FRONTEND_ORIGIN). No
+// wildcard origin with credentials — ever.
 app.use(cors({
   origin(origin, callback) {
     if (!origin || allowedOrigins.has(origin)) {
@@ -35,8 +53,8 @@ app.use(cors({
     callback(new Error('Origin not allowed'));
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
-  allowedHeaders: ['Content-Type'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'X-CSRF-Token'],
   maxAge: 600,
 }));
 
@@ -47,21 +65,13 @@ app.use(express.json({
 
 app.use(cookieParser());
 
-// Protect state-changing requests against unexpected origins
-app.use((req, res, next) => {
-  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
-    const origin = req.get('origin');
+// Strip MongoDB operator keys from every request before handlers run.
+app.use(sanitizeInput);
 
-    if (!origin || !allowedOrigins.has(origin)) {
-      res.status(403).json({
-        error: 'Request origin not allowed',
-      });
-      return;
-    }
-  }
-
-  next();
-});
+// Double-submit-cookie CSRF protection for state-changing requests.
+// Replaces the old origin-check middleware, which blocked legitimate
+// non-browser clients and was not a real CSRF defence.
+app.use(requireCsrf);
 
 app.get('/api/health', (_req, res) => {
   res.json({
@@ -104,6 +114,117 @@ app.use(
   profileRouter,
 );
 
+app.use(
+  '/api/study',
+  requireAuth,
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 120,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  studyRouter,
+);
+
+app.use(
+  '/api/prayer',
+  requireAuth,
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 60,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  prayerRouter,
+);
+
+app.use(
+  '/api/challenges',
+  requireAuth,
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 120,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  challengesRouter,
+);
+
+app.use(
+  '/api/rewards',
+  requireAuth,
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 60,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  rewardsRouter,
+);
+
+app.use(
+  '/api/friends',
+  requireAuth,
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 120,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  friendsRouter,
+);
+
+app.use(
+  '/api/notifications',
+  requireAuth,
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 120,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  notificationsRouter,
+);
+
+// Quran reading (surah list/text/search) is PUBLIC by design — no
+// account needed to read. Bookmarks, history and target stay behind
+// requireAuth inside the router. (Previously this mount had
+// requireAuth, which contradicted the documented intent.)
+app.use(
+  '/api/quran',
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 120,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  quranRouter,
+);
+
+app.use(
+  '/api/hijri',
+  requireAuth,
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 60,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  hijriRouter,
+);
+
+app.use(
+  '/api/mosques',
+  requireAuth,
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 30,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  mosquesRouter,
+);
+
 app.use((_req, res) => {
   res.status(404).json({
     error: 'Route not found',
@@ -116,6 +237,8 @@ app.use((
   res: express.Response,
   _next: express.NextFunction,
 ) => {
+  // Safe errors: only the message is logged; the client never sees a
+  // stack trace or internal details.
   console.error(
     'API error:',
     error instanceof Error ? error.message : 'Unknown error',

@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+jobs:
+  web:
+    name: Web (typecheck + build + tests)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Typecheck (web)
+        run: npm run typecheck
+
+      - name: Build (web)
+        run: npm run build
+
+  api:
+    name: API (typecheck + build + tests)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install API dependencies
+        working-directory: api
+        run: npm ci
+
+      - name: Typecheck (API)
+        working-directory: api
+        run: npm run typecheck
+
+      - name: Build (API)
+        working-directory: api
+        run: npm run build
+
+      # Pure-function unit tests only (timezone, streak, CSRF, email
+      # tokens, auto-missed, haversine, sanitiser). No MongoDB or SMTP
+      # is needed; MONGODB_URI is a dummy value for config parsing.
+      - name: Test (API)
+        working-directory: api
+        run: npm test

@@ -4,15 +4,53 @@ import { CalendarDays, ChevronLeft, ChevronRight, ShieldCheck } from 'lucide-rea
 const prayerNames = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'] as const;
 type Prayer = typeof prayerNames[number];
 type Status = 'pending' | 'prayed' | 'qaza' | 'missed';
-type PrayerRecord = Record<Prayer, Status>;
+type PrayerEntry = {
+  status: Status;
+  wasMissed: boolean;
+  missedAt: string | null;
+  autoMissed: boolean;
+};
+type PrayerRecord = Record<Prayer, PrayerEntry>;
+
+const emptyEntry: PrayerEntry = {
+  status: 'pending',
+  wasMissed: false,
+  missedAt: null,
+  autoMissed: false,
+};
 
 const emptyRecord: PrayerRecord = {
-  Fajr: 'pending',
-  Dhuhr: 'pending',
-  Asr: 'pending',
-  Maghrib: 'pending',
-  Isha: 'pending',
+  Fajr: { ...emptyEntry },
+  Dhuhr: { ...emptyEntry },
+  Asr: { ...emptyEntry },
+  Maghrib: { ...emptyEntry },
+  Isha: { ...emptyEntry },
 };
+
+function toEntry(value: unknown): PrayerEntry {
+  const entry = (value ?? {}) as Partial<PrayerEntry>;
+  return {
+    status: entry.status ?? 'pending',
+    wasMissed: entry.wasMissed ?? false,
+    missedAt: entry.missedAt ?? null,
+    autoMissed: entry.autoMissed ?? false,
+  };
+}
+
+/** Honest label: a Qaza keeps its original miss visible, never erased. */
+function statusLabel(entry: PrayerEntry): string {
+  const base = entry.status[0].toUpperCase() + entry.status.slice(1);
+  if (entry.status === 'missed' && entry.autoMissed) {
+    return 'Missed — auto-marked after deadline';
+  }
+  if (entry.status === 'qaza' && entry.wasMissed) {
+    return 'Qaza (was missed)';
+  }
+  if (entry.status === 'prayed' && entry.wasMissed) {
+    return 'Prayed (was missed earlier)';
+  }
+  return base;
+}
 
 const dateKey = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -51,7 +89,7 @@ export default function SalahTracker({ onNotify }: Props) {
 
         for (const day of data.days ?? []) {
           monthRecords[day.date] = Object.fromEntries(
-            prayerNames.map(name => [name, day.prayers?.[name]?.status ?? 'pending']),
+            prayerNames.map(name => [name, toEntry(day.prayers?.[name])]),
           ) as PrayerRecord;
         }
 
@@ -99,7 +137,9 @@ export default function SalahTracker({ onNotify }: Props) {
       const savedRecord = Object.fromEntries(
         prayerNames.map(name => [
           name,
-          data.prayers?.[name]?.status ?? (name === prayer ? status : selected[name]),
+          data.prayers?.[name]
+            ? toEntry(data.prayers[name])
+            : (name === prayer ? { ...toEntry(selected[name]), status } : selected[name]),
         ]),
       ) as PrayerRecord;
 
@@ -132,7 +172,7 @@ export default function SalahTracker({ onNotify }: Props) {
     Object.entries(records)
       .filter(([date]) => date.startsWith(month))
       .forEach(([, record]) => {
-        prayerNames.forEach(name => result[record[name]]++);
+        prayerNames.forEach(name => result[record[name].status]++);
       });
 
     return result;
@@ -198,7 +238,7 @@ export default function SalahTracker({ onNotify }: Props) {
 
               const key = `${month}-${String(day).padStart(2, '0')}`;
               const record = records[key] ?? emptyRecord;
-              const values = Object.values(record);
+              const values = prayerNames.map(name => record[name].status);
               const allPrayed = values.every(value => value === 'prayed');
               const hasMissed = values.includes('missed');
               const hasQaza = values.includes('qaza');
@@ -240,17 +280,17 @@ export default function SalahTracker({ onNotify }: Props) {
                 'en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' },
               )}</h4>
             </div>
-            <span>{prayerNames.filter(name => selected[name] === 'prayed').length}/5 prayed</span>
+            <span>{prayerNames.filter(name => selected[name].status === 'prayed').length}/5 prayed</span>
           </div>
 
           {prayerNames.map(prayer => (
             <div className="salah-prayer-row" key={prayer}>
               <div>
                 <strong>{prayer}</strong>
-                <small>{selected[prayer][0].toUpperCase() + selected[prayer].slice(1)}</small>
+                <small>{statusLabel(selected[prayer])}</small>
               </div>
               <select
-                value={selected[prayer]}
+                value={selected[prayer].status}
                 disabled={saving !== null || selectedDate > today || loading}
                 onChange={event => updateStatus(prayer, event.target.value as Status)}
                 aria-label={`${prayer} status`}
@@ -264,7 +304,9 @@ export default function SalahTracker({ onNotify }: Props) {
           ))}
 
           <p className="salah-private-note">
-            Your worship history is private. A status changes only when you select and save it.
+            Your worship history is private. A status changes when you select and save it — except a prayer
+            left unrecorded past its deadline plus 5 minutes, which is marked missed automatically and can
+            still be corrected to Qaza afterwards. A Qaza keeps its original miss visible.
           </p>
         </div>
       </div>

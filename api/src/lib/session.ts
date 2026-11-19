@@ -1,9 +1,59 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Request, Response } from 'express';
 import { Session } from '../models/Session.js';
+import { User } from '../models/User.js';
 import { config, isProduction } from '../config.js';
 
 export const hashSessionToken = (token: string) => createHash('sha256').update(token).digest('hex');
+
+/**
+ * Resolve a session token to its user. Shared by the REST auth
+ * middleware and the Socket.IO handshake, so sockets are authenticated
+ * with exactly the same session-cookie mechanism as the API.
+ * Returns null for a missing, expired, or orphaned session.
+ *
+ * Lazy cleanup: a token whose session row is gone (expired or
+ * revoked) has its hash deleted if it still lingers, and orphaned
+ * sessions (user deleted) are removed when found.
+ */
+export async function resolveSessionUser(
+  token: string,
+): Promise<{ id: string; name: string; email: string; emailVerified: boolean; role: string } | null> {
+  if (typeof token !== 'string' || token.length < 30 || token.length > 100) {
+    return null;
+  }
+  const tokenHash = hashSessionToken(token);
+  const session = await Session.findOne({
+    tokenHash,
+    expiresAt: { $gt: new Date() },
+  }).lean();
+  if (!session) {
+    await Session.deleteOne({ tokenHash });
+    return null;
+  }
+  const user = await User.findById(session.userId).select('_id name email emailVerifiedAt role').lean();
+  if (!user) {
+    await Session.deleteOne({ _id: session._id });
+    return null;
+  }
+  return {
+    id: String(user._id),
+    name: user.name,
+    email: user.email,
+    emailVerified: user.emailVerifiedAt !== null,
+    role: user.role,
+  };
+}
+
+/** Remove a user's expired sessions (lazy cleanup — there is no background scheduler). */
+export async function pruneExpiredSessions(userId: string): Promise<void> {
+  await Session.deleteMany({ userId, expiresAt: { $lte: new Date() } });
+}
+
+/** Invalidate every session of a user (used on login rotation and password changes). */
+export async function revokeAllSessions(userId: string): Promise<void> {
+  await Session.deleteMany({ userId });
+}
 
 export async function createSession(userId: string, req: Request, res: Response) {
   const token = randomBytes(32).toString('base64url');
@@ -21,6 +71,16 @@ export async function createSession(userId: string, req: Request, res: Response)
     path: '/',
     expires: expiresAt,
   });
+}
+
+/**
+ * Session rotation: invalidate ALL of the user's previous sessions,
+ * then issue a fresh one. Called on login and after password
+ * changes, so a stolen older session stops working immediately.
+ */
+export async function rotateSession(userId: string, req: Request, res: Response) {
+  await revokeAllSessions(userId);
+  await createSession(userId, req, res);
 }
 
 export function clearSessionCookie(res: Response) {

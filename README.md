@@ -8,18 +8,33 @@ A React + TypeScript frontend and Node.js + Express + MongoDB API for AHDORA:
 - Welcome screen with authenticated signup, login, session hydration, and logout.
 - Responsive app shell with desktop sidebar and mobile navigation.
 - Dashboard, Deen & Salah, Study Planner, Challenges, Quranic Guidance, Focus & Sleep, Analytics, and Profile screens.
-- Persisted profile onboarding and authenticated Salah calendar/check-ins.
-- Interactive study, challenge, timer, and focus surfaces with their current limitations clearly labelled.
+- Persisted 8-step profile onboarding (personal, education, college, study, location & prayer calculation, individual prayer timings, sleep, review & save) and authenticated Salah calendar/check-ins.
+- Live prayer times from Aladhan (no API key), wired into the Dashboard and Deen & Salah screens with next-prayer countdown and real Salah completion from saved records.
+- Interactive timer and focus surfaces with their current limitations clearly labelled.
+- Persisted study planner: subjects and tasks saved in MongoDB, a daily planner built from today's tasks plus the college/study schedule from onboarding, and a real Pomodoro timer whose start time lives on the server, so refresh, logout, or a device change keeps it running.
+- Solo challenges with templates and user-defined challenges, server-side points, rewards and badges, and Salah auto-missed after the deadline + 5-minute grace (user-correctable, Qaza keeps its original miss visible).
 - AHDORA logo asset and responsive dark emerald visual system.
 
 ## Important preview boundaries
 
-The API persists accounts, profiles, sessions, and Salah records in MongoDB. Study tasks,
-analytics, community challenges, notifications, and native Android focus controls are not
-implemented yet and must not be treated as persisted functionality. Live prayer times require
-a verified provider and location/time-zone integration. Do not use the staging deployment for
-production accounts until email verification, password recovery, monitoring, and security tests
-are complete.
+The API persists accounts, profiles, sessions, Salah records, study subjects/tasks,
+Pomodoro sessions, challenges and participations, points transactions and badges in MongoDB.
+Analytics are calculated from saved study activity (focus minutes, tasks completed, streak)
+plus real challenge/points aggregates. Native Android focus controls are not
+implemented yet and must not be treated as functionality. Quran text comes from AlQuran Cloud
+(Tanzil Uthmani Arabic text, transliteration, Saheeh International translation) and recitation
+audio streams from EveryAyah with the reciter credited; Hijri dates come from Aladhan (Umm
+al-Qura calendar) and mosque data from OpenStreetMap (Nominatim + Overpass). Upstream failures
+are honest errors — Quran text, Hijri dates and mosque results are never invented. Live prayer times come
+from Aladhan via `GET /api/prayer/times` using the city, country, calculation method and Asr
+school saved in onboarding; if the city is missing or Aladhan is unreachable, no times are
+invented — the UI shows an honest error state. Points are awarded server-side only, from real
+events (finished focus session, completed task, completed challenge day, completed challenge) —
+there is no endpoint that adds arbitrary points, and no points are awarded per individual prayer.
+Sleep, Quran and discipline challenge days are completed by an honest self-reported check-in,
+labelled as self-reported everywhere, because no reliable measured source exists for them yet.
+Do not use the staging deployment for
+production accounts until real MongoDB manual testing, real SMTP delivery, monitoring, and a green CI run are complete (see `DEPLOYMENT.md`).
 
 Focus settings are visual preferences only until the native Android layer is implemented and tested.
 
@@ -45,14 +60,49 @@ npm run build
 npm run preview
 ```
 
+## Phase 1 — done (2026-11-19, branch `phase-1-onboarding-prayer-times`)
+
+- 8-step onboarding (was 5 steps), all new fields optional with safe defaults so existing profiles keep loading.
+- Live prayer times: `GET /api/prayer/times` (Aladhan, method/school mapping, manual per-prayer overrides, deadlines, Hijri date, next prayer). Dashboard shows real times, a 30-second countdown to the next prayer, and real completion from today's saved Salah record. Deen & Salah reuses the same fetched times — no second fetch.
+
+## Phase 2 — done (2026-11-19, branch `phase-2-study-planner`)
+
+- Study persistence: `GET/POST/PUT/DELETE /api/study/subjects`, `GET/POST/PUT/PATCH /api/study/tasks/:id/status/DELETE /api/study/tasks`, `GET /api/study/today` (today's tasks + college/study schedule from the profile), `GET /api/study/stats` (today/week focus minutes, tasks completed today, streak, per-subject breakdown).
+- Real Pomodoro: `POST /api/study/pomodoro/start` (409 if a timer is already active), pause/resume/complete/abandon, `GET /api/study/pomodoro/active`, paginated `GET /api/study/pomodoro/history`. The server stores `startedAt` + `pausedTotalMs` and is the source of truth for the countdown, so the timer survives refresh/logout/device change. Abandoned sessions stay in history with 0 minutes earned. Deleting a subject unlinks its tasks (`subjectId` → null) instead of deleting them. Streak rule: a day counts when a focus session finishes OR a task is completed; consecutive days ending today, or yesterday if today has no activity yet.
+- Frontend: API-backed tasks/subjects with a full task modal and subject CRUD, real Pomodoro countdown (focus 25/45/60, break default from onboarding `studyBreakMinutes`), session history, Dashboard study panel and Analytics from real stats, honest "sign in to track" state for guests. The hardcoded subject rows and fake percentages are removed.
+
+## Phase 3 — done (2026-11-19, branch `phase-3-challenges-points`)
+
+- Solo challenges: `GET /api/challenges/templates` (8 built-in templates, one per category, 30-day and 365-day options), `POST /api/challenges` (user-defined, creator auto-joins), `GET /api/challenges/mine`, `GET /api/challenges/:id` (rules + participation + recent days), `POST /:id/join` and `POST /templates/:id/join` (explicit consent required, 409 on duplicate active participation), `POST /:id/leave` (history and earned points kept, no clawback), `POST /:id/check-in` (self-reported days for sleep/Quran/discipline only — labelled as such), `GET /:id/today`. Days complete from real activity only: prayers from SalahDay records (all five prayed or Qaza), study from a completed task or finished focus session, focus from a finished focus session.
+- Server-side points/rewards/badges: `GET /api/rewards/summary`, `GET /api/rewards/history`. Points: +10 finished focus session, +5 completed task, +10 challenge day, +100 (30-day) / +365 (365-day) / +50 (custom) challenge completion. Every award is idempotent via a unique index on (user, ref, reason). Badges: First Focus, 7-Day Study Streak, 30-Day Challenger, 365-Day Challenger. No points per individual prayer.
+- Salah auto-missed: when prayer times load for today, or when a Salah day/calendar is read, any prayer whose deadline + 5-minute grace has passed and is still pending is marked missed and persisted (never assumed prayed). "Today" is computed in the user's profile timezone. Correcting a missed prayer to Qaza (or prayed) keeps `wasMissed` + the original `missedAt`, shown as "Qaza (was missed)". Past dates are only auto-marked inside records that already exist — opening a calendar never backfills whole months.
+- Frontend: real Challenges page (templates with rules + consent, create form, detail view, progress, check-in, leave with rules, history), Dashboard points/badges/active-challenge teaser with a real nav count, Analytics challenge/points section, Salah calendar showing "Missed — auto-marked after deadline" and "Qaza (was missed)".
+
+## Phase 4 — done (2026-11-19, branch `phase-4-friends-notifications`)
+
+- Friends: `GET /api/friends/search?q=` (returns only id + name + initial — never email or profile details), `POST /api/friends/requests` (no self-requests, 409 on duplicate pending or already friends), `GET /api/friends/requests`, `POST /requests/:id/accept|reject|cancel` (only the recipient may accept/reject, only the sender may cancel), `GET /api/friends`, `DELETE /api/friends/:friendId`. A Friendship is created ONLY by accepting a request — never automatically, no special cases for any accounts.
+- Challenge invites: `POST /api/friends/invites` (friend only, inviter must take part, 409 if already taking part or an invite is pending), `GET /api/friends/invites`, `POST /invites/:id/accept` (explicit consent required, joins under the Phase 3 rules) and `POST /invites/:id/decline` (history kept).
+- Shared progress: `GET /api/friends/:friendId/shared-challenges` (friends only) returns, for challenges both take part in, ONLY challenge name, current day/total, completed days, progress and points earned. There is no endpoint that exposes another user's tasks, Salah records, study stats, profile, or points history.
+- Realtime (Socket.IO, same session cookie as REST, one room per user): the server pushes only — `friend_request_received`, `friend_request_accepted`, `challenge_invite_received`, `challenge_invite_response`, `challenge_progress_updated` (shared fields only, to co-participants), `notification_created`. Clients refetch over REST after every event; the app works fully without a socket.
+- Notifications: `GET /api/notifications` (unread first), `GET /api/notifications/unread-count`, `POST /:id/read`, `POST /read-all`, `GET/PUT /api/notifications/settings` (per-category toggles, quiet hours in profile timezone). Created server-side only for real events (friend request/invite, challenge day/completion, badge earned). A switched-off category never creates one; during quiet hours notifications are still stored but not pushed live. There is no scheduled/push reminder system — nothing claims a reminder arrives while the app is closed.
+- Frontend: real Friends page (search, requests, friends list, invites, shared-progress view), a real notification bell (unread badge, panel, mark read / mark all read), socket client that refetches on events, and notification preferences in Profile & settings.
+- Timezone fix: `GET /api/study/today`, `/stats` and the study streak now use the user's profile timezone (new `startOfDayUtc` helper) instead of the server-local date — the Phase 3 leftover is fixed.
+
+## Phase 5 — done (2026-11-19, branch `phase-5-quran-hijri-mosques`)
+
+- Quran browser: `GET /api/quran/surahs` (all 114, public — reading needs no account), `GET /api/quran/surahs/:number` (Arabic + transliteration + translation merged by ayah, with reciter choice), `GET /api/quran/search?q=` (surah name/number matches plus real ayah-text matches from the upstream search endpoint). Arabic is the Tanzil Uthmani text, translation is Saheeh International, transliteration is the `en.transliteration` edition — all from AlQuran Cloud (`api.alquran.cloud/v1`), because the Aladhan Quran endpoints on `api.aladhan.com/v1` return 404 (verified live). The source/edition is shown on every reading view. Upstream failures are 502s, never fabricated text. Bookmarks (`GET/POST/DELETE /api/quran/bookmarks`), reading history and daily target (`GET /api/quran/history`, `POST /api/quran/read`, `PUT /api/quran/target`) are per-user; "ayahs opened today" counts forward progress through a surah only. The 4 curated duas are unchanged and shown as their own section.
+- Recitation audio streams from EveryAyah (`everyayah.com/data/<reciter>/<surah><ayah>.mp3`) with the reciter credited — Mishary Rashid Alafasy, Abdul Basit (Murattal), Mahmoud Khalil Al-Husary, Maher Al-Muaiqly (all four file URLs verified live, HTTP 200 audio/mpeg). The AlQuran Cloud audio CDN returned 403 from the build environment, so it is not used.
+- Hijri calendar: `GET /api/hijri/today` and `GET /api/hijri/month?year=&month=` from Aladhan (`gToHCalendar`, Umm al-Qura), with Ramadan/Eid markers taken only from the upstream per-day holiday lists (verified: 1st Day of Ramadan 08-02-2027, Lailat-ul-Qadr 28-02-2027). `GET/PUT /api/hijri/settings` stores a per-user day adjustment (-2..+2) for local moon-sighting differences; the source and convention are returned with every response and shown in the UI.
+- Mosque finder: `GET /api/mosques/nearby?lat&lng&radiusKm=`, `GET /api/mosques/search?city=`, `GET /api/mosques/near-me` (profile city). Geocoding via Nominatim and mosques via Overpass (`amenity=place_of_worship` + `religion=muslim`), sorted by haversine distance, with a Google Maps directions link. Phone/website appear only when OpenStreetMap tags provide them. Verified live for Pune (Makkah Masjid, Farog E Nabavi Masjid, Sadal Baba, …).
+- Frontend: Guidance is now a real Quran browser (searchable surah list, reader with Arabic + transliteration + translation + audio, bookmarks, reading target/history), with tabs for the curated duas, Hijri calendar and mosque finder. Deen quick tiles open the matching tab; the mood "Open verified reading" button opens Surah Ash-Sharh (94) or the duas tab. Guests can read; bookmarks/history/target need sign-in.
+
 ## Remaining phases
 
-1. Study/task persistence, habit tracking, and analytics derived from saved activity.
-2. Live prayer-time calculation using a verified provider and time-zone handling.
-3. Community challenges with consent, privacy, invites, and ownership checks.
-4. Email verification, password recovery, session cleanup/rotation, and automated security tests.
-5. Verified Quran content workflow with attribution/licensing review.
-6. Capacitor/Kotlin native integrations for notifications and supported focus controls.
+1. Habit tracking and analytics derived from saved Salah/habit activity.
+2. Scholarly review workflow for Quran content (the curated duas keep their existing review-status wording; nothing is labelled reviewed without a real review).
+3. Capacitor/Kotlin native integrations for notifications and supported focus controls.
+
+Phase 6 (security hardening + deployment config) is complete: CSRF double-submit protection, session rotation on login/password change, email verification + password reset (needs SMTP configured — without it the endpoints honestly answer 503), account deletion + data export, vitest unit tests (36 passing), GitHub Actions CI, `DEPLOYMENT.md`, and `docs/ANDROID_EVALUATION.md`. See `DEPLOYMENT.md` for the honest not-yet-production-ready list.
 
 ## Repository hygiene
 
@@ -61,4 +111,4 @@ Never commit `.env` files, database credentials, signing keys, access tokens, re
 ## Backend foundation
 
 A Node.js + Express + TypeScript + MongoDB API starter is in `api/`.
-Read `api/README.md` before running it. The API is staging-only: email verification and password reset are not yet enabled.
+Read `api/README.md` before running it. The API is staging-only: email verification and password reset need SMTP configured (see `api/.env.example`); without it they answer 503 instead of pretending an email was sent.

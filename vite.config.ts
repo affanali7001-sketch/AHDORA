@@ -13,6 +13,12 @@ export default defineConfig({
         target: 'http://127.0.0.1:4000',
         changeOrigin: true,
       },
+      // Socket.IO realtime channel (same API server, same session cookie).
+      '/socket.io': {
+        target: 'http://127.0.0.1:4000',
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
 });
