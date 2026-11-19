@@ -9,6 +9,7 @@ import { authRouter } from './routes/auth.js';
 import { profileRouter } from './routes/profile.js';
 import { requireAuth } from './middleware/auth.js';
 import { salahRouter } from './routes/salah.js';
+import { prayerRouter } from './routes/prayer.js';
 
 export const app = express();
 
@@ -102,6 +103,18 @@ app.use(
     legacyHeaders: false,
   }),
   profileRouter,
+);
+
+app.use(
+  '/api/prayer',
+  requireAuth,
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 60,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  prayerRouter,
 );
 
 app.use((_req, res) => {

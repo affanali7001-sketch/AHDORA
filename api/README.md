@@ -24,12 +24,29 @@ Node.js + Express + TypeScript + MongoDB/Mongoose API starter.
 - `GET /api/salah/day/:date` (authenticated)
 - `PUT /api/salah/day/:date` (authenticated)
 - `GET /api/salah/calendar/:month` (authenticated)
+- `GET /api/prayer/times?date=YYYY-MM-DD` (authenticated, rate limit 60/15 min) — live times from Aladhan for the user's saved city/country/method/Asr school. Returns timings, per-prayer time/deadline/reminder/source (`calculated` or `manual` when a time override is set), Hijri date, and the next prayer. `date` defaults to today.
 
 Sessions use opaque random tokens. Only SHA-256 token hashes are stored in MongoDB; the browser cookie is HttpOnly, SameSite=Lax, and Secure in production. API mutations require the configured exact Origin. CORS is allowlisted. Helmet, JSON body size limits, Zod strict schemas, and auth rate limiting are enabled.
 
-The profile onboarding is a five-step frontend flow. New optional schedule fields are
-backward-compatible with existing profile documents; no existing users or records are
-deleted or migrated destructively.
+The profile onboarding is an eight-step frontend flow (personal, education, college,
+study, location & prayer calculation, individual prayer timings, sleep, review & save).
+New optional fields are backward-compatible with existing profile documents; no existing
+users or records are deleted or migrated destructively.
+
+### Prayer times — method & school mapping
+
+Aladhan `method` is mapped from the saved calculation method name: University of Islamic
+Sciences, Karachi → 1, ISNA → 2, Muslim World League → 3, Umm al-Qura University, Makkah → 4,
+Egyptian General Authority → 5 (default 1). `school` is 1 for Hanafi Asr, 0 for Standard/Shafi.
+A per-prayer `timeOverride` in the profile replaces the calculated time and is marked
+`source: "manual"`; otherwise the source is `calculated`. A per-prayer `endTime` is the
+deadline, otherwise the next prayer's time (Isha: 23:59).
+
+Error cases (no times are ever invented):
+- No city saved → `400 { error: "Add your city in onboarding to see prayer times." }`
+- Bad `date` → `400 { error: "Date must be YYYY-MM-DD" }`
+- Aladhan unreachable, timeout (8s), or incomplete response → `502 { error: "Prayer times could not be loaded from Aladhan. Please try again later." }`
+- Times are not cached in the database.
 
 ## Not production-ready yet
 

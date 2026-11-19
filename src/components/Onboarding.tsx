@@ -1,17 +1,36 @@
 import { useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ArrowLeft, ArrowRight, Moon } from 'lucide-react';
-import type { UserProfile } from '../types/profile';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
+import type { PrayerName, UserProfile } from '../types/profile';
+import { prayerNames, sleepDurationLabel } from '../types/profile';
 
 const logo = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Crect width="64" height="64" rx="16" fill="%23d9b36c"/%3E%3Cpath d="M16 45 32 15l16 30h-8l-3.2-7H27.2L24 45h-8Zm14-14-2.8 6h5.6L30 31Z" fill="%23343d35"/%3E%3C/svg%3E';
 
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const timezones = [
+  'Asia/Kolkata',
+  'Asia/Dubai',
+  'Asia/Karachi',
+  'Asia/Dhaka',
+  'Europe/London',
+  'Europe/Paris',
+  'America/New_York',
+  'America/Chicago',
+  'America/Los_Angeles',
+  'Australia/Sydney',
+];
 
 type Props = {
   user: UserProfile;
   onChange: (user: UserProfile) => void;
   onComplete: () => Promise<void>;
 };
+
+function isValidTime(value: string): boolean {
+  if (!value) return true;
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
+  return Boolean(match);
+}
 
 export default function Onboarding({ user, onChange, onComplete }: Props) {
   const [step, setStep] = useState(0);
@@ -23,15 +42,29 @@ export default function Onboarding({ user, onChange, onComplete }: Props) {
     setError('');
   };
 
+  const updatePrayer = (prayer: PrayerName, field: 'timeOverride' | 'endTime' | 'reminder', value: string | boolean) => {
+    onChange({
+      ...user,
+      prayerSettings: {
+        ...user.prayerSettings,
+        [prayer]: { ...user.prayerSettings[prayer], [field]: value },
+      },
+    });
+    setError('');
+  };
+
   const steps = useMemo(() => [
     { title: 'Personal information', text: 'Your account details are already connected.' },
     { title: 'Education', text: 'Tell us what you are learning.' },
     { title: 'College schedule', text: 'Add the days and hours you are unavailable.' },
     { title: 'Study schedule', text: 'Set a realistic daily learning rhythm.' },
-    { title: 'Prayer and sleep', text: 'Personalise your daily worship and rest settings.' },
+    { title: 'Location & prayer calculation', text: 'Where you are decides your prayer times.' },
+    { title: 'Individual prayer timings', text: 'Adjust each prayer time if you need to.' },
+    { title: 'Sleep schedule', text: 'Plan your rest and focus window.' },
+    { title: 'Review & save', text: 'Check everything, then save to your account.' },
   ], []);
 
-  function validateCurrentStep() {
+  function validateCurrentStep(): string {
     if (step === 1 && (!user.education || !user.course.trim() || !user.semester.trim() || !user.subjects.trim())) {
       return 'Please complete your education details.';
     }
@@ -42,6 +75,19 @@ export default function Onboarding({ user, onChange, onComplete }: Props) {
       return 'Add study hours, a daily target, and preferred study days.';
     }
     if (step === 4 && !user.city.trim()) return 'Please enter your city.';
+    if (step === 5) {
+      for (const prayer of prayerNames) {
+        const setting = user.prayerSettings[prayer];
+        if (!isValidTime(setting.timeOverride ?? '') || !isValidTime(setting.endTime ?? '')) {
+          return `Please use HH:mm times for ${prayer}, or leave them blank.`;
+        }
+      }
+    }
+    if (step === 6) {
+      for (const value of [user.sleepStartTime, user.sleepEndTime, user.focusStartTime ?? '', user.focusEndTime ?? '']) {
+        if (!isValidTime(value)) return 'Please use HH:mm times for sleep and focus, or leave focus blank.';
+      }
+    }
     return '';
   }
 
@@ -79,6 +125,86 @@ export default function Onboarding({ user, onChange, onComplete }: Props) {
     update(field, selected.includes(day) ? selected.filter((item) => item !== day) : [...selected, day]);
   }
 
+  const sleepDuration = sleepDurationLabel(user.sleepStartTime, user.sleepEndTime);
+  const reviewGroups: { label: string; step: number; lines: string[] }[] = [
+    {
+      label: 'Personal information',
+      step: 0,
+      lines: [
+        `${user.name} · ${user.email}`,
+        user.dateOfBirth ? `Date of birth: ${user.dateOfBirth}` : '',
+        user.gender ? `Gender: ${user.gender}` : '',
+        user.profilePictureUrl ? `Photo: ${user.profilePictureUrl}` : '',
+      ].filter(Boolean),
+    },
+    {
+      label: 'Education',
+      step: 1,
+      lines: [
+        [user.education, user.course].filter(Boolean).join(' · '),
+        [user.collegeName, user.classYear, user.semester, user.branch].filter(Boolean).join(' · '),
+        user.subjects ? `Subjects: ${user.subjects}` : '',
+      ].filter(Boolean),
+    },
+    {
+      label: 'College schedule',
+      step: 2,
+      lines: [
+        user.collegeStart && user.collegeEnd ? `${user.collegeStart} – ${user.collegeEnd}` : '',
+        user.collegeDays.length ? `College days: ${user.collegeDays.join(', ')}` : '',
+        user.weeklyOffDays.length ? `Off days: ${user.weeklyOffDays.join(', ')}` : '',
+        user.weekendSchedule ? `Weekend: ${user.weekendSchedule}` : '',
+        user.scheduleNote ? `Note: ${user.scheduleNote}` : '',
+      ].filter(Boolean),
+    },
+    {
+      label: 'Study schedule',
+      step: 3,
+      lines: [
+        user.studyStart && user.studyEnd ? `${user.studyStart} – ${user.studyEnd}` : '',
+        user.dailyStudyTarget ? `Daily target: ${user.dailyStudyTarget}` : '',
+        user.dailyStudyHours ? `Daily hours: ${user.dailyStudyHours}` : '',
+        user.studyBreakMinutes ? `Break: ${user.studyBreakMinutes} min` : '',
+        user.subjectTargets ? `Subject targets: ${user.subjectTargets}` : '',
+        user.preferredStudyDays.length ? `Study days: ${user.preferredStudyDays.join(', ')}` : '',
+      ].filter(Boolean),
+    },
+    {
+      label: 'Location & prayer calculation',
+      step: 4,
+      lines: [
+        [user.city, user.state, user.country].filter(Boolean).join(', '),
+        user.timezone ? `Timezone: ${user.timezone}` : '',
+        `Method: ${user.calculationMethod} · Asr: ${user.asrMethod}`,
+        user.locationPermission ? 'Location permission: on' : 'Location permission: off (manual city)',
+      ].filter(Boolean),
+    },
+    {
+      label: 'Individual prayer timings',
+      step: 5,
+      lines: prayerNames.map((prayer) => {
+        const setting = user.prayerSettings[prayer];
+        const parts = [
+          setting.timeOverride ? `time ${setting.timeOverride}` : 'calculated time',
+          setting.endTime ? `deadline ${setting.endTime}` : '',
+          setting.reminder === false ? 'no reminder' : '',
+        ].filter(Boolean);
+        return `${prayer}: ${parts.join(', ')}`;
+      }),
+    },
+    {
+      label: 'Sleep schedule',
+      step: 6,
+      lines: [
+        user.sleepStartTime && user.sleepEndTime
+          ? `Sleep ${user.sleepStartTime} – ${user.sleepEndTime}${sleepDuration ? ` (${sleepDuration} planned)` : ''}`
+          : '',
+        user.sleepReminder === false ? 'Sleep reminder: off' : 'Sleep reminder: on',
+        user.focusStartTime && user.focusEndTime ? `Focus window: ${user.focusStartTime} – ${user.focusEndTime}` : '',
+      ].filter(Boolean),
+    },
+  ];
+
   return (
     <div className="auth-screen onboarding-screen">
       <div className="auth-card onboarding-card" style={{ maxWidth: 620 }}>
@@ -100,6 +226,12 @@ export default function Onboarding({ user, onChange, onComplete }: Props) {
             <label className="field-label">Email address</label>
             <input className="form-input" value={user.email} readOnly />
             <p className="onboarding-help">These values come from your authenticated account and cannot be changed here.</p>
+            <div className="onboarding-two-col">
+              <div><label className="field-label">Date of birth (optional)</label><input className="form-input" type="date" value={user.dateOfBirth ?? ''} onChange={(e) => update('dateOfBirth', e.target.value)} /></div>
+              <div><label className="field-label">Gender (optional)</label><select className="form-input" value={user.gender ?? ''} onChange={(e) => update('gender', e.target.value as UserProfile['gender'])}><option value="">Prefer not to say</option><option value="female">Female</option><option value="male">Male</option><option value="prefer-not-to-say">Prefer not to say</option></select></div>
+            </div>
+            <label className="field-label">Profile picture URL (optional)</label>
+            <input className="form-input" value={user.profilePictureUrl ?? ''} onChange={(e) => update('profilePictureUrl', e.target.value)} placeholder="https://…" />
           </div>
         )}
 
@@ -136,6 +268,10 @@ export default function Onboarding({ user, onChange, onComplete }: Props) {
             <DayPicker selected={user.collegeDays} onToggle={(day) => toggleDay('collegeDays', day)} />
             <label className="field-label">Weekly off days</label>
             <DayPicker selected={user.weeklyOffDays} onToggle={(day) => toggleDay('weeklyOffDays', day)} />
+            <label className="field-label">Weekend schedule (optional)</label>
+            <input className="form-input" value={user.weekendSchedule ?? ''} onChange={(e) => update('weekendSchedule', e.target.value)} placeholder="e.g. Saturday 09:00–13:00, Sunday off" />
+            <label className="field-label">Schedule note (optional)</label>
+            <textarea className="form-input onboarding-textarea" value={user.scheduleNote ?? ''} onChange={(e) => update('scheduleNote', e.target.value)} placeholder="Different timings on some days, holidays, etc." />
           </div>
         )}
 
@@ -149,6 +285,12 @@ export default function Onboarding({ user, onChange, onComplete }: Props) {
             <select className="form-input" value={user.dailyStudyTarget} onChange={(e) => update('dailyStudyTarget', e.target.value)}>
               <option value="">Select target</option><option>30 minutes</option><option>1 hour</option><option>2 hours</option><option>3 hours</option><option>4+ hours</option>
             </select>
+            <div className="onboarding-two-col">
+              <div><label className="field-label">Daily study hours (optional)</label><input className="form-input" value={user.dailyStudyHours ?? ''} onChange={(e) => update('dailyStudyHours', e.target.value)} placeholder="e.g. 4" /></div>
+              <div><label className="field-label">Break duration in minutes (optional)</label><input className="form-input" inputMode="numeric" value={user.studyBreakMinutes ?? ''} onChange={(e) => update('studyBreakMinutes', e.target.value)} placeholder="e.g. 10" /></div>
+            </div>
+            <label className="field-label">Subject-wise targets (optional)</label>
+            <textarea className="form-input onboarding-textarea" value={user.subjectTargets ?? ''} onChange={(e) => update('subjectTargets', e.target.value)} placeholder="e.g. Maths: 1h, DBMS: 1h" />
             <label className="field-label">Preferred study days</label>
             <DayPicker selected={user.preferredStudyDays} onToggle={(day) => toggleDay('preferredStudyDays', day)} />
           </div>
@@ -156,8 +298,16 @@ export default function Onboarding({ user, onChange, onComplete }: Props) {
 
         {step === 4 && (
           <div>
+            <div className="onboarding-two-col">
+              <div><label className="field-label">Country</label><input className="form-input" value={user.country ?? 'India'} onChange={(e) => update('country', e.target.value)} /></div>
+              <div><label className="field-label">State</label><input className="form-input" value={user.state ?? ''} onChange={(e) => update('state', e.target.value)} placeholder="e.g. Maharashtra" /></div>
+            </div>
             <label className="field-label">Your city</label>
             <input className="form-input" value={user.city} onChange={(e) => update('city', e.target.value)} placeholder="e.g. Pune, Maharashtra" />
+            <label className="field-label">Timezone</label>
+            <select className="form-input" value={user.timezone ?? 'Asia/Kolkata'} onChange={(e) => update('timezone', e.target.value)}>
+              {timezones.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+            </select>
             <label className="field-label">Prayer time calculation method</label>
             <select className="form-input" value={user.calculationMethod} onChange={(e) => update('calculationMethod', e.target.value)}>
               <option>University of Islamic Sciences, Karachi</option><option>Muslim World League</option><option>Egyptian General Authority</option><option>Umm al-Qura University, Makkah</option><option>ISNA</option>
@@ -166,15 +316,71 @@ export default function Onboarding({ user, onChange, onComplete }: Props) {
             <select className="form-input" value={user.asrMethod} onChange={(e) => update('asrMethod', e.target.value)}>
               <option value="Hanafi">Hanafi</option><option value="Shafi">Shafi</option>
             </select>
-            <label className="field-label">Preferred bedtime</label>
-            <div className="sleep-choice-grid">
-              {(['22:00', '23:00'] as const).map((time) => (
-                <label className={`sleep-choice ${user.sleepTime === time ? 'selected' : ''}`} key={time}>
-                  <input type="radio" name="sleepTime" value={time} checked={user.sleepTime === time} onChange={() => update('sleepTime', time)} />
-                  <Moon size={20} /><strong>{time === '22:00' ? '10:00 PM' : '11:00 PM'}</strong><span>Sleep time</span>
-                </label>
-              ))}
+            <label className="field-label">
+              <input type="checkbox" checked={user.locationPermission ?? false} onChange={(e) => update('locationPermission', e.target.checked)} />{' '}
+              Use my device location when available (optional)
+            </label>
+            <p className="onboarding-help">Your city is used to calculate live prayer times. You can also enter it manually.</p>
+          </div>
+        )}
+
+        {step === 5 && (
+          <div>
+            <p className="onboarding-help">Leave a time blank to use the calculated time. A manual time is marked as manual on the prayer screen.</p>
+            {prayerNames.map((prayer) => {
+              const setting = user.prayerSettings[prayer];
+              return (
+                <div key={prayer} style={{ marginBottom: 14 }}>
+                  <label className="field-label">{prayer}</label>
+                  <div className="onboarding-two-col">
+                    <div><label className="field-label">Time override (optional)</label><input className="form-input" type="time" value={setting.timeOverride ?? ''} onChange={(e) => updatePrayer(prayer, 'timeOverride', e.target.value)} /></div>
+                    <div><label className="field-label">Deadline / end time (optional)</label><input className="form-input" type="time" value={setting.endTime ?? ''} onChange={(e) => updatePrayer(prayer, 'endTime', e.target.value)} /></div>
+                  </div>
+                  <label className="field-label">
+                    <input type="checkbox" checked={setting.reminder ?? true} onChange={(e) => updatePrayer(prayer, 'reminder', e.target.checked)} />{' '}
+                    Remind me for {prayer}
+                  </label>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {step === 6 && (
+          <div>
+            <div className="onboarding-two-col">
+              <div><label className="field-label">Sleep starts</label><input className="form-input" type="time" value={user.sleepStartTime} onChange={(e) => update('sleepStartTime', e.target.value)} /></div>
+              <div><label className="field-label">Wake up</label><input className="form-input" type="time" value={user.sleepEndTime} onChange={(e) => update('sleepEndTime', e.target.value)} /></div>
             </div>
+            {sleepDuration && <p className="onboarding-help">Planned sleep window: {sleepDuration}. This is your schedule, not measured sleep.</p>}
+            <div className="onboarding-two-col">
+              <div><label className="field-label">Focus starts (optional)</label><input className="form-input" type="time" value={user.focusStartTime ?? ''} onChange={(e) => update('focusStartTime', e.target.value)} /></div>
+              <div><label className="field-label">Focus ends (optional)</label><input className="form-input" type="time" value={user.focusEndTime ?? ''} onChange={(e) => update('focusEndTime', e.target.value)} /></div>
+            </div>
+            <label className="field-label">
+              <input type="checkbox" checked={user.sleepReminder ?? true} onChange={(e) => update('sleepReminder', e.target.checked)} />{' '}
+              Remind me at sleep time
+            </label>
+            <p className="onboarding-help">Sleep and focus settings are saved to your profile. App blocking is an Android-only feature and is not active on the web.</p>
+          </div>
+        )}
+
+        {step === 7 && (
+          <div>
+            {reviewGroups.map((group) => (
+              <div key={group.label} style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <strong>{group.label}</strong>
+                  <button type="button" className="text-button" onClick={() => { setStep(group.step); setError(''); }}>
+                    Edit <ArrowRight size={13} />
+                  </button>
+                </div>
+                {group.lines.length > 0
+                  ? group.lines.map((line) => <p key={line} className="onboarding-help" style={{ margin: '4px 0' }}>{line}</p>)
+                  : <p className="onboarding-help">Not filled in yet.</p>}
+              </div>
+            ))}
+            <p className="onboarding-help">Confirming saves all of this to your private AHDORA account in MongoDB. You can edit it later from Profile &amp; settings.</p>
           </div>
         )}
 
@@ -182,7 +388,7 @@ export default function Onboarding({ user, onChange, onComplete }: Props) {
         <form onSubmit={step === steps.length - 1 ? submit : next} className="onboarding-actions">
           {step > 0 && <button type="button" className="outline-button" onClick={() => { setStep((current) => current - 1); setError(''); }}><ArrowLeft size={15} /> Back</button>}
           <button type="submit" className="primary-button" disabled={busy}>
-            {busy ? 'Saving profile...' : step === steps.length - 1 ? 'Complete setup' : 'Continue'} <ArrowRight size={16} />
+            {busy ? 'Saving profile...' : step === steps.length - 1 ? 'Confirm & save' : 'Continue'} <ArrowRight size={16} />
           </button>
         </form>
         <p className="onboarding-help">Your profile is saved to your private AHDORA account.</p>

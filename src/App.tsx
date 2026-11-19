@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from 'react';
 import Onboarding from './components/Onboarding';
 import { emptyProfile, type UserProfile } from './types/profile';
 import { loadProfile, saveProfile } from './lib/profileApi';
+import { fetchPrayerTimes, type PrayerTimesResponse } from './lib/prayerApi';
+import { sleepDurationLabel } from './types/profile';
 import type { CSSProperties, ReactNode, FormEvent } from 'react';
 import {
   Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpen, BookMarked,
@@ -59,6 +61,36 @@ const navItems: { id: Page; label: string; icon: IconType; group: string }[] = [
 
 const prayerNames = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 
+function todayKey(): string {
+  const now = new Date();
+  return [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function formatTime12h(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return hhmm;
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
+function countdownTo(time: string, now: Date): string {
+  const [h, m] = time.split(':').map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return '';
+  const target = new Date(now);
+  target.setHours(h, m, 0, 0);
+  const diffMs = target.getTime() - now.getTime();
+  if (diffMs <= 0) return '';
+  const totalMin = Math.floor(diffMs / 60000);
+  const hours = Math.floor(totalMin / 60);
+  const minutes = totalMin % 60;
+  return hours > 0 ? `${hours}h ${minutes}m left` : `${minutes}m left`;
+}
+
 const guidanceCards = [
   { mood: 'Feeling overwhelmed', category: 'Patience & hope', ref: 'Surah Ash-Sharh · 94:5–6', icon: Heart },
   { mood: 'Looking for direction', category: 'Guidance', ref: 'Explore verified guidance', icon: Compass },
@@ -77,7 +109,10 @@ function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [toast, setToast] = useState('');
-  const [prayerDone] = useState<string[]>([]);
+  const [prayerTimes, setPrayerTimes] = useState<PrayerTimesResponse | null>(null);
+  const [prayerStatus, setPrayerStatus] = useState<'idle' | 'loading' | 'loaded' | 'error' | 'no-city'>('idle');
+  const [prayerError, setPrayerError] = useState('');
+  const [salahToday, setSalahToday] = useState<Record<string, { status: string }>>({});
   const [focusEnabled, setFocusEnabled] = useState(true);
   const [youtubeAllowed, setYoutubeAllowed] = useState(true);
   const [showAddTask, setShowAddTask] = useState(false);
@@ -108,6 +143,49 @@ function App() {
       notify(error instanceof Error ? error.message : 'Profile load nahi ho payi.');
     }
   }
+
+  async function refreshSalahToday() {
+    try {
+      const result = await apiRequest<{ date: string; prayers: Record<string, { status: string }> }>(`/api/salah/day/${todayKey()}`);
+      setSalahToday(result.prayers ?? {});
+    } catch {
+      // Dashboard completion stays empty rather than showing invented data.
+      setSalahToday({});
+    }
+  }
+
+  async function loadPrayerTimes() {
+    if (!authUser) return;
+    setPrayerStatus('loading');
+    setPrayerError('');
+    try {
+      const times = await fetchPrayerTimes();
+      setPrayerTimes(times);
+      setPrayerStatus('loaded');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Prayer times could not be loaded.';
+      setPrayerError(message);
+      setPrayerStatus(message.includes('city') ? 'no-city' : 'error');
+      setPrayerTimes(null);
+    }
+    await refreshSalahToday();
+  }
+
+  // Fetch prayer times once the user is in the app (not for guests).
+  useEffect(() => {
+    if (screen === 'app' && authUser && !guestMode && prayerStatus === 'idle') {
+      loadPrayerTimes();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, authUser, guestMode, prayerStatus]);
+
+  // Keep today's Salah completion fresh when the dashboard is shown.
+  useEffect(() => {
+    if (screen === 'app' && authUser && !guestMode && page === 'dashboard') {
+      refreshSalahToday();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
 
   useEffect(() => {
     let active = true;
@@ -175,6 +253,8 @@ function App() {
       const saved = await saveProfile(profileToSave);
       setNewUser(saved);
       setProfileName(authUser.name);
+      setPrayerStatus('idle');
+      setPrayerTimes(null);
       setScreen('app');
       notify('Profile MongoDB API par save ho gayi.');
     } catch (error) {
@@ -194,6 +274,9 @@ function App() {
     setGuestMode(false);
     setProfileName('');
     setNewUser(emptyProfile());
+    setPrayerTimes(null);
+    setPrayerStatus('idle');
+    setSalahToday({});
     setScreen('welcome');
     setPage('dashboard');
   }
@@ -226,12 +309,12 @@ function App() {
         <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{navItems.find((item) => item.id === page)?.label}</strong></div><div className="topbar-actions"><span className="demo-pill"><span />{authUser ? 'SECURE SESSION' : 'GUEST PREVIEW'}</span><button className="icon-button search-trigger" onClick={() => setSearchOpen(!searchOpen)} aria-label="Search"><Search size={18} /></button><button className="icon-button notification-button" onClick={() => notify('You are all caught up.')} aria-label="Notifications"><Bell size={18} /><i /></button><button className="top-avatar" onClick={() => goTo('profile')}>{initials}</button></div></header>
         {searchOpen && <div className="search-popover"><Search size={17} /><input autoFocus placeholder="Search AHDORA pages..." value={query} onChange={(e) => setQuery(e.target.value)} /><button onClick={() => { setQuery(''); setSearchOpen(false); }}><X size={16} /></button><div className="search-results">{filteredNav.map((item) => <button key={item.id} onClick={() => goTo(item.id)}>{item.label}<ArrowUpRight size={14} /></button>)}</div></div>}
         <div className="page-content">
-          {page === 'dashboard' && <Dashboard userName={profileName || 'there'} onNavigate={goTo} prayerDone={prayerDone} onPrayerToggle={() => goTo('deen')} tasks={tasks} />}
-          {page === 'deen' && <Deen onNotify={notify} />}
+          {page === 'dashboard' && <Dashboard userName={profileName || 'there'} onNavigate={goTo} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} onPrayerToggle={() => goTo('deen')} tasks={tasks} />}
+          {page === 'deen' && <Deen onNotify={notify} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} />}
           {page === 'study' && <Study tasks={tasks} onAdd={() => setShowAddTask(true)} onNotify={notify} />}
           {page === 'challenges' && <Challenges onNotify={notify} />}
           {page === 'guidance' && <Guidance onNotify={notify} />}
-          {page === 'focus' && <Focus sleepTime={newUser.sleepTime} focusEnabled={focusEnabled} setFocusEnabled={setFocusEnabled} youtubeAllowed={youtubeAllowed} setYoutubeAllowed={setYoutubeAllowed} onNotify={notify} />}
+          {page === 'focus' && <Focus sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} focusEnabled={focusEnabled} setFocusEnabled={setFocusEnabled} youtubeAllowed={youtubeAllowed} setYoutubeAllowed={setYoutubeAllowed} onNotify={notify} />}
           {page === 'analytics' && <Analytics />}
           {page === 'profile' && <Profile onNotify={notify} user={authUser} guestMode={guestMode} onLogout={handleLogout} />}
         </div>
@@ -532,19 +615,95 @@ function Ring({ value, label, small }: { value: number; label: string; small?: b
   );
 }
 
+function PrayerTimesPanel({
+  prayerTimes,
+  prayerStatus,
+  prayerError,
+}: {
+  prayerTimes: PrayerTimesResponse | null;
+  prayerStatus: 'idle' | 'loading' | 'loaded' | 'error' | 'no-city';
+  prayerError: string;
+}) {
+  if (prayerStatus === 'loading' || prayerStatus === 'idle') {
+    return (
+      <section className="panel prayer-panel">
+        <div className="panel-top"><div><span className="eyebrow">DEEN &amp; SALAH</span><h3>Prayer times</h3></div></div>
+        <p className="onboarding-help">Loading prayer times…</p>
+      </section>
+    );
+  }
+  if (prayerStatus === 'no-city') {
+    return (
+      <section className="panel prayer-panel">
+        <div className="panel-top"><div><span className="eyebrow">DEEN &amp; SALAH</span><h3>Prayer times</h3></div></div>
+        <p className="onboarding-help">Add your city in Profile to see prayer times.</p>
+      </section>
+    );
+  }
+  if (prayerStatus === 'error' || !prayerTimes) {
+    return (
+      <section className="panel prayer-panel">
+        <div className="panel-top"><div><span className="eyebrow">DEEN &amp; SALAH</span><h3>Prayer times</h3></div></div>
+        <p className="onboarding-help">{prayerError || 'Prayer times could not be loaded. Check your connection / city.'}</p>
+      </section>
+    );
+  }
+  return (
+    <section className="panel prayer-panel">
+      <div className="panel-top">
+        <div>
+          <span className="eyebrow">DEEN &amp; SALAH</span>
+          <h3>Prayer times · {prayerTimes.city}</h3>
+        </div>
+        {prayerTimes.hijri?.date && <span className="date-chip small-date">{prayerTimes.hijri.date} {prayerTimes.hijri.month} {prayerTimes.hijri.year}</span>}
+      </div>
+      <div className="prayer-list">
+        {prayerNames.map((name) => (
+          <div className="prayer-item" key={name}>
+            <span>{name}</span>
+            <strong>{formatTime12h(prayerTimes.timings[name as keyof typeof prayerTimes.timings])}</strong>
+            {prayerTimes.perPrayer[name as keyof typeof prayerTimes.perPrayer]?.source === 'manual' && <small>Manual</small>}
+          </div>
+        ))}
+        <div className="prayer-item">
+          <span>Sunrise</span>
+          <strong>{formatTime12h(prayerTimes.timings.Sunrise)}</strong>
+        </div>
+      </div>
+      <div className="demo-caption">Source: Aladhan · {prayerTimes.method} · {prayerTimes.city}</div>
+    </section>
+  );
+}
+
 function Dashboard({
   userName,
   onNavigate,
-  prayerDone,
+  prayerTimes,
+  prayerStatus,
+  prayerError,
+  salahToday,
   onPrayerToggle,
   tasks,
 }: {
   userName: string;
   onNavigate: (page: Page) => void;
-  prayerDone: string[];
+  prayerTimes: PrayerTimesResponse | null;
+  prayerStatus: 'idle' | 'loading' | 'loaded' | 'error' | 'no-city';
+  prayerError: string;
+  salahToday: Record<string, { status: string }>;
   onPrayerToggle: (name: string) => void;
   tasks: { name: string; time: string; status: string; color: string }[];
 }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const prayedNames = prayerNames.filter((name) => salahToday[name]?.status === 'prayed');
+  const prayedCount = prayedNames.length;
+  const completionPct = Math.round((prayedCount / prayerNames.length) * 100);
+  const nextPrayer = prayerTimes?.nextPrayer ?? null;
+  const nextCountdown = nextPrayer ? countdownTo(nextPrayer.time, now) : '';
   const todayLabel = new Date().toLocaleDateString('en-IN', {
     weekday: 'long',
     day: 'numeric',
@@ -611,10 +770,29 @@ function Dashboard({
             <div className="prayer-next-icon"><Moon size={18} /></div>
             <div>
               <small>PRAYER TIMES</small>
-              <strong>Set up your city</strong>
-              <small>Open Deen & Salah to record your prayers.</small>
+              {prayerStatus === 'loaded' && prayerTimes ? (
+                <>
+                  <strong>{nextPrayer ? `Next: ${nextPrayer.name} · ${formatTime12h(nextPrayer.time)}` : 'All prayers passed for today'}</strong>
+                  <small>{nextCountdown || `${prayedCount} of 5 prayed · ${completionPct}%`}</small>
+                </>
+              ) : prayerStatus === 'loading' || prayerStatus === 'idle' ? (
+                <>
+                  <strong>Loading prayer times…</strong>
+                  <small>Open Deen &amp; Salah to record your prayers.</small>
+                </>
+              ) : prayerStatus === 'no-city' ? (
+                <>
+                  <strong>Set up your city</strong>
+                  <small>Add your city in Profile to see prayer times.</small>
+                </>
+              ) : (
+                <>
+                  <strong>Prayer times unavailable</strong>
+                  <small>{prayerError || 'Check your connection / city.'}</small>
+                </>
+              )}
             </div>
-            <div className="prayer-location"><Compass size={13} /> Profile settings</div>
+            <div className="prayer-location"><Compass size={13} /> {prayerTimes?.city ?? 'Profile settings'}</div>
           </div>
           <div className="prayer-list">
             {prayerNames.map((name) => (
@@ -623,15 +801,19 @@ function Dashboard({
                 key={name}
                 onClick={() => onPrayerToggle(name)}
               >
-                <span className={`prayer-check ${prayerDone.includes(name) ? 'checked' : ''}`}>
-                  {prayerDone.includes(name) && <Check size={11} />}
+                <span className={`prayer-check ${prayedNames.includes(name) ? 'checked' : ''}`}>
+                  {prayedNames.includes(name) && <Check size={11} />}
                 </span>
                 <span>{name}</span>
-                <strong>Open tracker</strong>
+                <strong>{prayerStatus === 'loaded' && prayerTimes ? formatTime12h(prayerTimes.timings[name as keyof typeof prayerTimes.timings]) : 'Open tracker'}</strong>
               </button>
             ))}
           </div>
-          <div className="demo-caption">Prayer times are not shown until a verified location provider is configured.</div>
+          {prayerStatus === 'loaded' && prayerTimes ? (
+            <div className="demo-caption">Source: Aladhan · {prayerTimes.method} · {prayerTimes.city} · {prayedCount} of 5 prayed</div>
+          ) : prayerStatus === 'error' ? (
+            <div className="demo-caption">{prayerError || 'Prayer times could not be loaded. Check your connection / city.'}</div>
+          ) : null}
         </section>
 
         <section className="panel study-panel">
@@ -725,7 +907,12 @@ function QuranDuas() {
   );
 }
 
-function Deen({ onNotify }: { onNotify: (message: string) => void }) {
+function Deen({ onNotify, prayerTimes, prayerStatus, prayerError }: {
+  onNotify: (message: string) => void;
+  prayerTimes: PrayerTimesResponse | null;
+  prayerStatus: 'idle' | 'loading' | 'loaded' | 'error' | 'no-city';
+  prayerError: string;
+}) {
   return (
     <>
       <PageHeading
@@ -733,6 +920,8 @@ function Deen({ onNotify }: { onNotify: (message: string) => void }) {
         title="Make room for what matters."
         text="Your personal Salah record and Qur'anic supplications."
       />
+
+      <PrayerTimesPanel prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} />
 
       <SalahTracker onNotify={onNotify} />
 
@@ -1043,22 +1232,25 @@ function Guidance({ onNotify }: { onNotify: (message: string) => void }) {
 }
 
 function Focus({
-  sleepTime,
+  sleepStartTime,
+  sleepEndTime,
   focusEnabled,
   setFocusEnabled,
   youtubeAllowed,
   setYoutubeAllowed,
   onNotify,
 }: {
-  sleepTime: '22:00' | '23:00';
+  sleepStartTime: string;
+  sleepEndTime: string;
   focusEnabled: boolean;
   setFocusEnabled: (value: boolean) => void;
   youtubeAllowed: boolean;
   setYoutubeAllowed: (value: boolean) => void;
   onNotify: (message: string) => void;
 }) {
-  const sleepStart = sleepTime === '22:00' ? '10:00 PM' : '11:00 PM';
-  const sleepEnd = sleepTime === '22:00' ? '04:00 AM' : '05:00 AM';
+  const sleepStart = formatTime12h(sleepStartTime || '22:00');
+  const sleepEnd = formatTime12h(sleepEndTime || '04:00');
+  const sleepDuration = sleepDurationLabel(sleepStartTime || '22:00', sleepEndTime || '04:00');
   const [socialApps, setSocialApps] = useState(['Instagram', 'Facebook', 'Snapchat', 'WhatsApp', 'Telegram', 'X']);
 
   return (
@@ -1095,7 +1287,7 @@ function Focus({
             </div>
             <div className="sleep-duration">
               <div className="sleep-line" />
-              <span>6 hours protected</span>
+              <span>{sleepDuration ? `${sleepDuration} protected` : 'Protected'}</span>
               <div className="sleep-line" />
             </div>
             <div className="sleep-time">

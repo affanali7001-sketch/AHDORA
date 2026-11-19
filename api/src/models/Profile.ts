@@ -1,5 +1,11 @@
 import mongoose, { Schema } from 'mongoose';
 
+const prayerSettingSchema = new Schema({
+  timeOverride: { type: String, trim: true, maxlength: 5, default: '' },
+  endTime: { type: String, trim: true, maxlength: 5, default: '' },
+  reminder: { type: Boolean, default: true },
+}, { _id: false });
+
 const profileSchema = new Schema({
   userId: {
     type: Schema.Types.ObjectId,
@@ -7,6 +13,26 @@ const profileSchema = new Schema({
     required: true,
     unique: true,
     index: true,
+  },
+
+  dateOfBirth: {
+    type: String,
+    trim: true,
+    maxlength: 10,
+    default: '',
+  },
+
+  gender: {
+    type: String,
+    enum: ['', 'female', 'male', 'prefer-not-to-say'],
+    default: '',
+  },
+
+  profilePictureUrl: {
+    type: String,
+    trim: true,
+    maxlength: 500,
+    default: '',
   },
 
   education: {
@@ -82,6 +108,20 @@ const profileSchema = new Schema({
     default: [],
   },
 
+  weekendSchedule: {
+    type: String,
+    trim: true,
+    maxlength: 200,
+    default: '',
+  },
+
+  scheduleNote: {
+    type: String,
+    trim: true,
+    maxlength: 500,
+    default: '',
+  },
+
   studyStartTime: {
     type: String,
     default: '',
@@ -99,9 +139,44 @@ const profileSchema = new Schema({
     default: '',
   },
 
+  dailyStudyHours: {
+    type: String,
+    trim: true,
+    maxlength: 10,
+    default: '',
+  },
+
+  studyBreakMinutes: {
+    type: String,
+    trim: true,
+    maxlength: 10,
+    default: '',
+  },
+
+  subjectTargets: {
+    type: String,
+    trim: true,
+    maxlength: 500,
+    default: '',
+  },
+
   preferredStudyDays: {
     type: [String],
     default: [],
+  },
+
+  country: {
+    type: String,
+    trim: true,
+    maxlength: 100,
+    default: 'India',
+  },
+
+  state: {
+    type: String,
+    trim: true,
+    maxlength: 100,
+    default: '',
   },
 
   city: {
@@ -109,6 +184,18 @@ const profileSchema = new Schema({
     trim: true,
     maxlength: 100,
     default: '',
+  },
+
+  timezone: {
+    type: String,
+    trim: true,
+    maxlength: 60,
+    default: 'Asia/Kolkata',
+  },
+
+  locationPermission: {
+    type: Boolean,
+    default: false,
   },
 
   prayerCalculationMethod: {
@@ -124,6 +211,14 @@ const profileSchema = new Schema({
     default: '',
   },
 
+  prayerSettings: {
+    Fajr: { type: prayerSettingSchema, default: () => ({}) },
+    Dhuhr: { type: prayerSettingSchema, default: () => ({}) },
+    Asr: { type: prayerSettingSchema, default: () => ({}) },
+    Maghrib: { type: prayerSettingSchema, default: () => ({}) },
+    Isha: { type: prayerSettingSchema, default: () => ({}) },
+  },
+
   sleepTime: {
     type: String,
     default: '',
@@ -135,6 +230,21 @@ const profileSchema = new Schema({
   },
 
   sleepEndTime: {
+    type: String,
+    default: '',
+  },
+
+  sleepReminder: {
+    type: Boolean,
+    default: true,
+  },
+
+  focusStartTime: {
+    type: String,
+    default: '',
+  },
+
+  focusEndTime: {
     type: String,
     default: '',
   },
