@@ -1,10 +1,12 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { rateLimit } from 'express-rate-limit';
 
-import { allowedOrigins } from './config.js';
+import { allowedOrigins, isProduction } from './config.js';
 import { authRouter } from './routes/auth.js';
 import { profileRouter } from './routes/profile.js';
 import { requireAuth } from './middleware/auth.js';
@@ -224,6 +226,47 @@ app.use(
   }),
   mosquesRouter,
 );
+
+// Production only: the API also serves the built web app, so the whole
+// product runs on one origin from a single dyno (Heroku) — no CORS
+// problems and cookies just work. Development is untouched: the Vite
+// dev server keeps serving the frontend there.
+// The global helmet CSP above is `default-src 'none'` (API serves JSON
+// only), which would block the SPA's scripts, React inline styles and
+// Google Fonts — so static responses carry their own SPA policy.
+// `../../dist` resolves the same from `api/src/app.ts` (tsx) and from
+// the built `api/dist/app.js` (node): the repo-root web build output.
+if (isProduction) {
+  const webDist = fileURLToPath(new URL('../../dist', import.meta.url));
+  const spaCsp = [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com data:",
+    "img-src 'self' data:",
+    "connect-src 'self' ws: wss:",
+    "base-uri 'none'",
+    "frame-ancestors 'none'",
+  ].join('; ');
+  app.use(express.static(webDist, {
+    index: false,
+    setHeaders(res) {
+      res.setHeader('Content-Security-Policy', spaCsp);
+    },
+  }));
+  // SPA fallback: any GET that is not an API or Socket.IO path serves
+  // the app shell. Unknown /api/* routes still get the JSON 404 below.
+  // `/*splat` alone does not match the bare `/` path in Express 5, so
+  // both are listed explicitly.
+  app.get(['/', '/*splat'], (req, res, next) => {
+    if (req.path.startsWith('/api/') || req.path.startsWith('/socket.io/')) {
+      next();
+      return;
+    }
+    res.setHeader('Content-Security-Policy', spaCsp);
+    res.sendFile(path.join(webDist, 'index.html'));
+  });
+}
 
 app.use((_req, res) => {
   res.status(404).json({
