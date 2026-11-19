@@ -15,10 +15,19 @@ Node.js + Express + TypeScript + MongoDB/Mongoose API starter.
 ## Implemented routes
 
 - `GET /api/health`
+- `GET /api/auth/csrf` — issues the CSRF token (public, before login)
 - `POST /api/auth/signup` (12+ character password, Argon2id, generic duplicate-account response)
-- `POST /api/auth/login` (generic credential failure)
+- `POST /api/auth/login` (generic credential failure; rotates the session — all previous sessions are invalidated)
 - `GET /api/auth/me`
 - `POST /api/auth/logout`
+- `POST /api/auth/verify-email` (authenticated — request a verification email; 503 when SMTP is not configured)
+- `GET /api/auth/verify-email?token=` (confirm a verification link; token is random, stored hashed, single-use, 24 h)
+- `POST /api/auth/forgot-password` (5/15 min; same generic answer for unknown emails; 503 when SMTP is not configured)
+- `POST /api/auth/reset-password` (5/15 min; single-use token, 1 h; invalidates every session)
+- `POST /api/auth/change-password` (authenticated, old password required; rotates the session)
+- `GET /api/auth/sessions`, `DELETE /api/auth/sessions/:id` (authenticated — list and revoke sessions)
+- `GET /api/auth/export` (authenticated — JSON download of the user's own data, no secrets)
+- `DELETE /api/auth/account` (authenticated, password confirmation — deletes the user and all of their data across every collection)
 - `GET /api/profile` (authenticated)
 - `POST /api/profile` (authenticated upsert)
 - `GET /api/salah/day/:date` (authenticated)
@@ -41,7 +50,7 @@ Node.js + Express + TypeScript + MongoDB/Mongoose API starter.
 - Socket.IO on the same server (`/socket.io`, same session cookie, one room per user): pushes `friend_request_received`, `friend_request_accepted`, `challenge_invite_received`, `challenge_invite_response`, `challenge_progress_updated`, `notification_created`. Clients refetch over REST; the app works without a socket.
 - Study dates (`/api/study/today`, `/stats`, streak) use the user's profile timezone, not the server clock.
 
-Sessions use opaque random tokens. Only SHA-256 token hashes are stored in MongoDB; the browser cookie is HttpOnly, SameSite=Lax, and Secure in production. API mutations require the configured exact Origin. CORS is allowlisted. Helmet, JSON body size limits, Zod strict schemas, and auth rate limiting are enabled.
+Sessions use opaque random tokens. Only SHA-256 token hashes are stored in MongoDB; the browser cookie is HttpOnly, SameSite=Lax, and Secure in production. Sessions rotate on login and on password change/reset (all previous sessions are invalidated); expired sessions are pruned lazily (no background scheduler exists). Every state-changing request needs a CSRF token (`X-CSRF-Token` header must equal the `ahdora_csrf` cookie; fetch one from `GET /api/auth/csrf`). CORS is allowlisted from env (`FRONTEND_ORIGIN` + `CORS_ORIGINS`); the Socket.IO handshake checks the origin too. Helmet runs with a strict CSP, JSON body size limits, Zod strict schemas, input sanitisation (MongoDB operator keys stripped), and per-group rate limiting (login/signup/forgot/reset are strictest at 5/15 min). Tests: `npm test` in `api/` (vitest, 36 pure-function unit tests). CI: `.github/workflows/ci.yml` runs typecheck, build and tests on push/PR. See `../DEPLOYMENT.md` for the deployment guide and the honest not-yet-production-ready list.
 
 The profile onboarding is an eight-step frontend flow (personal, education, college,
 study, location & prayer calculation, individual prayer timings, sleep, review & save).

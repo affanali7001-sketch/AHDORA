@@ -1,3 +1,4 @@
+import { apiFetch } from './http.js';
 export type NotificationType =
   | 'prayer'
   | 'study'
@@ -33,7 +34,7 @@ export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
 };
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
+  const response = await apiFetch(path, {
     ...options,
     credentials: 'include',
     headers: {

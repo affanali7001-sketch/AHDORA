@@ -1,3 +1,4 @@
+import { apiFetch } from './http.js';
 export type ChallengeCategory =
   | 'prayers'
   | 'quran'
@@ -76,7 +77,7 @@ export type ChallengeInput = {
 };
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
+  const response = await apiFetch(path, {
     ...options,
     credentials: 'include',
     headers: {

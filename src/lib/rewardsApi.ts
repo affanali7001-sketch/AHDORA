@@ -1,3 +1,4 @@
+import { apiFetch } from './http.js';
 export type Badge = {
   badgeId: string;
   title: string;
@@ -30,7 +31,7 @@ export const POINT_REASON_LABELS: Record<PointTransaction['reason'], string> = {
 };
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
+  const response = await apiFetch(path, {
     ...options,
     credentials: 'include',
     headers: {

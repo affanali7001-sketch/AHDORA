@@ -1,3 +1,4 @@
+import { apiFetch } from './http.js';
 /**
  * Hijri calendar API client. All dates come from Aladhan
  * (Umm al-Qura calendar); the day adjustment is the user's own
@@ -41,7 +42,7 @@ export type HijriMonth = {
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { credentials: 'include', ...init });
+  const response = await apiFetch(path, { credentials: 'include', ...init });
   const data = (await response.json().catch(() => ({}))) as { error?: string } & T;
   if (!response.ok) {
     throw new Error(typeof data.error === 'string' ? data.error : 'Hijri request failed.');

@@ -1,3 +1,4 @@
+import { apiFetch } from './http.js';
 /**
  * Mosque finder API client. All results come from OpenStreetMap
  * (Nominatim + Overpass) via the backend — nothing is invented.
@@ -29,7 +30,7 @@ export type MosqueResult = {
 };
 
 async function request<T>(path: string): Promise<T> {
-  const response = await fetch(path, { credentials: 'include' });
+  const response = await apiFetch(path, { credentials: 'include' });
   const data = (await response.json().catch(() => ({}))) as { error?: string } & T;
   if (!response.ok) {
     throw new Error(typeof data.error === 'string' ? data.error : 'Mosque search failed.');

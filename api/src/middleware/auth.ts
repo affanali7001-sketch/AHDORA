@@ -4,7 +4,7 @@ import { resolveSessionUser } from '../lib/session.js';
 
 declare global {
   namespace Express {
-    interface Request { authUser?: { id: string; name: string; email: string; role: string } }
+    interface Request { authUser?: { id: string; name: string; email: string; emailVerified: boolean; role: string } }
   }
 }
 

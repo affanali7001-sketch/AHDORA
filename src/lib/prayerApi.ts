@@ -1,3 +1,4 @@
+import { apiFetch } from './http.js';
 export type PrayerName = 'Fajr' | 'Dhuhr' | 'Asr' | 'Maghrib' | 'Isha';
 
 export type PrayerTimesResponse = {
@@ -18,7 +19,7 @@ export type PrayerTimesResponse = {
 
 export async function fetchPrayerTimes(date?: string): Promise<PrayerTimesResponse> {
   const query = date ? `?date=${encodeURIComponent(date)}` : '';
-  const response = await fetch(`/api/prayer/times${query}`, {
+  const response = await apiFetch(`/api/prayer/times${query}`, {
     credentials: 'include',
   });
   const data = await response.json().catch(() => ({}));

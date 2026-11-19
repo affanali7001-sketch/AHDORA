@@ -34,8 +34,7 @@ there is no endpoint that adds arbitrary points, and no points are awarded per i
 Sleep, Quran and discipline challenge days are completed by an honest self-reported check-in,
 labelled as self-reported everywhere, because no reliable measured source exists for them yet.
 Do not use the staging deployment for
-production accounts until email verification, password recovery, monitoring, and security tests
-are complete.
+production accounts until real MongoDB manual testing, real SMTP delivery, monitoring, and a green CI run are complete (see `DEPLOYMENT.md`).
 
 Focus settings are visual preferences only until the native Android layer is implemented and tested.
 
@@ -100,9 +99,10 @@ npm run preview
 ## Remaining phases
 
 1. Habit tracking and analytics derived from saved Salah/habit activity.
-2. Email verification, password recovery, session cleanup/rotation, and automated security tests.
-3. Scholarly review workflow for Quran content (the curated duas keep their existing review-status wording; nothing is labelled reviewed without a real review).
-4. Capacitor/Kotlin native integrations for notifications and supported focus controls.
+2. Scholarly review workflow for Quran content (the curated duas keep their existing review-status wording; nothing is labelled reviewed without a real review).
+3. Capacitor/Kotlin native integrations for notifications and supported focus controls.
+
+Phase 6 (security hardening + deployment config) is complete: CSRF double-submit protection, session rotation on login/password change, email verification + password reset (needs SMTP configured — without it the endpoints honestly answer 503), account deletion + data export, vitest unit tests (36 passing), GitHub Actions CI, `DEPLOYMENT.md`, and `docs/ANDROID_EVALUATION.md`. See `DEPLOYMENT.md` for the honest not-yet-production-ready list.
 
 ## Repository hygiene
 
@@ -111,4 +111,4 @@ Never commit `.env` files, database credentials, signing keys, access tokens, re
 ## Backend foundation
 
 A Node.js + Express + TypeScript + MongoDB API starter is in `api/`.
-Read `api/README.md` before running it. The API is staging-only: email verification and password reset are not yet enabled.
+Read `api/README.md` before running it. The API is staging-only: email verification and password reset need SMTP configured (see `api/.env.example`); without it they answer 503 instead of pretending an email was sent.

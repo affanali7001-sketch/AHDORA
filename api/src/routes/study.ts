@@ -6,6 +6,7 @@ import { createNotification } from '../lib/notifications.js';
 import { refreshChallengeProgress, userTimezone } from '../lib/challengeProgress.js';
 import { awardBadge, awardPoints, POINT_VALUES } from '../lib/points.js';
 import { addDays, dateKeyInTimezone, startOfDayUtc } from '../lib/timezone.js';
+import { computeStreakFromDayKeys } from '../lib/streak.js';
 import { Profile } from '../models/Profile.js';
 import { StudySubject, subjectColours } from '../models/StudySubject.js';
 import { StudyTask, taskPriorities, taskStatuses } from '../models/StudyTask.js';
@@ -188,18 +189,7 @@ async function computeStreak(userId: string): Promise<number> {
   for (const t of tasks) activeDays.add(dateKeyOf(t.completedAt, timezone) ?? '');
   activeDays.delete('');
 
-  const today = dateKeyInTimezone(timezone);
-  if (activeDays.size === 0) return 0;
-
-  let cursor = activeDays.has(today) ? today : addDays(today, -1);
-  if (!activeDays.has(cursor)) return 0;
-
-  let streak = 0;
-  while (activeDays.has(cursor)) {
-    streak++;
-    cursor = addDays(cursor, -1);
-  }
-  return streak;
+  return computeStreakFromDayKeys(activeDays, dateKeyInTimezone(timezone));
 }
 
 /**

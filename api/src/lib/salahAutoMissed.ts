@@ -70,6 +70,31 @@ export function profileDeadlines(
   return out;
 }
 
+/**
+ * Pure deadline check (unit-tested): which prayers are past
+ * deadline + grace? For a past date every prayer is past. For today,
+ * a prayer is past when now (minutes since midnight, in the user's
+ * timezone) is beyond deadline + MISSED_GRACE_MINUTES. Prayers
+ * without a known deadline are never marked.
+ */
+export function prayersPastDeadline(
+  deadlines: Partial<Record<PrayerName, string>>,
+  nowMinutes: number | null,
+  isPastDate: boolean,
+): PrayerName[] {
+  if (isPastDate) return [...PRAYER_NAMES];
+  if (nowMinutes === null) return [];
+  const past: PrayerName[] = [];
+  for (const prayer of PRAYER_NAMES) {
+    const deadline = deadlines[prayer];
+    const deadlineMinutes = deadline ? toMinutes(deadline) : null;
+    if (deadlineMinutes !== null && nowMinutes > deadlineMinutes + MISSED_GRACE_MINUTES) {
+      past.push(prayer);
+    }
+  }
+  return past;
+}
+
 function markMissed(
   prayers: Record<PrayerName, PrayerEntry>,
   prayer: PrayerName,
@@ -104,7 +129,7 @@ export async function recomputeDay(
     profile?: any;
   },
 ): Promise<SalahDayDoc | null> {
-  const { timezone, deadlines } = options;
+  const { timezone } = options;
   const today = dateKeyInTimezone(timezone);
   if (dateKey > today) return null;
 
@@ -113,22 +138,11 @@ export async function recomputeDay(
   const isPast = dateKey < today;
 
   // Which prayers are past deadline + grace?
-  const pastDeadline: PrayerName[] = [];
-  if (isPast) {
-    pastDeadline.push(...PRAYER_NAMES);
-  } else if (nowMinutes !== null) {
-    const effective: Partial<Record<PrayerName, string>> = {
-      ...profileDeadlines(options.profile ?? null),
-      ...(deadlines ?? {}),
-    };
-    for (const prayer of PRAYER_NAMES) {
-      const deadline = effective[prayer];
-      const deadlineMinutes = deadline ? toMinutes(deadline) : null;
-      if (deadlineMinutes !== null && nowMinutes > deadlineMinutes + MISSED_GRACE_MINUTES) {
-        pastDeadline.push(prayer);
-      }
-    }
-  }
+  const effective: Partial<Record<PrayerName, string>> = {
+    ...profileDeadlines(options.profile ?? null),
+    ...(options.deadlines ?? {}),
+  };
+  const pastDeadline = prayersPastDeadline(effective, nowMinutes, isPast);
   if (pastDeadline.length === 0) return null;
 
   const existing = (await SalahDay.findOne({ userId, date: dateKey }).lean()) as unknown as SalahDayDoc | null;

@@ -5,6 +5,7 @@ import CuratedDuas from './components/QuranDuas';
 import QuranBrowser from './components/QuranBrowser';
 import HijriCalendar from './components/HijriCalendar';
 import MosqueFinder from './components/MosqueFinder';
+import SecuritySettings from './components/SecuritySettings';
 import { connectSocket, disconnectSocket } from './lib/socket';
 import {
   fetchNotifications,
@@ -66,6 +67,7 @@ import {
   POINT_REASON_LABELS,
   type RewardsSummary,
 } from './lib/rewardsApi';
+import { apiFetch, clearCsrfToken } from './lib/http.js';
 import type { CSSProperties, ReactNode, FormEvent } from 'react';
 import {
   Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpen, BookMarked,
@@ -77,11 +79,11 @@ import {
 
 const logo = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Crect width="64" height="64" rx="16" fill="%23d9b36c"/%3E%3Cpath d="M16 45 32 15l16 30h-8l-3.2-7H27.2L24 45h-8Zm14-14-2.8 6h5.6L30 31Z" fill="%23343d35"/%3E%3C/svg%3E';
 
-type AuthUser = { id: string; name: string; email: string; role: string };
+type AuthUser = { id: string; name: string; email: string; emailVerified: boolean; role: string };
 type ApiResponse<T> = T;
 
 async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
-  const response = await fetch(path, {
+  const response = await apiFetch(path, {
     ...options,
     credentials: 'include',
     headers: {
@@ -163,7 +165,8 @@ const guidanceCards = [
 ];
 
 function App() {
-  const [screen, setScreen] = useState<'checking' | 'welcome' | 'login' | 'onboarding' | 'app'>('checking');
+  const [screen, setScreen] = useState<'checking' | 'welcome' | 'login' | 'forgot' | 'reset' | 'onboarding' | 'app'>('checking');
+  const [resetToken, setResetToken] = useState('');
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [guestMode, setGuestMode] = useState(false);
   const [page, setPage] = useState<Page>('dashboard');
@@ -393,6 +396,29 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, authUser, guestMode]);
 
+  // Email links land here: ?verifyToken= confirms verification,
+  // ?resetToken= opens the reset-password screen. The token is
+  // removed from the URL once handled.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const verifyToken = params.get('verifyToken') ?? '';
+    const token = params.get('resetToken') ?? '';
+    if (verifyToken) {
+      window.history.replaceState({}, '', window.location.pathname);
+      apiRequest<{ verified: boolean }>(`/api/auth/verify-email?token=${encodeURIComponent(verifyToken)}`)
+        .then(() => {
+          notify('Email verified. Welcome to AHDORA.');
+          setAuthUser((current) => (current ? { ...current, emailVerified: true } : current));
+        })
+        .catch((err) => notify(err instanceof Error ? err.message : 'Verification link did not work.'));
+    } else if (token) {
+      window.history.replaceState({}, '', window.location.pathname);
+      setResetToken(token);
+      setScreen('reset');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     let active = true;
     apiRequest<{ user: AuthUser }>('/api/auth/me')
@@ -482,6 +508,7 @@ function App() {
       notify(error instanceof Error ? error.message : 'Logout nahi ho paya. Dobara try karo.');
       return;
     }
+    clearCsrfToken();
     setAuthUser(null);
     setGuestMode(false);
     setProfileName('');
@@ -510,6 +537,31 @@ function App() {
     setPage('dashboard');
   }
 
+  function handleAccountDeleted() {
+    clearCsrfToken();
+    setAuthUser(null);
+    setGuestMode(false);
+    setProfileName('');
+    setNewUser(emptyProfile());
+    setScreen('welcome');
+    setPage('dashboard');
+    notify('Your account and all its data were deleted.');
+  }
+
+  async function handleResendVerification() {
+    try {
+      const result = await apiRequest<{ sent?: boolean; alreadyVerified?: boolean }>('/api/auth/verify-email', { method: 'POST' });
+      if (result.alreadyVerified) {
+        setAuthUser((current) => (current ? { ...current, emailVerified: true } : current));
+        notify('Your email is already verified.');
+      } else {
+        notify('Verification email sent. Check your inbox.');
+      }
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not send the verification email.');
+    }
+  }
+
   const displayName = authUser?.name || profileName || 'Guest';
   const initials = displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0].toUpperCase()).join('') || 'AH';
 
@@ -520,7 +572,13 @@ function App() {
     return <Welcome onContinue={() => setScreen('login')} onExplore={() => { setGuestMode(true); setProfileName('Guest'); setScreen('app'); }} />;
   }
   if (screen === 'login') {
-    return <Login onBack={() => setScreen('welcome')} onLogin={handleLogin} onSignup={handleSignup} />;
+    return <Login onBack={() => setScreen('welcome')} onLogin={handleLogin} onSignup={handleSignup} onForgot={() => setScreen('forgot')} />;
+  }
+  if (screen === 'forgot') {
+    return <ForgotPassword onBack={() => setScreen('login')} onSent={() => notify('If an account exists for this email, a reset link has been sent.')} />;
+  }
+  if (screen === 'reset') {
+    return <ResetPassword token={resetToken} onDone={() => { setResetToken(''); setScreen('login'); notify('Password reset. Please log in with your new password.'); }} onBack={() => { setResetToken(''); setScreen('login'); }} />;
   }
   if (screen === 'onboarding') {
     return <Onboarding user={newUser} onChange={setNewUser} onComplete={handleOnboardingComplete} />;
@@ -537,6 +595,13 @@ function App() {
       <main className="main-area">
         <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{navItems.find((item) => item.id === page)?.label}</strong></div><div className="topbar-actions"><span className="demo-pill"><span />{authUser ? 'SECURE SESSION' : 'GUEST PREVIEW'}</span><button className="icon-button search-trigger" onClick={() => setSearchOpen(!searchOpen)} aria-label="Search"><Search size={18} /></button><div className="notification-wrap"><button className="icon-button notification-button" onClick={() => { setNotifOpen((open) => !open); if (!notifOpen) refreshNotifications(); }} aria-label="Notifications"><Bell size={18} />{unreadCount > 0 && <span className="notification-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}</button>{notifOpen && <div className="notification-panel"><div className="notification-panel-head"><strong>Notifications</strong>{unreadCount > 0 && <button onClick={async () => { try { await markAllNotificationsRead(); await refreshNotifications(); } catch { notify('Could not mark all as read.'); } }}>Mark all read</button>}</div>{!authUser || guestMode ? <p className="onboarding-help">Sign in to see your notifications.</p> : notifications.length === 0 ? <p className="onboarding-help">No notifications yet. Friend requests, challenge invitations and badges will appear here.</p> : <div className="notification-list">{notifications.map((item) => <button key={item.id} className={`notification-item ${item.read ? 'notification-read' : ''}`} onClick={async () => { if (!item.read) { try { await markNotificationRead(item.id); await refreshNotifications(); } catch { notify('Could not mark as read.'); } } }}><span className="notification-dot" /><span><strong>{item.title}</strong><small>{item.body}</small><small>{new Date(item.createdAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></span></button>)}</div>}</div>}</div><button className="top-avatar" onClick={() => goTo('profile')}>{initials}</button></div></header>
         {searchOpen && <div className="search-popover"><Search size={17} /><input autoFocus placeholder="Search AHDORA pages..." value={query} onChange={(e) => setQuery(e.target.value)} /><button onClick={() => { setQuery(''); setSearchOpen(false); }}><X size={16} /></button><div className="search-results">{filteredNav.map((item) => <button key={item.id} onClick={() => goTo(item.id)}>{item.label}<ArrowUpRight size={14} /></button>)}</div></div>}
+        {authUser && !authUser.emailVerified && !guestMode && (
+          <div className="verify-banner">
+            <Shield size={16} />
+            <span>Your email is not verified yet. Some account features need verification.</span>
+            <button className="text-button" onClick={handleResendVerification}>Resend verification email</button>
+          </div>
+        )}
         <div className="page-content">
           {page === 'dashboard' && <Dashboard userName={profileName || 'there'} onNavigate={goTo} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} onPrayerToggle={() => goTo('deen')} subjects={subjects} todayTasks={todayTasks} studyStats={studyStats} guestMode={guestMode} activeChallenges={activeChallenges} rewards={rewards} />}
           {page === 'deen' && <Deen onNotify={notify} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} onOpenGuidance={goToGuidance} />}
@@ -546,7 +611,7 @@ function App() {
           {page === 'guidance' && <Guidance onNotify={notify} tab={guidanceTab} onTabChange={setGuidanceTab} guestMode={guestMode} profileCity={newUser.city} initialSurah={guidanceSurah} onInitialSurahOpened={() => setGuidanceSurah(null)} onOpenSurah={(surahNumber) => goToGuidance('quran', surahNumber)} />}
           {page === 'focus' && <Focus sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} focusEnabled={focusEnabled} setFocusEnabled={setFocusEnabled} youtubeAllowed={youtubeAllowed} setYoutubeAllowed={setYoutubeAllowed} onNotify={notify} />}
           {page === 'analytics' && <Analytics stats={studyStats} guestMode={guestMode} rewards={rewards} activeChallenges={activeChallenges} challengeHistory={challengeHistory} />}
-          {page === 'profile' && <Profile onNotify={notify} user={authUser} guestMode={guestMode} onLogout={handleLogout} />}
+          {page === 'profile' && <Profile onNotify={notify} user={authUser} guestMode={guestMode} onLogout={handleLogout} onAccountDeleted={handleAccountDeleted} />}
         </div>
         <footer className="app-footer"><span>© 2026 AHDORA</span><span>Built around what matters.</span><button onClick={() => notify('Help centre will be connected in a later phase.')}><CircleHelp size={14} /> Help & feedback</button></footer>
       </main>
@@ -652,10 +717,12 @@ function Login({
   onBack,
   onLogin,
   onSignup,
+  onForgot,
 }: {
   onBack: () => void;
   onLogin: (email: string, password: string) => Promise<void>;
   onSignup: (user: { name: string; email: string; password: string }) => Promise<void>;
+  onForgot: () => void;
 }) {
   const [tab, setTab] = useState<'login' | 'signup'>('login');
   const [name, setName] = useState('');
@@ -788,14 +855,175 @@ function Login({
           </button>
         </form>
 
+        {tab === 'login' && (
+          <button type="button" className="text-button" onClick={onForgot} style={{ marginTop: 12 }}>
+            Forgot your password?
+          </button>
+        )}
+
         <div className="auth-notice">
           <Shield size={15} />
           <span>
-            Secure session is handled by the AHDORA API. Use a unique password. Email verification is not enabled yet, so this is still a development-stage account flow.
+            Secure session is handled by the AHDORA API. Use a unique password. Email verification is available once email sending is set up on the server — until then the app will tell you it is not configured.
           </span>
         </div>
       </div>
 
+      <div className="auth-bottom">AHDORA <span>·</span> Deen, Ilm & Discipline</div>
+    </div>
+  );
+}
+
+function ForgotPassword({ onBack, onSent }: { onBack: () => void; onSent: () => void }) {
+  const [email, setEmail] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (busy || !email.trim()) return;
+    setError('');
+    setBusy(true);
+    try {
+      await apiRequest<{ sent: boolean }>('/api/auth/forgot-password', {
+        method: 'POST',
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      setDone(true);
+      onSent();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not send the reset email.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="auth-screen">
+      <button className="back-link" onClick={onBack}>
+        <ArrowRight className="back-arrow" size={16} /> Back to log in
+      </button>
+      <div className="auth-card">
+        <div className="auth-brand">
+          <img src={logo} alt="AHDORA" />
+          <span>AHDORA</span>
+        </div>
+        <div className="auth-heading">
+          <span className="eyebrow">RESET PASSWORD</span>
+          <h1>Forgot your password?</h1>
+          <p>Enter your email and we will send a reset link (valid for 1 hour).</p>
+        </div>
+        {done ? (
+          <p className="onboarding-help">If an account exists for this email, a reset link has been sent. Check your inbox.</p>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            <label className="field-label">Email address</label>
+            <input
+              className="form-input"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              autoComplete="email"
+              required
+            />
+            {error && <p style={{ color: '#c45b52', fontSize: 13, marginTop: 12 }}>{error}</p>}
+            <button type="submit" className="primary-button full-width" disabled={busy}>
+              {busy ? 'Please wait...' : 'Send reset link'}
+              <ArrowRight size={16} />
+            </button>
+          </form>
+        )}
+        <div className="auth-notice">
+          <Shield size={15} />
+          <span>If email sending is not set up on this server yet, you will see a clear message instead of a fake confirmation.</span>
+        </div>
+      </div>
+      <div className="auth-bottom">AHDORA <span>·</span> Deen, Ilm & Discipline</div>
+    </div>
+  );
+}
+
+function ResetPassword({ token, onDone, onBack }: { token: string; onDone: () => void; onBack: () => void }) {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (busy) return;
+    setError('');
+    if (password.length < 12) {
+      setError('Password kam se kam 12 characters ka rakho.');
+      return;
+    }
+    if (password !== confirm) {
+      setError('Passwords do not match.');
+      return;
+    }
+    if (!token) {
+      setError('This reset link is missing its token.');
+      return;
+    }
+    setBusy(true);
+    try {
+      await apiRequest<{ reset: boolean }>('/api/auth/reset-password', {
+        method: 'POST',
+        body: JSON.stringify({ token, password }),
+      });
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Password reset nahi ho paya.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="auth-screen">
+      <button className="back-link" onClick={onBack}>
+        <ArrowRight className="back-arrow" size={16} /> Back to log in
+      </button>
+      <div className="auth-card">
+        <div className="auth-brand">
+          <img src={logo} alt="AHDORA" />
+          <span>AHDORA</span>
+        </div>
+        <div className="auth-heading">
+          <span className="eyebrow">RESET PASSWORD</span>
+          <h1>Choose a new password.</h1>
+          <p>Your reset link is valid for 1 hour and can be used only once.</p>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <label className="field-label">New password</label>
+          <input
+            className="form-input"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Minimum 12 characters"
+            autoComplete="new-password"
+            required
+          />
+          <label className="field-label">Confirm new password</label>
+          <input
+            className="form-input"
+            type="password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            placeholder="Repeat the new password"
+            autoComplete="new-password"
+            required
+          />
+          {error && <p style={{ color: '#c45b52', fontSize: 13, marginTop: 12 }}>{error}</p>}
+          <button type="submit" className="primary-button full-width" disabled={busy}>
+            {busy ? 'Please wait...' : 'Reset password'}
+            <ArrowRight size={16} />
+          </button>
+        </form>
+      </div>
       <div className="auth-bottom">AHDORA <span>·</span> Deen, Ilm & Discipline</div>
     </div>
   );
@@ -2975,11 +3203,13 @@ function Profile({
   user,
   guestMode,
   onLogout,
+  onAccountDeleted,
 }: {
   onNotify: (message: string) => void;
   user: AuthUser | null;
   guestMode: boolean;
   onLogout: () => void;
+  onAccountDeleted: () => void;
 }) {
   const displayName = user?.name || (guestMode ? 'Guest preview' : 'Your account');
   const initials = displayName
@@ -2989,6 +3219,7 @@ function Profile({
     .map((part) => part[0].toUpperCase())
     .join('') || 'AH';
   const [showNotifSettings, setShowNotifSettings] = useState(false);
+  const [showSecurity, setShowSecurity] = useState(false);
 
   return (
     <>
@@ -3045,9 +3276,15 @@ function Profile({
           <SettingRow
             icon={Shield}
             title="Privacy & security"
-            detail="Sessions, devices and data controls"
-            onClick={() => onNotify('Session security is handled by the backend. More controls are planned.')}
+            detail="Password, sessions, data export and account deletion"
+            onClick={() => setShowSecurity((open) => !open)}
           />
+          {showSecurity && !guestMode && user && (
+            <SecuritySettings onNotify={onNotify} emailVerified={user.emailVerified} onAccountDeleted={onAccountDeleted} />
+          )}
+          {showSecurity && guestMode && (
+            <p className="onboarding-help">Sign in to change security settings.</p>
+          )}
           <SettingRow
             icon={CircleHelp}
             title="Help & support"
