@@ -13,6 +13,8 @@ import {
   isDuplicateKeyError,
   type BadgeId,
 } from './points.js';
+import { createNotification } from './notifications.js';
+import { emitToUsers } from './realtime.js';
 import {
   addDays,
   dateKeyInTimezone,
@@ -191,6 +193,43 @@ async function refreshParticipantCounters(
 }
 
 /**
+ * Push a progress update to the OTHER people taking part in the same
+ * challenge. The payload carries ONLY the shared fields friends are
+ * allowed to see: challenge name, current day / total, completed days
+ * and points earned. No tasks, Salah records, or other private data
+ * ever travels over the socket.
+ */
+async function emitProgressUpdate(
+  participant: ParticipantDoc,
+  challenge: ChallengeDoc,
+  timezone: string,
+  todayKey: string,
+): Promise<void> {
+  try {
+    const others = await ChallengeParticipant.find({
+      challengeId: participant.challengeId,
+      userId: { $ne: participant.userId },
+      status: { $in: ['active', 'completed'] },
+    }).select('userId').lean();
+    if (others.length === 0) return;
+    const fresh = (await ChallengeParticipant.findById(participant._id).lean()) as unknown as ParticipantDoc | null;
+    const current = fresh ?? participant;
+    const userIds = others.map((o) => String(o.userId));
+    emitToUsers(userIds, 'challenge_progress_updated', {
+      challengeId: String(challenge._id),
+      challengeTitle: challenge.title,
+      userId: String(participant.userId),
+      currentDay: currentDayFor(current, challenge, todayKey, timezone),
+      totalDays: challenge.durationDays,
+      completedDays: current.completedDays,
+      pointsEarned: current.pointsEarned,
+    });
+  } catch {
+    // A failed push must never break the progress update itself.
+  }
+}
+
+/**
  * Mark one day completed and handle everything that follows: points for
  * the day, counters, and — when the last day is done — challenge
  * completion with its bonus points and badge. Idempotent: calling it
@@ -242,6 +281,17 @@ export async function completeDay(
     $inc: { pointsEarned: dayPoints },
   });
 
+  // Co-participants see only the shared progress fields (see
+  // emitProgressUpdate), and the user gets a real in-app notification.
+  await emitProgressUpdate(participant, challenge, timezone, dateKey);
+  await createNotification(String(participant.userId), {
+    type: 'challenge',
+    title: 'Challenge day completed',
+    body: `Day ${dayNumber} of ${challenge.durationDays} done in "${challenge.title}". +10 points.`,
+    refType: 'Challenge',
+    refId: String(challenge._id),
+  });
+
   if (completedDays < challenge.durationDays) {
     return { newlyCompleted: true, challengeCompleted: false };
   }
@@ -271,6 +321,23 @@ export async function completeDay(
       $inc: { pointsEarned: bonusPoints },
     },
   );
+  await createNotification(String(participant.userId), {
+    type: 'challenge',
+    title: 'Challenge completed',
+    body: `You finished "${challenge.title}" — ${challenge.durationDays} days. +${bonus} bonus points${badge ? ' and a new badge' : ''}.`,
+    refType: 'Challenge',
+    refId: String(challenge._id),
+  });
+  if (badge) {
+    await createNotification(String(participant.userId), {
+      type: 'challenge',
+      title: 'Badge earned',
+      body: `You earned the ${badge === 'challenge-365' ? '365-Day Challenger' : '30-Day Challenger'} badge.`,
+      refType: 'Badge',
+      refId: badge,
+    });
+  }
+  await emitProgressUpdate(participant, challenge, timezone, dateKey);
   return { newlyCompleted: true, challengeCompleted: true };
 }
 

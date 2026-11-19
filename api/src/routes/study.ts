@@ -2,9 +2,10 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.js';
+import { createNotification } from '../lib/notifications.js';
 import { refreshChallengeProgress, userTimezone } from '../lib/challengeProgress.js';
 import { awardBadge, awardPoints, POINT_VALUES } from '../lib/points.js';
-import { dateKeyInTimezone } from '../lib/timezone.js';
+import { addDays, dateKeyInTimezone, startOfDayUtc } from '../lib/timezone.js';
 import { Profile } from '../models/Profile.js';
 import { StudySubject, subjectColours } from '../models/StudySubject.js';
 import { StudyTask, taskPriorities, taskStatuses } from '../models/StudyTask.js';
@@ -18,24 +19,15 @@ studyRouter.use(requireAuth);
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-/** Server-local YYYY-MM-DD, same convention as the Salah routes. */
-function todayKey(date = new Date()): string {
-  return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, '0'),
-    String(date.getDate()).padStart(2, '0'),
-  ].join('-');
-}
-
-function dateKeyOf(value: Date | null | undefined): string | null {
+/**
+ * A user's "today" is their profile timezone (default Asia/Kolkata),
+ * NOT the server's local clock. The old server-local helpers were
+ * removed in Phase 4; every date here goes through dateKeyInTimezone
+ * / startOfDayUtc with the caller's timezone.
+ */
+function dateKeyOf(value: Date | null | undefined, timezone: string): string | null {
   if (!value) return null;
-  return todayKey(new Date(value));
-}
-
-function startOfDay(date: Date): Date {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
+  return dateKeyInTimezone(timezone, new Date(value));
 }
 
 function isObjectId(value: unknown): value is string {
@@ -178,6 +170,7 @@ function compareTasks(a: TaskDoc, b: TaskDoc): number {
  * yesterday, if today has no activity yet.
  */
 async function computeStreak(userId: string): Promise<number> {
+  const timezone = await userTimezone(userId);
   const sessions = await PomodoroSession.find({
     userId,
     status: 'completed',
@@ -191,21 +184,20 @@ async function computeStreak(userId: string): Promise<number> {
   }).select('completedAt').lean();
 
   const activeDays = new Set<string>();
-  for (const s of sessions) activeDays.add(dateKeyOf(s.completedAt) ?? '');
-  for (const t of tasks) activeDays.add(dateKeyOf(t.completedAt) ?? '');
+  for (const s of sessions) activeDays.add(dateKeyOf(s.completedAt, timezone) ?? '');
+  for (const t of tasks) activeDays.add(dateKeyOf(t.completedAt, timezone) ?? '');
   activeDays.delete('');
 
-  const today = todayKey();
+  const today = dateKeyInTimezone(timezone);
   if (activeDays.size === 0) return 0;
 
-  let cursor = new Date();
-  if (!activeDays.has(today)) cursor.setDate(cursor.getDate() - 1);
-  if (!activeDays.has(todayKey(cursor))) return 0;
+  let cursor = activeDays.has(today) ? today : addDays(today, -1);
+  if (!activeDays.has(cursor)) return 0;
 
   let streak = 0;
-  while (activeDays.has(todayKey(cursor))) {
+  while (activeDays.has(cursor)) {
     streak++;
-    cursor.setDate(cursor.getDate() - 1);
+    cursor = addDays(cursor, -1);
   }
   return streak;
 }
@@ -220,7 +212,15 @@ async function onTaskCompleted(userId: string, taskId: string, completedAt: Date
   try {
     await awardPoints(userId, POINT_VALUES.task_completed, 'task_completed', 'StudyTask', taskId);
     const streak = await computeStreak(userId);
-    if (streak >= 7) await awardBadge(userId, 'study-streak-7');
+    if (streak >= 7 && (await awardBadge(userId, 'study-streak-7'))) {
+      await createNotification(userId, {
+        type: 'study',
+        title: 'Badge earned',
+        body: 'You earned the 7-Day Study Streak badge.',
+        refType: 'Badge',
+        refId: 'study-streak-7',
+      });
+    }
     const timezone = await userTimezone(userId);
     await refreshChallengeProgress(userId, dateKeyInTimezone(timezone, completedAt));
   } catch {
@@ -241,9 +241,25 @@ async function onFocusSessionCompleted(
       'PomodoroSession',
       sessionId,
     );
-    await awardBadge(userId, 'first-focus');
+    if (await awardBadge(userId, 'first-focus')) {
+      await createNotification(userId, {
+        type: 'study',
+        title: 'Badge earned',
+        body: 'You earned the First Focus badge.',
+        refType: 'Badge',
+        refId: 'first-focus',
+      });
+    }
     const streak = await computeStreak(userId);
-    if (streak >= 7) await awardBadge(userId, 'study-streak-7');
+    if (streak >= 7 && (await awardBadge(userId, 'study-streak-7'))) {
+      await createNotification(userId, {
+        type: 'study',
+        title: 'Badge earned',
+        body: 'You earned the 7-Day Study Streak badge.',
+        refType: 'Badge',
+        refId: 'study-streak-7',
+      });
+    }
     const timezone = await userTimezone(userId);
     await refreshChallengeProgress(userId, dateKeyInTimezone(timezone, completedAt));
   } catch {
@@ -544,11 +560,12 @@ studyRouter.delete('/tasks/:id', async (req, res, next) => {
 
 studyRouter.get('/today', async (req, res, next) => {
   try {
-    const today = todayKey();
+    const timezone = await userTimezone(req.authUser!.id);
+    const today = dateKeyInTimezone(timezone);
     const profile = await Profile.findOne({ userId: req.authUser!.id }).lean();
     const tasks = await StudyTask.find({ userId: req.authUser!.id }).lean();
     const todaysTasks = (tasks as TaskDoc[]).filter((task) => {
-      if (task.status === 'Completed') return dateKeyOf(task.completedAt) === today;
+      if (task.status === 'Completed') return dateKeyOf(task.completedAt, timezone) === today;
       return task.dueDate === null || task.dueDate <= today;
     });
     todaysTasks.sort(compareTasks);
@@ -576,9 +593,12 @@ studyRouter.get('/today', async (req, res, next) => {
 
 studyRouter.get('/stats', async (req, res, next) => {
   try {
-    const today = startOfDay(new Date());
-    const weekStart = startOfDay(new Date());
-    weekStart.setDate(weekStart.getDate() - 6);
+    // Day boundaries in the user's own timezone, converted to UTC
+    // instants for the stored-timestamp comparisons.
+    const timezone = await userTimezone(req.authUser!.id);
+    const todayKey = dateKeyInTimezone(timezone);
+    const today = startOfDayUtc(todayKey, timezone);
+    const weekStart = new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000);
 
     const [todaySessions, weekSessions, tasksCompletedToday, allTasks, subjects] = await Promise.all([
       PomodoroSession.find({

@@ -76,11 +76,20 @@ npm run preview
 - Salah auto-missed: when prayer times load for today, or when a Salah day/calendar is read, any prayer whose deadline + 5-minute grace has passed and is still pending is marked missed and persisted (never assumed prayed). "Today" is computed in the user's profile timezone. Correcting a missed prayer to Qaza (or prayed) keeps `wasMissed` + the original `missedAt`, shown as "Qaza (was missed)". Past dates are only auto-marked inside records that already exist — opening a calendar never backfills whole months.
 - Frontend: real Challenges page (templates with rules + consent, create form, detail view, progress, check-in, leave with rules, history), Dashboard points/badges/active-challenge teaser with a real nav count, Analytics challenge/points section, Salah calendar showing "Missed — auto-marked after deadline" and "Qaza (was missed)".
 
+## Phase 4 — done (2026-11-19, branch `phase-4-friends-notifications`)
+
+- Friends: `GET /api/friends/search?q=` (returns only id + name + initial — never email or profile details), `POST /api/friends/requests` (no self-requests, 409 on duplicate pending or already friends), `GET /api/friends/requests`, `POST /requests/:id/accept|reject|cancel` (only the recipient may accept/reject, only the sender may cancel), `GET /api/friends`, `DELETE /api/friends/:friendId`. A Friendship is created ONLY by accepting a request — never automatically, no special cases for any accounts.
+- Challenge invites: `POST /api/friends/invites` (friend only, inviter must take part, 409 if already taking part or an invite is pending), `GET /api/friends/invites`, `POST /invites/:id/accept` (explicit consent required, joins under the Phase 3 rules) and `POST /invites/:id/decline` (history kept).
+- Shared progress: `GET /api/friends/:friendId/shared-challenges` (friends only) returns, for challenges both take part in, ONLY challenge name, current day/total, completed days, progress and points earned. There is no endpoint that exposes another user's tasks, Salah records, study stats, profile, or points history.
+- Realtime (Socket.IO, same session cookie as REST, one room per user): the server pushes only — `friend_request_received`, `friend_request_accepted`, `challenge_invite_received`, `challenge_invite_response`, `challenge_progress_updated` (shared fields only, to co-participants), `notification_created`. Clients refetch over REST after every event; the app works fully without a socket.
+- Notifications: `GET /api/notifications` (unread first), `GET /api/notifications/unread-count`, `POST /:id/read`, `POST /read-all`, `GET/PUT /api/notifications/settings` (per-category toggles, quiet hours in profile timezone). Created server-side only for real events (friend request/invite, challenge day/completion, badge earned). A switched-off category never creates one; during quiet hours notifications are still stored but not pushed live. There is no scheduled/push reminder system — nothing claims a reminder arrives while the app is closed.
+- Frontend: real Friends page (search, requests, friends list, invites, shared-progress view), a real notification bell (unread badge, panel, mark read / mark all read), socket client that refetches on events, and notification preferences in Profile & settings.
+- Timezone fix: `GET /api/study/today`, `/stats` and the study streak now use the user's profile timezone (new `startOfDayUtc` helper) instead of the server-local date — the Phase 3 leftover is fixed.
+
 ## Remaining phases
 
 1. Habit tracking and analytics derived from saved Salah/habit activity.
-2. Community challenges with consent, privacy, invites, and ownership checks.
-3. Email verification, password recovery, session cleanup/rotation, and automated security tests.
+2. Email verification, password recovery, session cleanup/rotation, and automated security tests.
 4. Verified Quran content workflow with attribution/licensing review.
 5. Capacitor/Kotlin native integrations for notifications and supported focus controls.
 

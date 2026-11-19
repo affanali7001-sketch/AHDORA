@@ -12,6 +12,7 @@ import {
   refreshChallengeProgress,
   userTimezone,
 } from '../lib/challengeProgress.js';
+import { joinChallenge } from '../lib/challengeJoin.js';
 import {
   CHALLENGE_TEMPLATES,
   LEAVE_RULE,
@@ -108,17 +109,6 @@ async function todayCompletedFor(participantId: string, todayKey: string): Promi
     completed: true,
   }).select('_id').lean();
   return Boolean(row);
-}
-
-async function loadMyParticipation(
-  userId: string,
-  challengeId: string,
-): Promise<ParticipantDoc | null> {
-  return (await ChallengeParticipant.findOne({
-    userId,
-    challengeId,
-    status: 'active',
-  }).lean()) as unknown as ParticipantDoc | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -323,31 +313,6 @@ challengesRouter.get('/:id', async (req, res, next) => {
 const joinSchema = z.object({
   consent: z.literal(true, { error: 'Joining requires explicit consent' }),
 }).strict();
-
-async function joinChallenge(
-  userId: string,
-  challenge: ChallengeDoc,
-): Promise<{ participant: ParticipantDoc; fresh: boolean }> {
-  const existing = await loadMyParticipation(userId, String(challenge._id));
-  if (existing) {
-    return { participant: existing, fresh: false };
-  }
-  try {
-    const participant = await ChallengeParticipant.create({
-      challengeId: challenge._id,
-      userId,
-      status: 'active',
-      joinedAt: new Date(),
-    });
-    return { participant: participant.toObject() as ParticipantDoc, fresh: true };
-  } catch (error) {
-    if (isDuplicateKeyError(error)) {
-      const again = await loadMyParticipation(userId, String(challenge._id));
-      if (again) return { participant: again, fresh: false };
-    }
-    throw error;
-  }
-}
 
 challengesRouter.post('/:id/join', async (req, res, next) => {
   try {

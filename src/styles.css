@@ -301,3 +301,64 @@
 .challenge-completed svg{color:var(--gold);flex:0 0 auto}
 .challenge-completed h3{margin:4px 0}
 .challenge-completed p{color:#c4d6c9;font-size:13px;margin:0}
+
+/* Phase 4 — Friends, notifications, realtime */
+.notification-wrap{position:relative}
+.notification-button{position:relative}
+.notification-badge{position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;border-radius:10px;background:#d64545;color:#fff;font-size:9px;font-weight:800;display:grid;place-items:center;padding:0 4px}
+.notification-panel{position:absolute;right:0;top:46px;width:340px;max-width:88vw;max-height:480px;overflow:auto;background:var(--panel2);border:1px solid var(--line-strong);border-radius:12px;box-shadow:var(--shadow);z-index:60;text-align:left}
+.notification-panel-head{display:flex;align-items:center;justify-content:space-between;padding:13px 15px;border-bottom:1px solid var(--line)}
+.notification-panel-head strong{font-size:13px}
+.notification-panel-head button{background:none;border:0;color:var(--green);font-size:11px;cursor:pointer}
+.notification-panel .onboarding-help{padding:14px 15px}
+.notification-list{display:flex;flex-direction:column}
+.notification-item{display:flex;gap:11px;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);padding:12px 15px;cursor:pointer;color:var(--text)}
+.notification-item:hover{background:rgba(133,210,152,.06)}
+.notification-item:last-child{border-bottom:0}
+.notification-item.notification-read{opacity:.62}
+.notification-dot{flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:var(--green);margin-top:5px}
+.notification-read .notification-dot{background:var(--muted2)}
+.notification-item span{display:flex;flex-direction:column;gap:3px;min-width:0}
+.notification-item strong{font-size:12px}
+.notification-item small{font-size:11px;color:var(--muted);line-height:1.5}
+.friends-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+@media (max-width:900px){.friends-grid{grid-template-columns:1fr}}
+.friend-search{display:flex;align-items:center;gap:9px;margin:12px 0}
+.friend-search svg{flex:0 0 auto;color:var(--muted)}
+.friend-search .form-input{flex:1}
+.friend-list{display:flex;flex-direction:column;gap:4px;margin-top:10px}
+.friend-row{display:flex;align-items:center;gap:12px;padding:10px 4px;border-bottom:1px solid var(--line)}
+.friend-row:last-child{border-bottom:0}
+.friend-row>div{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.friend-row strong{font-size:13px}
+.friend-row small{font-size:11px;color:var(--muted)}
+.friend-avatar{flex:0 0 auto;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,#d6bd80,#8e7441);color:#152117;font-weight:800;font-size:13px}
+.friend-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.friend-confirm{margin-top:14px;padding:13px;border:1px solid var(--line-strong);border-radius:10px;background:rgba(133,210,152,.05);display:flex;flex-direction:column;gap:10px}
+.friend-confirm p{font-size:12px;line-height:1.6;color:#c4d6c9;margin:0}
+.friend-confirm .form-input{width:100%}
+.form-error{color:#f0a8a8;font-size:12px;margin:0 0 12px}
+.shared-challenge{border:1px solid var(--line);border-radius:10px;padding:13px;margin:12px 0}
+.shared-challenge-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.shared-challenge-head strong{font-size:13px}
+.shared-challenge-head span{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.shared-progress-row{margin-bottom:10px}
+.shared-progress-label{display:flex;justify-content:space-between;gap:10px;font-size:11px;margin-bottom:5px}
+.shared-progress-label span{color:var(--muted)}
+.shared-progress-bar{height:7px;border-radius:5px;background:rgba(164,203,177,.14);overflow:hidden}
+.shared-progress-bar span{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,var(--green-strong),var(--green))}
+.notification-settings{display:flex;flex-direction:column;gap:14px;padding:14px 0 4px}
+.notification-settings-head{display:flex;gap:12px;align-items:flex-start}
+.notification-settings-head>div{display:flex;flex-direction:column;gap:3px}
+.notification-settings-head span{font-size:11px;color:var(--muted);line-height:1.5}
+.notification-categories{display:flex;flex-direction:column;gap:2px}
+.notification-toggle{display:flex;align-items:center;justify-content:space-between;padding:9px 2px;border-bottom:1px solid var(--line);font-size:12px;cursor:pointer}
+.toggle-switch{width:40px;height:22px;border-radius:12px;border:1px solid var(--line-strong);background:rgba(164,203,177,.12);position:relative;cursor:pointer;flex:0 0 auto}
+.toggle-switch span{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#8fa499;transition:.2s}
+.toggle-switch.toggle-on{background:rgba(54,191,113,.35);border-color:var(--green-strong)}
+.toggle-switch.toggle-on span{left:20px;background:var(--green)}
+.quiet-hours{display:flex;flex-direction:column;gap:8px}
+.quiet-hours>span{font-size:11px;color:var(--muted);line-height:1.5}
+.quiet-hours-inputs{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+.quiet-hours-inputs label{display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--muted)}
+.quiet-hours-inputs .form-input{width:130px}

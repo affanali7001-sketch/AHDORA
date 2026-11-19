@@ -1,4 +1,14 @@
 import SalahTracker from './components/SalahTracker';
+import Friends from './components/Friends';
+import NotificationSettingsPanel from './components/NotificationSettings';
+import { connectSocket, disconnectSocket } from './lib/socket';
+import {
+  fetchNotifications,
+  fetchUnreadCount,
+  markAllNotificationsRead,
+  markNotificationRead,
+  type AppNotification,
+} from './lib/notificationsApi';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Onboarding from './components/Onboarding';
 import { emptyProfile, type UserProfile } from './types/profile';
@@ -90,7 +100,7 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<A
   return data as ApiResponse<T>;
 }
 
-type Page = 'dashboard' | 'deen' | 'study' | 'challenges' | 'guidance' | 'focus' | 'analytics' | 'profile';
+type Page = 'dashboard' | 'deen' | 'study' | 'challenges' | 'friends' | 'guidance' | 'focus' | 'analytics' | 'profile';
 type IconType = typeof Home;
 
 
@@ -100,6 +110,7 @@ const navItems: { id: Page; label: string; icon: IconType; group: string }[] = [
   { id: 'deen', label: 'Deen & Salah', icon: Compass, group: 'Workspace' },
   { id: 'study', label: 'Study planner', icon: GraduationCap, group: 'Workspace' },
   { id: 'challenges', label: 'Challenges', icon: Trophy, group: 'Community' },
+  { id: 'friends', label: 'Friends', icon: Users, group: 'Community' },
   { id: 'guidance', label: 'Quranic guidance', icon: BookOpen, group: 'Community' },
   { id: 'focus', label: 'Focus & sleep', icon: LockKeyhole, group: 'Tools' },
   { id: 'analytics', label: 'My progress', icon: Activity, group: 'Tools' },
@@ -174,6 +185,10 @@ function App() {
   const [challengeHistory, setChallengeHistory] = useState<ChallengeParticipation[]>([]);
   const [rewards, setRewards] = useState<RewardsSummary | null>(null);
   const [challengeError, setChallengeError] = useState('');
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [friendsRefreshKey, setFriendsRefreshKey] = useState(0);
 
   const notify = (message: string) => {
     setToast(message);
@@ -260,6 +275,22 @@ function App() {
     }
   }
 
+  // Notifications live in MongoDB; the bell shows the real unread
+  // count and the real list. The socket only tells us to refetch.
+  async function refreshNotifications() {
+    if (!authUser || guestMode) return;
+    try {
+      const [list, unread] = await Promise.all([
+        fetchNotifications(1, 20),
+        fetchUnreadCount(),
+      ]);
+      setNotifications(list.notifications);
+      setUnreadCount(unread);
+    } catch {
+      // The bell stays empty rather than showing invented alerts.
+    }
+  }
+
   async function loadPrayerTimes() {
     if (!authUser) return;
     setPrayerStatus('loading');
@@ -304,7 +335,53 @@ function App() {
     if (screen === 'app' && authUser && !guestMode) {
       refreshStudy();
       refreshChallenges();
+      refreshNotifications();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, authUser, guestMode]);
+
+  // Realtime: the socket only PUSHES — every event refetches the
+  // authoritative data over REST. If the socket never connects, the
+  // app keeps working from the list endpoints; a failed connection
+  // never breaks a page.
+  useEffect(() => {
+    if (screen !== 'app' || !authUser || guestMode) return;
+    let socket: ReturnType<typeof connectSocket> | null = null;
+    try {
+      socket = connectSocket();
+      const onNotification = (payload: { notification?: AppNotification }) => {
+        refreshNotifications();
+        if (payload?.notification) notify(payload.notification.title);
+      };
+      const onFriendEvent = () => {
+        refreshNotifications();
+        setFriendsRefreshKey((key) => key + 1);
+      };
+      const onInviteEvent = () => {
+        refreshNotifications();
+        setFriendsRefreshKey((key) => key + 1);
+      };
+      const onProgressEvent = (payload: { challengeTitle?: string }) => {
+        refreshChallenges();
+        if (payload?.challengeTitle) {
+          notify(`Shared progress updated in "${payload.challengeTitle}".`);
+        }
+      };
+      socket.on('notification_created', onNotification);
+      socket.on('friend_request_received', onFriendEvent);
+      socket.on('friend_request_accepted', onFriendEvent);
+      socket.on('challenge_invite_received', onInviteEvent);
+      socket.on('challenge_invite_response', onInviteEvent);
+      socket.on('challenge_progress_updated', onProgressEvent);
+      socket.on('connect_error', () => {
+        // Silent: REST remains the fallback for every read.
+      });
+    } catch {
+      // A socket that cannot start must never break the app.
+    }
+    return () => {
+      disconnectSocket();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, authUser, guestMode]);
 
@@ -410,6 +487,11 @@ function App() {
     setChallengeHistory([]);
     setRewards(null);
     setChallengeError('');
+    setNotifications([]);
+    setUnreadCount(0);
+    setNotifOpen(false);
+    setFriendsRefreshKey(0);
+    disconnectSocket();
     setScreen('welcome');
     setPage('dashboard');
   }
@@ -439,13 +521,14 @@ function App() {
         <div className="sidebar-bottom"><div className="sidebar-quote"><Sparkles size={15} /><p>Small steps, sincere intentions, steady growth.</p></div><button className="profile-mini" onClick={() => goTo('profile')}><div className="avatar">{initials}</div><div><strong>{displayName}</strong><span>Personal account</span></div><MoreHorizontal size={17} /></button></div>
       </aside>
       <main className="main-area">
-        <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{navItems.find((item) => item.id === page)?.label}</strong></div><div className="topbar-actions"><span className="demo-pill"><span />{authUser ? 'SECURE SESSION' : 'GUEST PREVIEW'}</span><button className="icon-button search-trigger" onClick={() => setSearchOpen(!searchOpen)} aria-label="Search"><Search size={18} /></button><button className="icon-button notification-button" onClick={() => notify('You are all caught up.')} aria-label="Notifications"><Bell size={18} /><i /></button><button className="top-avatar" onClick={() => goTo('profile')}>{initials}</button></div></header>
+        <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{navItems.find((item) => item.id === page)?.label}</strong></div><div className="topbar-actions"><span className="demo-pill"><span />{authUser ? 'SECURE SESSION' : 'GUEST PREVIEW'}</span><button className="icon-button search-trigger" onClick={() => setSearchOpen(!searchOpen)} aria-label="Search"><Search size={18} /></button><div className="notification-wrap"><button className="icon-button notification-button" onClick={() => { setNotifOpen((open) => !open); if (!notifOpen) refreshNotifications(); }} aria-label="Notifications"><Bell size={18} />{unreadCount > 0 && <span className="notification-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}</button>{notifOpen && <div className="notification-panel"><div className="notification-panel-head"><strong>Notifications</strong>{unreadCount > 0 && <button onClick={async () => { try { await markAllNotificationsRead(); await refreshNotifications(); } catch { notify('Could not mark all as read.'); } }}>Mark all read</button>}</div>{!authUser || guestMode ? <p className="onboarding-help">Sign in to see your notifications.</p> : notifications.length === 0 ? <p className="onboarding-help">No notifications yet. Friend requests, challenge invitations and badges will appear here.</p> : <div className="notification-list">{notifications.map((item) => <button key={item.id} className={`notification-item ${item.read ? 'notification-read' : ''}`} onClick={async () => { if (!item.read) { try { await markNotificationRead(item.id); await refreshNotifications(); } catch { notify('Could not mark as read.'); } } }}><span className="notification-dot" /><span><strong>{item.title}</strong><small>{item.body}</small><small>{new Date(item.createdAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></span></button>)}</div>}</div>}</div><button className="top-avatar" onClick={() => goTo('profile')}>{initials}</button></div></header>
         {searchOpen && <div className="search-popover"><Search size={17} /><input autoFocus placeholder="Search AHDORA pages..." value={query} onChange={(e) => setQuery(e.target.value)} /><button onClick={() => { setQuery(''); setSearchOpen(false); }}><X size={16} /></button><div className="search-results">{filteredNav.map((item) => <button key={item.id} onClick={() => goTo(item.id)}>{item.label}<ArrowUpRight size={14} /></button>)}</div></div>}
         <div className="page-content">
           {page === 'dashboard' && <Dashboard userName={profileName || 'there'} onNavigate={goTo} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} onPrayerToggle={() => goTo('deen')} subjects={subjects} todayTasks={todayTasks} studyStats={studyStats} guestMode={guestMode} activeChallenges={activeChallenges} rewards={rewards} />}
           {page === 'deen' && <Deen onNotify={notify} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} />}
           {page === 'study' && <Study subjects={subjects} tasks={tasks} todayTasks={todayTasks} schedule={todaySchedule} stats={studyStats} activeSession={activePomodoro} history={pomodoroHistory} studyError={studyError} guestMode={guestMode} profile={newUser} onRefresh={refreshStudy} onNotify={notify} />}
           {page === 'challenges' && <Challenges onNotify={notify} onRefresh={refreshChallenges} guestMode={guestMode} />}
+          {page === 'friends' && <Friends onNotify={notify} refreshKey={friendsRefreshKey} guestMode={guestMode} />}
           {page === 'guidance' && <Guidance onNotify={notify} />}
           {page === 'focus' && <Focus sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} focusEnabled={focusEnabled} setFocusEnabled={setFocusEnabled} youtubeAllowed={youtubeAllowed} setYoutubeAllowed={setYoutubeAllowed} onNotify={notify} />}
           {page === 'analytics' && <Analytics stats={studyStats} guestMode={guestMode} rewards={rewards} activeChallenges={activeChallenges} challengeHistory={challengeHistory} />}
@@ -2835,6 +2918,7 @@ function Profile({
     .slice(0, 2)
     .map((part) => part[0].toUpperCase())
     .join('') || 'AH';
+  const [showNotifSettings, setShowNotifSettings] = useState(false);
 
   return (
     <>
@@ -2869,9 +2953,13 @@ function Profile({
           <SettingRow
             icon={Bell}
             title="Notifications"
-            detail="Prayer, study and habit reminders"
-            onClick={() => onNotify('Notification preferences will be added later.')}
+            detail="Categories, quiet hours and live alerts"
+            onClick={() => setShowNotifSettings((open) => !open)}
           />
+          {showNotifSettings && !guestMode && <NotificationSettingsPanel onNotify={onNotify} />}
+          {showNotifSettings && guestMode && (
+            <p className="onboarding-help">Sign in to change notification preferences.</p>
+          )}
           <SettingRow
             icon={Compass}
             title="Prayer calculation"

@@ -13,6 +13,8 @@ import { prayerRouter } from './routes/prayer.js';
 import { studyRouter } from './routes/study.js';
 import { challengesRouter } from './routes/challenges.js';
 import { rewardsRouter } from './routes/rewards.js';
+import { friendsRouter } from './routes/friends.js';
+import { notificationsRouter } from './routes/notifications.js';
 
 export const app = express();
 
@@ -154,6 +156,30 @@ app.use(
     legacyHeaders: false,
   }),
   rewardsRouter,
+);
+
+app.use(
+  '/api/friends',
+  requireAuth,
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 120,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  friendsRouter,
+);
+
+app.use(
+  '/api/notifications',
+  requireAuth,
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 120,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  notificationsRouter,
 );
 
 app.use((_req, res) => {

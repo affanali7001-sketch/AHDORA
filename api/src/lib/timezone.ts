@@ -55,8 +55,7 @@ export function toMinutes(hhmm: string): number | null {
   return Number(match[1]) * 60 + Number(match[2]);
 }
 
-/** Whole days between two YYYY-MM-DD keys (b - a). Negative when b is earlier. */
-export function daysBetween(a: string, b: string): number {
+/** Whole days between two YYYY-MM-DD keys (b - a). Negative when b is earlier. */export function daysBetween(a: string, b: string): number {
   const parse = (key: string) => {
     const [y = 1970, m = 1, d = 1] = key.split('-').map(Number);
     return Date.UTC(y, m - 1, d);
@@ -73,4 +72,47 @@ export function addDays(key: string, days: number): string {
     String(date.getUTCMonth() + 1).padStart(2, '0'),
     String(date.getUTCDate()).padStart(2, '0'),
   ].join('-');
+}
+
+/**
+ * Offset of `timezone` from UTC at `date`, in milliseconds (positive
+ * east of UTC). Derived from Intl so DST is handled by the platform.
+ */
+function tzOffsetMs(timezone: string, date: Date): number {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).formatToParts(date);
+    const value = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+    const asUtc = Date.UTC(
+      value('year'),
+      value('month') - 1,
+      value('day'),
+      value('hour') % 24,
+      value('minute'),
+      value('second'),
+    );
+    return asUtc - date.getTime();
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * The UTC instant when `dateKey` starts in `timezone` (midnight local
+ * time). Use this for $gte comparisons on stored UTC timestamps, so
+ * "today" / "this week" follow the user's own timezone, not the
+ * server's clock.
+ */
+export function startOfDayUtc(dateKey: string, timezone: string): Date {
+  const [y = 1970, m = 1, d = 1] = dateKey.split('-').map(Number);
+  const utcMidnight = Date.UTC(y, m - 1, d);
+  return new Date(utcMidnight - tzOffsetMs(timezone, new Date(utcMidnight)));
 }
