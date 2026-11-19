@@ -11,6 +11,8 @@ import { requireAuth } from './middleware/auth.js';
 import { salahRouter } from './routes/salah.js';
 import { prayerRouter } from './routes/prayer.js';
 import { studyRouter } from './routes/study.js';
+import { challengesRouter } from './routes/challenges.js';
+import { rewardsRouter } from './routes/rewards.js';
 
 export const app = express();
 
@@ -128,6 +130,30 @@ app.use(
     legacyHeaders: false,
   }),
   prayerRouter,
+);
+
+app.use(
+  '/api/challenges',
+  requireAuth,
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 120,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  challengesRouter,
+);
+
+app.use(
+  '/api/rewards',
+  requireAuth,
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 60,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  rewardsRouter,
 );
 
 app.use((_req, res) => {

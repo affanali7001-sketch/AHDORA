@@ -29,7 +29,10 @@ Node.js + Express + TypeScript + MongoDB/Mongoose API starter.
 - `GET /api/study/tasks` (optional `?status=&subjectId=&dueDate=`), `POST /api/study/tasks`, `GET /api/study/tasks/:id`, `PUT /api/study/tasks/:id`, `PATCH /api/study/tasks/:id/status`, `DELETE /api/study/tasks/:id` (authenticated, rate limit 120/15 min) — per-user tasks. Completing a task stamps `completedAt`.
 - `GET /api/study/today` (authenticated) — today's tasks (due today or earlier and not completed, unscheduled tasks included, completed-today tasks included) ordered by due date then start time, plus the college/study schedule from the user's profile.
 - `GET /api/study/stats` (authenticated) — today focus minutes, tasks completed today, week focus minutes, current streak, and a per-subject breakdown (tasks done/total, focus minutes this week).
-- `POST /api/study/pomodoro/start` (authenticated, `mode` focus/break, `plannedMinutes` 1–180, optional `taskId`/`subjectId`; 409 if a timer is already active), `GET /api/study/pomodoro/active`, `POST /api/study/pomodoro/:id/pause|resume|complete|abandon`, `GET /api/study/pomodoro/history?page=&limit=` (newest first, completed + abandoned only) — the server stores `startedAt` + `pausedTotalMs` and derives `remainingMs`, so the timer is the source of truth across refresh/logout/device change. Abandoned sessions stay in history with 0 minutes earned.
+- `POST /api/study/pomodoro/start` (authenticated, `mode` focus/break, `plannedMinutes` 1–180, optional `taskId`/`subjectId`; 409 if a timer is already active), `GET /api/study/pomodoro/active`, `POST /api/study/pomodoro/:id/pause|resume|complete|abandon`, `GET /api/study/pomodoro/history?page=&limit=` (newest first, completed + abandoned only) — the server stores `startedAt` + `pausedTotalMs` and derives `remainingMs`, so the timer is the source of truth across refresh/logout/device change. Abandoned sessions stay in history with 0 minutes earned. Completing a focus session awards 10 points (server-side, idempotent) and the First Focus badge; completing a task awards 5 points. A 7-day streak awards the 7-Day Study Streak badge.
+- `GET /api/salah/day/:date` and `GET /api/salah/calendar/:month` auto-mark missed prayers (see below).
+- `GET /api/challenges/templates`, `POST /api/challenges` (user-defined, consent required, creator auto-joins), `GET /api/challenges/mine`, `GET /api/challenges/:id`, `POST /api/challenges/:id/join`, `POST /api/challenges/templates/:templateId/join` (consent required, 409 on duplicate active participation), `POST /api/challenges/:id/leave` (history and earned points kept), `POST /api/challenges/:id/check-in` (self-reported days for sleep/Quran/discipline only), `GET /api/challenges/:id/today` (authenticated, rate limit 120/15 min) — solo challenges only; friends/invites are a later phase.
+- `GET /api/rewards/summary`, `GET /api/rewards/history?page=&limit=` (authenticated, rate limit 60/15 min) — read-only points total, badges, and transaction history. No endpoint awards points from the client.
 
 Sessions use opaque random tokens. Only SHA-256 token hashes are stored in MongoDB; the browser cookie is HttpOnly, SameSite=Lax, and Secure in production. API mutations require the configured exact Origin. CORS is allowlisted. Helmet, JSON body size limits, Zod strict schemas, and auth rate limiting are enabled.
 
@@ -67,6 +70,33 @@ The server stores `startedAt` and `pausedTotalMs`. Remaining time is
 the active session after a refresh, logout, or device change and the timer
 simply continues. Focus minutes earned are the whole minutes actually run when
 a focus session completes (0 for breaks and abandoned sessions).
+
+### Salah auto-missed
+
+A prayer whose deadline + 5-minute grace has passed and is still `pending` is
+marked `missed` and persisted — never assumed prayed. This happens when prayer
+times are loaded for today (full deadlines from Aladhan + manual overrides)
+and when a Salah day or calendar is read (past dates mark every pending prayer
+missed; today uses the profile's per-prayer endTime overrides). "Today" is
+computed in the user's profile timezone (default Asia/Kolkata). Correcting a
+missed prayer to Qaza (or prayed) keeps `wasMissed: true` and the original
+`missedAt`, shown as "Qaza (was missed)". Past dates are only auto-marked
+inside records that already exist — reading a calendar never backfills whole
+months of missed prayers.
+
+### Challenges, points and badges
+
+Challenge days complete from real activity only: prayers (all five prayed or
+Qaza that day), study (a task completed or a focus session finished), focus
+(a focus session finished). Sleep, Quran and discipline days complete by an
+honest self-reported check-in, labelled self-reported everywhere. Points are
+awarded server-side only: +10 finished focus session, +5 completed task, +10
+challenge day, +100 (30-day) / +365 (365-day) / +50 (custom) challenge
+completion. Each award is idempotent through a unique index on
+(user, refType, refId, reason), so retries can never double-award. Badges:
+First Focus, 7-Day Study Streak, 30-Day Challenger, 365-Day Challenger.
+No points are awarded per individual prayer. Leaving a challenge keeps its
+history and earned points; joining twice while active returns 409.
 
 Error cases (no data is ever invented):
 - A second timer while one is active/paused → `409 { error: "A focus timer is already running. Pause or finish it first." }`

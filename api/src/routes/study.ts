@@ -2,6 +2,9 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.js';
+import { refreshChallengeProgress, userTimezone } from '../lib/challengeProgress.js';
+import { awardBadge, awardPoints, POINT_VALUES } from '../lib/points.js';
+import { dateKeyInTimezone } from '../lib/timezone.js';
 import { Profile } from '../models/Profile.js';
 import { StudySubject, subjectColours } from '../models/StudySubject.js';
 import { StudyTask, taskPriorities, taskStatuses } from '../models/StudyTask.js';
@@ -207,6 +210,47 @@ async function computeStreak(userId: string): Promise<number> {
   return streak;
 }
 
+/**
+ * Server-side rewards for real study events. Points and badges are only
+ * ever awarded here — never from a client request — and each award is
+ * idempotent, so retries can never double-award. A failure here must
+ * never break the task/session response itself.
+ */
+async function onTaskCompleted(userId: string, taskId: string, completedAt: Date): Promise<void> {
+  try {
+    await awardPoints(userId, POINT_VALUES.task_completed, 'task_completed', 'StudyTask', taskId);
+    const streak = await computeStreak(userId);
+    if (streak >= 7) await awardBadge(userId, 'study-streak-7');
+    const timezone = await userTimezone(userId);
+    await refreshChallengeProgress(userId, dateKeyInTimezone(timezone, completedAt));
+  } catch {
+    // Rewards must never break the study response.
+  }
+}
+
+async function onFocusSessionCompleted(
+  userId: string,
+  sessionId: string,
+  completedAt: Date,
+): Promise<void> {
+  try {
+    await awardPoints(
+      userId,
+      POINT_VALUES.focus_session_completed,
+      'focus_session_completed',
+      'PomodoroSession',
+      sessionId,
+    );
+    await awardBadge(userId, 'first-focus');
+    const streak = await computeStreak(userId);
+    if (streak >= 7) await awardBadge(userId, 'study-streak-7');
+    const timezone = await userTimezone(userId);
+    await refreshChallengeProgress(userId, dateKeyInTimezone(timezone, completedAt));
+  } catch {
+    // Rewards must never break the Pomodoro response.
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Subjects                                                            */
 /* ------------------------------------------------------------------ */
@@ -368,6 +412,9 @@ studyRouter.post('/tasks', async (req, res, next) => {
       status: data.status ?? 'Pending',
       completedAt: data.status === 'Completed' ? new Date() : null,
     });
+    if (data.status === 'Completed') {
+      void onTaskCompleted(req.authUser!.id, String(task._id), new Date());
+    }
     res.status(201).json({ task: serializeTask(task.toObject() as TaskDoc) });
   } catch (error) {
     next(error);
@@ -431,6 +478,9 @@ studyRouter.put('/tasks/:id', async (req, res, next) => {
       },
       { new: true, runValidators: true },
     ).lean();
+    if (task && data.status === 'Completed' && existing.status !== 'Completed') {
+      void onTaskCompleted(req.authUser!.id, String(task._id), task.completedAt ?? new Date());
+    }
     res.json({ task: serializeTask(task as TaskDoc) });
   } catch (error) {
     next(error);
@@ -462,6 +512,9 @@ studyRouter.patch('/tasks/:id/status', async (req, res, next) => {
       { status: parsed.data.status, completedAt },
       { new: true, runValidators: true },
     ).lean();
+    if (task && parsed.data.status === 'Completed' && existing.status !== 'Completed') {
+      void onTaskCompleted(req.authUser!.id, String(task._id), task.completedAt ?? new Date());
+    }
     res.json({ task: serializeTask(task as TaskDoc) });
   } catch (error) {
     next(error);
@@ -762,6 +815,13 @@ studyRouter.post('/pomodoro/:id/complete', async (req, res, next) => {
     if (!updated) {
       res.status(409).json({ error: 'Session was already finished' });
       return;
+    }
+    if (updated.mode === 'focus') {
+      void onFocusSessionCompleted(
+        req.authUser!.id,
+        String(updated._id),
+        updated.completedAt ?? now,
+      );
     }
     res.json({ session: serializePomodoro(updated as PomodoroDoc) });
   } catch (error) {

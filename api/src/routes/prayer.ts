@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
+import { markTodayMissed } from '../lib/salahAutoMissed.js';
+import { dateKeyInTimezone, toMinutes } from '../lib/timezone.js';
 import { Profile } from '../models/Profile.js';
 
 export const prayerRouter = Router();
@@ -17,26 +19,11 @@ const methodMap: Record<string, number> = {
   ISNA: 2,
 };
 
-function todayKey(): string {
-  const now = new Date();
-  return [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, '0'),
-    String(now.getDate()).padStart(2, '0'),
-  ].join('-');
-}
-
 /** "05:12" from Aladhan values like "05:12" or "05:12 (IST)". */
 function stripToHHmm(value: unknown): string {
   if (typeof value !== 'string') return '';
   const first = value.trim().split(' ')[0] ?? '';
   return first.slice(0, 5);
-}
-
-function toMinutes(hhmm: string): number | null {
-  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(hhmm);
-  if (!match) return null;
-  return Number(match[1]) * 60 + Number(match[2]);
 }
 
 /** Current HH:mm in the given IANA timezone; falls back to server local time. */
@@ -64,8 +51,8 @@ prayerRouter.get('/times', async (req, res, next) => {
       return;
     }
 
-    const dateParam = typeof req.query.date === 'string' ? req.query.date : todayKey();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+    const dateParam = typeof req.query.date === 'string' ? req.query.date : '';
+    if (dateParam && !/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
       res.status(400).json({ error: 'Date must be YYYY-MM-DD' });
       return;
     }
@@ -79,6 +66,9 @@ prayerRouter.get('/times', async (req, res, next) => {
 
     const country = profile?.country?.trim() || 'India';
     const timezone = profile?.timezone?.trim() || 'Asia/Kolkata';
+    // "Today" is the user's own timezone, not the server's local date.
+    const today = dateKeyInTimezone(timezone);
+    const requestedDate = dateParam || today;
     const methodName = profile?.prayerCalculationMethod?.trim() || 'University of Islamic Sciences, Karachi';
     const method = methodMap[methodName] ?? 1;
     const school = profile?.asrMethod === 'hanafi' ? 1 : 0;
@@ -166,7 +156,7 @@ prayerRouter.get('/times', async (req, res, next) => {
 
     // Next prayer is only meaningful for today; for a past/future date return null.
     let nextPrayer: { name: PrayerName; time: string } | null = null;
-    if (dateParam === todayKey()) {
+    if (requestedDate === today) {
       const nowMinutes = toMinutes(nowInTimezone(timezone));
       if (nowMinutes !== null) {
         for (const prayer of prayers) {
@@ -179,9 +169,19 @@ prayerRouter.get('/times', async (req, res, next) => {
       }
     }
 
+    // Auto-missed: now that today's deadlines are known, any prayer whose
+    // deadline + 5-minute grace has passed and is still pending is marked
+    // missed and persisted. Best-effort — it never fails this response.
+    if (requestedDate === today) {
+      const deadlines = Object.fromEntries(
+        prayers.map((prayer) => [prayer, perPrayer[prayer].deadline]),
+      ) as Record<PrayerName, string>;
+      await markTodayMissed(req.authUser.id, requestedDate, timezone, deadlines);
+    }
+
     const hijri = payload?.data?.date?.hijri;
     res.json({
-      date: dateParam,
+      date: requestedDate,
       city,
       country,
       timezone: payload?.data?.meta?.timezone || timezone,

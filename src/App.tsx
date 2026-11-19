@@ -32,6 +32,26 @@ import {
   type TaskStatus,
 } from './lib/studyApi';
 import { sleepDurationLabel } from './types/profile';
+import {
+  checkInChallenge,
+  createChallenge,
+  fetchChallengeDetail,
+  fetchMyChallenges,
+  fetchTemplates,
+  joinChallenge,
+  joinTemplate,
+  leaveChallenge,
+  type Challenge,
+  type ChallengeCategory,
+  type ChallengeDetail,
+  type ChallengeParticipation,
+  type ChallengeTemplate,
+} from './lib/challengesApi';
+import {
+  fetchRewardsSummary,
+  POINT_REASON_LABELS,
+  type RewardsSummary,
+} from './lib/rewardsApi';
 import type { CSSProperties, ReactNode, FormEvent } from 'react';
 import {
   Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpen, BookMarked,
@@ -150,6 +170,10 @@ function App() {
   const [activePomodoro, setActivePomodoro] = useState<PomodoroSession | null>(null);
   const [pomodoroHistory, setPomodoroHistory] = useState<PomodoroSession[]>([]);
   const [studyError, setStudyError] = useState('');
+  const [activeChallenges, setActiveChallenges] = useState<ChallengeParticipation[]>([]);
+  const [challengeHistory, setChallengeHistory] = useState<ChallengeParticipation[]>([]);
+  const [rewards, setRewards] = useState<RewardsSummary | null>(null);
+  const [challengeError, setChallengeError] = useState('');
 
   const notify = (message: string) => {
     setToast(message);
@@ -216,6 +240,26 @@ function App() {
     );
   }
 
+  // Challenges and rewards live in MongoDB; every load re-fetches them so
+  // a refresh, logout, or device change shows the same real records.
+  async function refreshChallenges() {
+    if (!authUser || guestMode) return;
+    try {
+      const [mine, summary] = await Promise.all([
+        fetchMyChallenges(),
+        fetchRewardsSummary(),
+      ]);
+      setActiveChallenges(mine.active);
+      setChallengeHistory(mine.history);
+      setRewards(summary);
+      setChallengeError('');
+    } catch (error) {
+      setChallengeError(
+        error instanceof Error ? error.message : 'Challenge data could not be loaded.',
+      );
+    }
+  }
+
   async function loadPrayerTimes() {
     if (!authUser) return;
     setPrayerStatus('loading');
@@ -249,6 +293,9 @@ function App() {
     if (screen === 'app' && authUser && !guestMode && (page === 'dashboard' || page === 'study' || page === 'analytics')) {
       refreshStudy();
     }
+    if (screen === 'app' && authUser && !guestMode && (page === 'dashboard' || page === 'challenges' || page === 'analytics')) {
+      refreshChallenges();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
 
@@ -256,6 +303,7 @@ function App() {
   useEffect(() => {
     if (screen === 'app' && authUser && !guestMode) {
       refreshStudy();
+      refreshChallenges();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, authUser, guestMode]);
@@ -358,6 +406,10 @@ function App() {
     setActivePomodoro(null);
     setPomodoroHistory([]);
     setStudyError('');
+    setActiveChallenges([]);
+    setChallengeHistory([]);
+    setRewards(null);
+    setChallengeError('');
     setScreen('welcome');
     setPage('dashboard');
   }
@@ -383,20 +435,20 @@ function App() {
       <aside className={`sidebar ${mobileNav ? 'sidebar-open' : ''}`}>
         <div className="brand-lockup"><img src={logo} alt="AHDORA logo" /><div><strong>AHDORA</strong><span>DEEN · ILM · DISCIPLINE</span></div><button className="icon-button mobile-close" onClick={() => setMobileNav(false)} aria-label="Close menu"><X size={18} /></button></div>
         <div className="workspace-switch"><span className="workspace-dot" /><span>Personal space</span><ChevronDown size={14} /></div>
-        {['Workspace', 'Community', 'Tools'].map((group) => <div className="nav-group" key={group}><div className="nav-caption">{group}</div>{navItems.filter((item) => item.group === group).map((item) => { const Icon = item.icon; return <button key={item.id} className={`nav-link ${page === item.id ? 'active' : ''}`} onClick={() => goTo(item.id)}><Icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.id === 'challenges' && <span className="nav-count">2</span>}</button>; })}</div>)}
+        {['Workspace', 'Community', 'Tools'].map((group) => <div className="nav-group" key={group}><div className="nav-caption">{group}</div>{navItems.filter((item) => item.group === group).map((item) => { const Icon = item.icon; return <button key={item.id} className={`nav-link ${page === item.id ? 'active' : ''}`} onClick={() => goTo(item.id)}><Icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.id === 'challenges' && activeChallenges.length > 0 && <span className="nav-count">{activeChallenges.length}</span>}</button>; })}</div>)}
         <div className="sidebar-bottom"><div className="sidebar-quote"><Sparkles size={15} /><p>Small steps, sincere intentions, steady growth.</p></div><button className="profile-mini" onClick={() => goTo('profile')}><div className="avatar">{initials}</div><div><strong>{displayName}</strong><span>Personal account</span></div><MoreHorizontal size={17} /></button></div>
       </aside>
       <main className="main-area">
         <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{navItems.find((item) => item.id === page)?.label}</strong></div><div className="topbar-actions"><span className="demo-pill"><span />{authUser ? 'SECURE SESSION' : 'GUEST PREVIEW'}</span><button className="icon-button search-trigger" onClick={() => setSearchOpen(!searchOpen)} aria-label="Search"><Search size={18} /></button><button className="icon-button notification-button" onClick={() => notify('You are all caught up.')} aria-label="Notifications"><Bell size={18} /><i /></button><button className="top-avatar" onClick={() => goTo('profile')}>{initials}</button></div></header>
         {searchOpen && <div className="search-popover"><Search size={17} /><input autoFocus placeholder="Search AHDORA pages..." value={query} onChange={(e) => setQuery(e.target.value)} /><button onClick={() => { setQuery(''); setSearchOpen(false); }}><X size={16} /></button><div className="search-results">{filteredNav.map((item) => <button key={item.id} onClick={() => goTo(item.id)}>{item.label}<ArrowUpRight size={14} /></button>)}</div></div>}
         <div className="page-content">
-          {page === 'dashboard' && <Dashboard userName={profileName || 'there'} onNavigate={goTo} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} onPrayerToggle={() => goTo('deen')} subjects={subjects} todayTasks={todayTasks} studyStats={studyStats} guestMode={guestMode} />}
+          {page === 'dashboard' && <Dashboard userName={profileName || 'there'} onNavigate={goTo} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} onPrayerToggle={() => goTo('deen')} subjects={subjects} todayTasks={todayTasks} studyStats={studyStats} guestMode={guestMode} activeChallenges={activeChallenges} rewards={rewards} />}
           {page === 'deen' && <Deen onNotify={notify} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} />}
           {page === 'study' && <Study subjects={subjects} tasks={tasks} todayTasks={todayTasks} schedule={todaySchedule} stats={studyStats} activeSession={activePomodoro} history={pomodoroHistory} studyError={studyError} guestMode={guestMode} profile={newUser} onRefresh={refreshStudy} onNotify={notify} />}
-          {page === 'challenges' && <Challenges onNotify={notify} />}
+          {page === 'challenges' && <Challenges onNotify={notify} onRefresh={refreshChallenges} guestMode={guestMode} />}
           {page === 'guidance' && <Guidance onNotify={notify} />}
           {page === 'focus' && <Focus sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} focusEnabled={focusEnabled} setFocusEnabled={setFocusEnabled} youtubeAllowed={youtubeAllowed} setYoutubeAllowed={setYoutubeAllowed} onNotify={notify} />}
-          {page === 'analytics' && <Analytics stats={studyStats} guestMode={guestMode} />}
+          {page === 'analytics' && <Analytics stats={studyStats} guestMode={guestMode} rewards={rewards} activeChallenges={activeChallenges} challengeHistory={challengeHistory} />}
           {page === 'profile' && <Profile onNotify={notify} user={authUser} guestMode={guestMode} onLogout={handleLogout} />}
         </div>
         <footer className="app-footer"><span>© 2026 AHDORA</span><span>Built around what matters.</span><button onClick={() => notify('Help centre will be connected in a later phase.')}><CircleHelp size={14} /> Help & feedback</button></footer>
@@ -767,6 +819,8 @@ function Dashboard({
   todayTasks,
   studyStats,
   guestMode,
+  activeChallenges,
+  rewards,
 }: {
   userName: string;
   onNavigate: (page: Page) => void;
@@ -779,6 +833,8 @@ function Dashboard({
   todayTasks: StudyTask[];
   studyStats: StudyStats | null;
   guestMode: boolean;
+  activeChallenges: ChallengeParticipation[];
+  rewards: RewardsSummary | null;
 }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -970,17 +1026,27 @@ function Dashboard({
         <section className="panel challenge-teaser">
           <div className="challenge-bg-shape" />
           <div className="panel-top">
-            <span className="eyebrow">COMMUNITY</span>
+            <span className="eyebrow">CHALLENGES · POINTS</span>
             <Trophy size={18} />
           </div>
           <div className="challenge-teaser-copy">
-            <h3>Grow better,<br />together.</h3>
-            <p>Choose a healthy challenge and invite a friend to join you.</p>
+            <h3>{activeChallenges[0] ? activeChallenges[0].challenge.title : 'Grow better, together.'}</h3>
+            <p>
+              {activeChallenges[0]
+                ? `Day ${activeChallenges[0].currentDay} of ${activeChallenges[0].totalDays} · ${activeChallenges[0].completedDays} day${activeChallenges[0].completedDays === 1 ? '' : 's'} done · ${activeChallenges[0].pointsEarned} pts from this challenge`
+                : 'Choose a healthy challenge and keep yourself accountable.'}
+            </p>
+            {rewards && (
+              <p className="challenge-points-line">
+                <Zap size={13} /> {rewards.total} points earned
+                {rewards.badges.length > 0 && ` · ${rewards.badges.length} badge${rewards.badges.length === 1 ? '' : 's'}: ${rewards.badges.map((b) => b.title).join(', ')}`}
+              </p>
+            )}
             <button className="outline-gold" onClick={() => onNavigate('challenges')}>
-              Explore challenges <ArrowRight size={14} />
+              {activeChallenges.length > 0 ? 'View my challenges' : 'Explore challenges'} <ArrowRight size={14} />
             </button>
           </div>
-          <div className="challenge-avatars"><span>Private until you invite someone.</span></div>
+          <div className="challenge-avatars"><span>{activeChallenges.length > 0 ? `${activeChallenges.length} active challenge${activeChallenges.length === 1 ? '' : 's'}` : 'Private until you invite someone.'}</span></div>
         </section>
       </div>
     </>
@@ -1763,39 +1829,429 @@ function SubjectRow({ name, label, tasksDone, tasksTotal, focusMinutes, colour }
   );
 }
 
-function Challenges({ onNotify }: { onNotify: (message: string) => void }) {
-  const [tab, setTab] = useState<'all' | 'friends' | 'solo'>('all');
+const CHALLENGE_CATEGORY_LABELS: Record<ChallengeCategory, string> = {
+  prayers: 'Prayers',
+  quran: 'Quran',
+  study: 'Study',
+  focus: 'Focus',
+  sleep: 'Sleep',
+  discipline: 'Discipline',
+};
 
-  const challengeData = [
-    { title: '7-Day Study Sprint', category: 'Study', duration: '7 days', people: '2 friends', description: 'Build a repeatable daily study rhythm.', tag: 'Popular', icon: GraduationCap },
-    { title: 'Early Sleep Reset', category: 'Lifestyle', duration: '14 days', people: 'Solo or friend', description: 'Create a calmer, consistent night routine.', tag: 'Lifestyle', icon: Moon },
-    { title: 'Daily Walk Challenge', category: 'Fitness', duration: '21 days', people: 'Solo or friend', description: 'Make movement part of your everyday routine.', tag: 'Wellbeing', icon: Footprints },
-  ];
+const CHALLENGE_CATEGORY_ICONS: Record<ChallengeCategory, IconType> = {
+  prayers: Compass,
+  quran: BookOpen,
+  study: GraduationCap,
+  focus: Timer,
+  sleep: Moon,
+  discipline: Target,
+};
 
-  const visible = challengeData.filter((c) =>
-    tab === 'all' ||
-    (tab === 'friends' ? c.people.toLowerCase().includes('friend') : c.people.toLowerCase().includes('solo'))
-  );
+/** Prayers, study and focus complete automatically from real activity. */
+function isAutoCategory(category: ChallengeCategory): boolean {
+  return category === 'prayers' || category === 'study' || category === 'focus';
+}
+
+function requirementFor(category: ChallengeCategory): string {
+  switch (category) {
+    case 'prayers':
+      return 'All five prayers prayed or Qaza';
+    case 'study':
+      return 'Complete a task or finish a focus session';
+    case 'focus':
+      return 'Finish a focus session';
+    default:
+      return 'Self-reported daily check-in';
+  }
+}
+
+function progressSourceLabel(source: string): string {
+  switch (source) {
+    case 'salah':
+      return 'From your Salah record';
+    case 'study-task':
+      return 'From a completed task';
+    case 'focus-session':
+      return 'From a finished focus session';
+    case 'self-reported':
+      return 'Self-reported';
+    default:
+      return source;
+  }
+}
+
+function Challenges({
+  onNotify,
+  onRefresh,
+  guestMode,
+}: {
+  onNotify: (message: string) => void;
+  onRefresh: () => void;
+  guestMode: boolean;
+}) {
+  const [tab, setTab] = useState<'explore' | 'mine' | 'history'>('explore');
+  const [templates, setTemplates] = useState<ChallengeTemplate[]>([]);
+  const [myActive, setMyActive] = useState<ChallengeParticipation[]>([]);
+  const [myHistory, setMyHistory] = useState<ChallengeParticipation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [detail, setDetail] = useState<ChallengeDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [expandedTemplate, setExpandedTemplate] = useState<string | null>(null);
+  const [templateConsent, setTemplateConsent] = useState(false);
+  const [detailConsent, setDetailConsent] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [createTitle, setCreateTitle] = useState('');
+  const [createDescription, setCreateDescription] = useState('');
+  const [createCategory, setCreateCategory] = useState<ChallengeCategory>('study');
+  const [createDuration, setCreateDuration] = useState('30');
+  const [createRules, setCreateRules] = useState('');
+  const [createConsent, setCreateConsent] = useState(false);
+
+  async function loadAll() {
+    if (guestMode) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      const [templateList, mine] = await Promise.all([
+        fetchTemplates(),
+        fetchMyChallenges(),
+      ]);
+      setTemplates(templateList);
+      setMyActive(mine.active);
+      setMyHistory(mine.history);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Challenges could not be loaded.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function openDetail(challengeId: string) {
+    setDetailLoading(true);
+    setDetailConsent(false);
+    setConfirmLeave(false);
+    try {
+      const result = await fetchChallengeDetail(challengeId);
+      setDetail(result);
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : 'Challenge could not be loaded.');
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  async function refreshAfterChange() {
+    await loadAll();
+    onRefresh();
+  }
+
+  async function handleJoinTemplate(template: ChallengeTemplate) {
+    if (!templateConsent) {
+      onNotify('Please read the rules and tick the consent box to join.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const { challenge } = await joinTemplate(template.id);
+      onNotify(`Joined “${template.title}”. Day 1 starts today.`);
+      setExpandedTemplate(null);
+      setTemplateConsent(false);
+      await refreshAfterChange();
+      await openDetail(challenge.id);
+      setTab('mine');
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : 'Could not join this challenge.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleJoinDetail() {
+    if (!detail || !detailConsent) {
+      onNotify('Please read the rules and tick the consent box to join.');
+      return;
+    }
+    setBusy(true);
+    try {
+      await joinChallenge(detail.challenge.id);
+      onNotify(`Joined “${detail.challenge.title}”. Day 1 starts today.`);
+      await refreshAfterChange();
+      await openDetail(detail.challenge.id);
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : 'Could not join this challenge.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleLeave() {
+    if (!detail) return;
+    setBusy(true);
+    try {
+      const result = await leaveChallenge(detail.challenge.id);
+      onNotify(result.message);
+      setConfirmLeave(false);
+      await refreshAfterChange();
+      await openDetail(detail.challenge.id);
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : 'Could not leave this challenge.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCheckIn() {
+    if (!detail) return;
+    setBusy(true);
+    try {
+      const result = await checkInChallenge(detail.challenge.id);
+      onNotify(result.message);
+      await refreshAfterChange();
+      await openDetail(detail.challenge.id);
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : 'Check-in failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCreate(event: FormEvent) {
+    event.preventDefault();
+    const rules = createRules.split('\n').map((r) => r.trim()).filter(Boolean);
+    if (!createTitle.trim() || rules.length === 0 || !createConsent) {
+      onNotify('Add a title, at least one rule, and tick the consent box.');
+      return;
+    }
+    const durationDays = Number.parseInt(createDuration, 10);
+    if (!Number.isFinite(durationDays) || durationDays < 1 || durationDays > 365) {
+      onNotify('Duration must be between 1 and 365 days.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const { challenge } = await createChallenge({
+        title: createTitle.trim(),
+        description: createDescription.trim(),
+        category: createCategory,
+        durationDays,
+        rules,
+        consent: true,
+      });
+      onNotify(`“${challenge.title}” created — you joined automatically.`);
+      setShowCreate(false);
+      setCreateTitle('');
+      setCreateDescription('');
+      setCreateRules('');
+      setCreateConsent(false);
+      await refreshAfterChange();
+      await openDetail(challenge.id);
+      setTab('mine');
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : 'Challenge could not be created.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function participationForTemplate(templateId: string): ChallengeParticipation | undefined {
+    return myActive.find((p) => p.challenge.templateId === templateId);
+  }
+
+  if (guestMode) {
+    return (
+      <>
+        <PageHeading
+          eyebrow="COMMUNITY · ACCOUNTABILITY"
+          title="Progress feels better together."
+          text="Choose a healthy goal and keep yourself accountable."
+        />
+        <section className="panel" style={{ padding: 28 }}>
+          <span className="eyebrow">SIGN IN TO TRACK</span>
+          <h3>Challenges live in your account</h3>
+          <p className="onboarding-help">
+            Sign in to join challenges and earn points from your real activity. Nothing is tracked in guest preview.
+          </p>
+        </section>
+      </>
+    );
+  }
+
+  /* ---------------- Detail view ---------------- */
+
+  if (detail) {
+    const challenge = detail.challenge;
+    const participation = detail.participation;
+    const Icon = CHALLENGE_CATEGORY_ICONS[challenge.category];
+    const auto = isAutoCategory(challenge.category);
+    const completed = participation?.status === 'completed';
+    return (
+      <>
+        <PageHeading
+          eyebrow="CHALLENGE · DETAIL"
+          title={challenge.title}
+          text={challenge.description || 'A challenge you joined.'}
+          action={<button className="outline-button" onClick={() => setDetail(null)}>← All challenges</button>}
+        />
+        {detailLoading && <p className="onboarding-help">Loading challenge details…</p>}
+
+        {completed && participation && (
+          <section className="panel challenge-completed">
+            <Trophy size={22} />
+            <div>
+              <span className="eyebrow">CHALLENGE COMPLETED</span>
+              <h3>You finished all {challenge.durationDays} days.</h3>
+              <p>
+                Badge earned: {challenge.durationDays >= 365 ? '365-Day Challenger' : challenge.durationDays >= 30 ? '30-Day Challenger' : 'Challenge Finisher'} · {participation.pointsEarned} points from this challenge.
+              </p>
+            </div>
+          </section>
+        )}
+
+        <div className="challenge-detail-grid">
+          <section className="panel">
+            <span className="eyebrow">{CHALLENGE_CATEGORY_LABELS[challenge.category].toUpperCase()} · {challenge.durationDays} DAYS · {challenge.kind === 'template' ? 'TEMPLATE' : 'YOUR CHALLENGE'}</span>
+            <h3>Rules — read before joining</h3>
+            <ul className="challenge-rules">
+              {challenge.rules.map((rule, index) => <li key={index}>{rule}</li>)}
+            </ul>
+            <p className="onboarding-help">
+              What completes a day: {requirementFor(challenge.category)}.
+              {!auto && ' Days are self-reported — they are shown as self-reported, never as verified.'}
+            </p>
+
+            {!participation && (
+              <div className="challenge-consent">
+                <label className="consent-row">
+                  <input type="checkbox" checked={detailConsent} onChange={(e) => setDetailConsent(e.target.checked)} />
+                  <span>I have read the rules and I join this challenge willingly.</span>
+                </label>
+                <button className="primary-button" disabled={!detailConsent || busy} onClick={handleJoinDetail}>
+                  Join this challenge
+                </button>
+              </div>
+            )}
+
+            {participation && participation.status === 'active' && (
+              <div className="challenge-leave">
+                {!confirmLeave ? (
+                  <button className="outline-button" onClick={() => setConfirmLeave(true)}>Leave challenge</button>
+                ) : (
+                  <>
+                    <p className="onboarding-help">{detail.leaveRule}</p>
+                    <div className="challenge-leave-actions">
+                      <button className="primary-button" disabled={busy} onClick={handleLeave}>Yes, leave — keep my history</button>
+                      <button className="outline-button" onClick={() => setConfirmLeave(false)}>Stay</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </section>
+
+          <section className="panel">
+            {participation ? (
+              <>
+                <span className="eyebrow">YOUR PROGRESS</span>
+                <h3>Day {participation.currentDay} of {participation.totalDays}</h3>
+                <div className="progress-track"><span className="fill-mint" style={{ width: `${Math.round((participation.completedDays / participation.totalDays) * 100)}%` }} /></div>
+                <div className="challenge-stat-row">
+                  <div><strong>{participation.completedDays}</strong><span>days done</span></div>
+                  <div><strong>{participation.streak}</strong><span>day streak</span></div>
+                  <div><strong>{participation.pointsEarned}</strong><span>points</span></div>
+                </div>
+                <p className="onboarding-help">
+                  {detail.todayCompleted
+                    ? 'Today is done. Come back tomorrow for the next day.'
+                    : auto
+                      ? `Today is not done yet — ${requirementFor(challenge.category).toLowerCase()}. It completes automatically from your real activity.`
+                      : 'Today is not done yet — mark it yourself after you have kept the habit.'}
+                </p>
+                {participation.status === 'active' && !auto && !detail.todayCompleted && (
+                  <button className="primary-button" disabled={busy} onClick={handleCheckIn}>
+                    <Check size={16} /> Check in for today (self-reported)
+                  </button>
+                )}
+                {detail.progress.length > 0 && (
+                  <>
+                    <h3 style={{ marginTop: 18 }}>Recent days</h3>
+                    <div className="challenge-progress-list">
+                      {detail.progress.slice(0, 14).map((day) => (
+                        <div className="challenge-progress-row" key={day.date}>
+                          <span className="challenge-day-dot done" />
+                          <div><strong>Day {day.dayNumber} · {day.date}</strong><small>{progressSourceLabel(day.source)}{day.source === 'self-reported' ? ' — self-reported, not verified' : ''}</small></div>
+                          <Check size={15} />
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <span className="eyebrow">YOUR PROGRESS</span>
+                <h3>Not joined yet</h3>
+                <p className="onboarding-help">Read the rules, tick the consent box and join to start day 1 today.</p>
+              </>
+            )}
+            {detail.history.length > 0 && (
+              <>
+                <h3 style={{ marginTop: 18 }}>Past attempts</h3>
+                {detail.history.map((attempt) => (
+                  <p className="onboarding-help" key={attempt.id}>
+                    {attempt.status === 'completed' ? 'Completed' : 'Left'} · {attempt.completedDays} of {attempt.totalDays} days · {attempt.pointsEarned} points kept
+                  </p>
+                ))}
+              </>
+            )}
+          </section>
+        </div>
+
+        <div className="privacy-callout">
+          <Lock size={16} />
+          <div>
+            <strong>Privacy comes first</strong>
+            <span>Your prayer history and private activity are never shared. Challenges here are solo — friends and invites come in a later phase.</span>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  /* ---------------- List view ---------------- */
 
   return (
     <>
       <PageHeading
         eyebrow="COMMUNITY · ACCOUNTABILITY"
         title="Progress feels better together."
-        text="Choose a healthy goal, invite someone you trust and keep each other accountable."
+        text="Choose a healthy goal, keep yourself accountable, and earn points from real activity — never from invented progress."
         action={
-          <button className="primary-button" onClick={() => onNotify('Challenge creation flow will be connected after backend permissions and privacy rules are ready.')}>
+          <button className="primary-button" onClick={() => setShowCreate(true)}>
             <Plus size={16} /> Create challenge
           </button>
         }
       />
 
+      {error && <p className="salah-error">{error}</p>}
+      {loading && <p className="onboarding-help">Loading challenges…</p>}
+
       <div className="challenge-highlight panel">
         <div>
           <span className="eyebrow">A HEALTHY KIND OF COMPETITION</span>
           <h2>Compete with your past self.<br /><em>Support each other.</em></h2>
-          <p>Keep worship personal. Use shared challenges for study, sleep, fitness and everyday habits.</p>
-          <button className="gold-button" onClick={() => onNotify('Challenge setup will be connected in the backend phase.')}>
+          <p>Keep worship personal. Points come from real activity — finished focus sessions, completed tasks and challenge days — never per prayer.</p>
+          <button className="gold-button" onClick={() => setTab('explore')}>
             Start a challenge <ArrowRight size={15} />
           </button>
         </div>
@@ -1809,41 +2265,166 @@ function Challenges({ onNotify }: { onNotify: (message: string) => void }) {
 
       <div className="challenge-controls">
         <div className="segmented">
-          <button className={tab === 'all' ? 'on' : ''} onClick={() => setTab('all')}>Explore all</button>
-          <button className={tab === 'friends' ? 'on' : ''} onClick={() => setTab('friends')}>With friends</button>
-          <button className={tab === 'solo' ? 'on' : ''} onClick={() => setTab('solo')}>Solo goals</button>
+          <button className={tab === 'explore' ? 'on' : ''} onClick={() => setTab('explore')}>Explore</button>
+          <button className={tab === 'mine' ? 'on' : ''} onClick={() => setTab('mine')}>My challenges ({myActive.length})</button>
+          <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>History ({myHistory.length})</button>
         </div>
         <div className="privacy-hint"><ShieldCheck size={14} /> Private progress by default</div>
       </div>
 
-      <div className="challenge-cards">
-        {visible.map((c) => {
-          const Icon = c.icon;
-          return (
-            <div className="panel challenge-card" key={c.title}>
-              <div className="challenge-card-icon"><Icon size={21} /></div>
-              <span className="eyebrow">{c.category.toUpperCase()} · {c.tag.toUpperCase()}</span>
-              <h3>{c.title}</h3>
-              <p>{c.description}</p>
-              <div className="challenge-meta">
-                <span><CalendarDays size={14} /> {c.duration}</span>
-                <span><Users size={14} /> {c.people}</span>
+      {tab === 'explore' && (
+        <div className="challenge-cards">
+          {templates.length === 0 && !loading && (
+            <p className="onboarding-help">No templates available right now. Create your own challenge instead.</p>
+          )}
+          {templates.map((template) => {
+            const Icon = CHALLENGE_CATEGORY_ICONS[template.category];
+            const joined = participationForTemplate(template.id);
+            const expanded = expandedTemplate === template.id;
+            return (
+              <div className="panel challenge-card" key={template.id}>
+                <div className="challenge-card-icon"><Icon size={21} /></div>
+                <span className="eyebrow">{CHALLENGE_CATEGORY_LABELS[template.category].toUpperCase()} · {template.durationDays} DAYS</span>
+                <h3>{template.title}</h3>
+                <p>{template.description}</p>
+                <div className="challenge-meta">
+                  <span><CalendarDays size={14} /> {template.durationDays} days</span>
+                  <span><Target size={14} /> {template.requirement}</span>
+                </div>
+                {expanded && (
+                  <div className="challenge-rules-box">
+                    <strong>Rules — read before joining</strong>
+                    <ul className="challenge-rules">
+                      {template.rules.map((rule, index) => <li key={index}>{rule}</li>)}
+                    </ul>
+                    <label className="consent-row">
+                      <input type="checkbox" checked={templateConsent} onChange={(e) => setTemplateConsent(e.target.checked)} />
+                      <span>I have read the rules and I join this challenge willingly.</span>
+                    </label>
+                  </div>
+                )}
+                {joined ? (
+                  <button className="primary-button full-width" onClick={() => openDetail(joined.challengeId)}>
+                    Joined · Day {joined.currentDay} of {joined.totalDays} — View <ArrowRight size={15} />
+                  </button>
+                ) : expanded ? (
+                  <div className="challenge-card-actions">
+                    <button className="primary-button full-width" disabled={!templateConsent || busy} onClick={() => handleJoinTemplate(template)}>
+                      Join this challenge
+                    </button>
+                    <button className="outline-button full-width" onClick={() => { setExpandedTemplate(null); setTemplateConsent(false); }}>Close rules</button>
+                  </div>
+                ) : (
+                  <button className="outline-button full-width" onClick={() => { setExpandedTemplate(template.id); setTemplateConsent(false); }}>
+                    View rules &amp; join <ArrowRight size={15} />
+                  </button>
+                )}
               </div>
-              <button className="outline-button full-width" onClick={() => onNotify('Challenge details and consent flow are coming with the secure backend.')}>
-                View challenge <ArrowRight size={15} />
-              </button>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === 'mine' && (
+        <div className="challenge-cards">
+          {myActive.length === 0 && !loading && (
+            <p className="onboarding-help">You have no active challenges. Explore the templates or create your own.</p>
+          )}
+          {myActive.map((participation) => {
+            const Icon = CHALLENGE_CATEGORY_ICONS[participation.challenge.category];
+            return (
+              <div className="panel challenge-card" key={participation.id}>
+                <div className="challenge-card-icon"><Icon size={21} /></div>
+                <span className="eyebrow">{CHALLENGE_CATEGORY_LABELS[participation.challenge.category].toUpperCase()} · {participation.totalDays} DAYS</span>
+                <h3>{participation.challenge.title}</h3>
+                <p>{participation.challenge.description}</p>
+                <div className="challenge-meta">
+                  <span><CalendarDays size={14} /> Day {participation.currentDay} of {participation.totalDays}</span>
+                  <span><Flame size={14} /> {participation.streak}-day streak</span>
+                </div>
+                <div className="progress-track"><span className="fill-mint" style={{ width: `${Math.round((participation.completedDays / participation.totalDays) * 100)}%` }} /></div>
+                <p className="onboarding-help">{participation.completedDays} days done · {participation.pointsEarned} points{participation.todayCompleted ? ' · Today done' : ' · Today pending'}</p>
+                <button className="outline-button full-width" onClick={() => openDetail(participation.challengeId)}>
+                  View challenge <ArrowRight size={15} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === 'history' && (
+        <div className="challenge-cards">
+          {myHistory.length === 0 && !loading && (
+            <p className="onboarding-help">No finished or left challenges yet. Your history will appear here and is never deleted.</p>
+          )}
+          {myHistory.map((participation) => {
+            const Icon = CHALLENGE_CATEGORY_ICONS[participation.challenge.category];
+            return (
+              <div className="panel challenge-card" key={participation.id}>
+                <div className="challenge-card-icon"><Icon size={21} /></div>
+                <span className="eyebrow">{CHALLENGE_CATEGORY_LABELS[participation.challenge.category].toUpperCase()} · {participation.totalDays} DAYS · {participation.status === 'completed' ? 'COMPLETED' : 'LEFT'}</span>
+                <h3>{participation.challenge.title}</h3>
+                <p>{participation.completedDays} of {participation.totalDays} days done · {participation.pointsEarned} points kept</p>
+                {participation.status === 'completed' && (
+                  <p className="onboarding-help">Badge earned: {participation.totalDays >= 365 ? '365-Day Challenger' : participation.totalDays >= 30 ? '30-Day Challenger' : 'Challenge Finisher'}</p>
+                )}
+                <button className="outline-button full-width" onClick={() => openDetail(participation.challengeId)}>
+                  View challenge <ArrowRight size={15} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="privacy-callout">
         <Lock size={16} />
         <div>
           <strong>Privacy comes first</strong>
-          <span>Random matching will require consent. Your location, prayer history and private religious activity will never be shared with strangers.</span>
+          <span>Random matching will require consent. Your location, prayer history and private religious activity will never be shared with strangers. Friends and invites come in a later phase.</span>
         </div>
       </div>
+
+      {showCreate && (
+        <div className="modal-backdrop" onClick={() => setShowCreate(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <div><span className="eyebrow">CHALLENGES</span><h3>Create your own challenge</h3></div>
+              <button className="icon-button" onClick={() => setShowCreate(false)}><X size={18} /></button>
+            </div>
+            <form onSubmit={handleCreate}>
+              <label className="field-label">Title</label>
+              <input className="form-input" value={createTitle} onChange={(e) => setCreateTitle(e.target.value)} placeholder="e.g. Read 10 pages every day" />
+              <label className="field-label">Description (optional)</label>
+              <input className="form-input" value={createDescription} onChange={(e) => setCreateDescription(e.target.value)} placeholder="What is this challenge about?" />
+              <div className="form-row">
+                <div>
+                  <label className="field-label">Category</label>
+                  <select className="form-input" value={createCategory} onChange={(e) => setCreateCategory(e.target.value as ChallengeCategory)}>
+                    {(Object.keys(CHALLENGE_CATEGORY_LABELS) as ChallengeCategory[]).map((c) => (
+                      <option key={c} value={c}>{CHALLENGE_CATEGORY_LABELS[c]}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="field-label">Duration (days)</label>
+                  <input className="form-input" inputMode="numeric" value={createDuration} onChange={(e) => setCreateDuration(e.target.value)} placeholder="30" />
+                </div>
+              </div>
+              <p className="onboarding-help">What completes a day: {requirementFor(createCategory)}.{!isAutoCategory(createCategory) && ' Days are self-reported — shown as self-reported, never as verified.'}</p>
+              <label className="field-label">Rules (one per line)</label>
+              <textarea className="form-input" value={createRules} onChange={(e) => setCreateRules(e.target.value)} placeholder={'e.g. A day counts when I finish the task.\nDays are counted in my own timezone.'} rows={4} />
+              <label className="consent-row">
+                <input type="checkbox" checked={createConsent} onChange={(e) => setCreateConsent(e.target.checked)} />
+                <span>I understand the rules and I join this challenge willingly. I can leave at any time — my history and earned points are kept.</span>
+              </label>
+              <button className="primary-button full-width" type="submit" disabled={busy}>Create &amp; join</button>
+              <p className="modal-note">You join automatically when you create a challenge. Friends and invites come in a later phase — this is solo for now.</p>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -2072,7 +2653,19 @@ function InfoIcon() {
   return <span className="info-icon">i</span>;
 }
 
-function Analytics({ stats, guestMode }: { stats: StudyStats | null; guestMode: boolean }) {
+function Analytics({
+  stats,
+  guestMode,
+  rewards,
+  activeChallenges,
+  challengeHistory,
+}: {
+  stats: StudyStats | null;
+  guestMode: boolean;
+  rewards: RewardsSummary | null;
+  activeChallenges: ChallengeParticipation[];
+  challengeHistory: ChallengeParticipation[];
+}) {
   if (guestMode) {
     return (
       <>
@@ -2114,7 +2707,12 @@ function Analytics({ stats, guestMode }: { stats: StudyStats | null; guestMode: 
     stats.todayFocusMinutes > 0 ||
     stats.weekFocusMinutes > 0 ||
     stats.tasksCompletedToday > 0 ||
-    stats.subjectBreakdown.some((s) => s.tasksTotal > 0);
+    stats.subjectBreakdown.some((s) => s.tasksTotal > 0) ||
+    (rewards?.total ?? 0) > 0 ||
+    activeChallenges.length > 0 ||
+    challengeHistory.length > 0;
+
+  const completedChallenges = challengeHistory.filter((c) => c.status === 'completed').length;
 
   return (
     <>
@@ -2175,8 +2773,42 @@ function Analytics({ stats, guestMode }: { stats: StudyStats | null; guestMode: 
               ))
             )}
           </section>
+          <section className="panel progress-breakdown" style={{ marginTop: 14 }}>
+            <SectionTitle title="Challenges & points" />
+            <div className="analytics-grid" style={{ marginTop: 0 }}>
+              <div className="panel metric-card">
+                <span className="eyebrow">TOTAL POINTS</span>
+                <strong>{rewards?.total ?? 0}</strong>
+                <span className="metric-trend"><Zap size={13} /> From real activity only — never per prayer</span>
+              </div>
+              <div className="panel metric-card">
+                <span className="eyebrow">BADGES EARNED</span>
+                <strong>{rewards?.badges.length ?? 0}</strong>
+                <span className="metric-trend"><Trophy size={13} /> {rewards && rewards.badges.length > 0 ? rewards.badges.map((b) => b.title).join(', ') : 'No badges yet'}</span>
+              </div>
+              <div className="panel metric-card">
+                <span className="eyebrow">ACTIVE CHALLENGES</span>
+                <strong>{activeChallenges.length}</strong>
+                <span className="metric-trend"><Target size={13} /> {completedChallenges} completed in total</span>
+              </div>
+            </div>
+            {rewards && rewards.recent.length > 0 && (
+              <div className="challenge-progress-list" style={{ marginTop: 14 }}>
+                {rewards.recent.map((entry) => (
+                  <div className="challenge-progress-row" key={entry.id}>
+                    <span className="challenge-day-dot done" />
+                    <div><strong>+{entry.amount} points</strong><small>{POINT_REASON_LABELS[entry.reason]} · {new Date(entry.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</small></div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {(!rewards || rewards.recent.length === 0) && (
+              <p className="onboarding-help">No points yet. Finish a focus session, complete a task, or complete a challenge day to earn your first points.</p>
+            )}
+          </section>
           <p className="analytics-footnote">
             Study analytics are calculated only from your saved tasks and finished focus sessions.
+            Challenge and points analytics come only from your saved activity and server-side awards.
             Salah and habit analytics are not connected yet — no scores are invented for them.
           </p>
         </>
