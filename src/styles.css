@@ -507,18 +507,14 @@
 @keyframes auth-tick-pop{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}
 @media(max-width:760px){.auth-orb-one{width:260px;height:260px}.auth-orb-two{width:250px;height:250px}.auth-crescent{font-size:38px;top:9%;right:7%}.auth-star-one{left:6%}.auth-greeting{font-size:15px}}
 
-/* AHDORA meaning strip — welcome page. Letters arrive one by one when the
-   strip scrolls into view (staggered via --d). Reduced-motion users see
-   the full strip at once. */
-.meaning-strip{padding:56px 36px 10px;max-width:1120px;margin:0 auto;scroll-margin-top:20px}
-.meaning-intro{text-align:center;margin-bottom:30px}
-.meaning-intro h2{font-family:Manrope,sans-serif;font-size:30px;line-height:1.25;margin:12px 0 8px;color:var(--text)}
-.meaning-intro p{color:var(--muted);font-size:14px;margin:0}
-.meaning-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
-.meaning-item{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 10px 18px;text-align:center;opacity:0;transform:translateY(14px);transition:opacity .6s ease var(--d,0s),transform .6s ease var(--d,0s),border-color .2s}
-.meaning-visible .meaning-item{opacity:1;transform:translateY(0)}
-.meaning-item:hover{transform:translateY(-4px);border-color:var(--line-strong)}
-.meaning-letter{display:block;font-family:Manrope,sans-serif;font-size:36px;font-weight:800;line-height:1;color:var(--gold)}
-.meaning-word{display:block;margin-top:10px;font-size:12px;font-weight:700;letter-spacing:.4px;color:var(--text)}
-@media(max-width:760px){.meaning-strip{padding:40px 20px 6px}.meaning-grid{grid-template-columns:repeat(3,1fr)}.meaning-intro h2{font-size:23px}.meaning-letter{font-size:30px}}
-@media(prefers-reduced-motion:reduce){.meaning-item{opacity:1;transform:none;transition:none}}
+/* AHDORA meaning — typed out live on the login card, right after the
+   Salam greeting. Six compact rows; each letter pops in, then its word
+   types out beside it. Rows always take up their space so the card
+   never jumps while the animation plays. */
+.meaning-type{margin:14px 0 4px;display:flex;flex-direction:column;gap:3px}
+.meaning-type-row{display:flex;align-items:baseline;gap:8px;min-height:22px;font-size:14px}
+.meaning-type-letter{display:inline-block;width:16px;text-align:center;font-family:Manrope,sans-serif;font-size:16px;font-weight:800;color:var(--gold);opacity:0;transform:scale(.6);transition:opacity .25s ease,transform .25s ease}
+.meaning-type-letter-in{opacity:1;transform:scale(1)}
+.meaning-type-dash{color:var(--muted2);font-size:12px}
+.meaning-type-word{color:var(--text);font-weight:600;letter-spacing:.3px}
+@media(prefers-reduced-motion:reduce){.meaning-type-letter{opacity:1;transform:none;transition:none}}

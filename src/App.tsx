@@ -662,7 +662,7 @@ function Welcome({ onContinue, onExplore }: { onContinue: () => void; onExplore:
         </div>
       </div>
 
-      <div className="welcome-hero">
+      <div className="welcome-hero" id="meaning">
         <div className="hero-copy">
           <div className="eyebrow hero-eyebrow"><span /> A CALMER WAY TO GROW</div>
           <h1>Your life.<br /><em>Your intention.</em><br />Your growth.</h1>
@@ -706,8 +706,6 @@ function Welcome({ onContinue, onExplore }: { onContinue: () => void; onExplore:
           </div>
         </div>
       </div>
-
-      <AhdoraMeaning />
 
       <div className="welcome-bottom" id="features">
         <div className="bottom-intro">
@@ -838,6 +836,8 @@ function Login({
           <h1>{tab === 'login' ? 'Welcome back.' : 'Begin with intention.'}</h1>
           <p>{tab === 'login' ? 'Pick up where you left off.' : 'Create your personal AHDORA space.'}</p>
         </div>
+
+        <AhdoraMeaning />
 
         <div className="auth-tabs auth-tabs-animated">
           <span className={`auth-tab-pill ${tab === 'signup' ? 'auth-tab-pill-right' : ''}`} aria-hidden="true" />
