@@ -16,6 +16,8 @@ import {
 } from './lib/notificationsApi';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Onboarding from './components/Onboarding';
+import AuthBackdrop from './components/AuthBackdrop';
+import Typewriter from './components/Typewriter';
 import { emptyProfile, type UserProfile } from './types/profile';
 import { loadProfile, saveProfile } from './lib/profileApi';
 import { fetchPrayerTimes, type PrayerTimesResponse } from './lib/prayerApi';
@@ -168,6 +170,10 @@ function App() {
   const [screen, setScreen] = useState<'checking' | 'welcome' | 'login' | 'forgot' | 'reset' | 'onboarding' | 'app'>('checking');
   const [resetToken, setResetToken] = useState('');
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  // True briefly after a successful login/signup so the auth button can
+  // show its success tick before the screen changes. Presentation only;
+  // the session itself is established by handleLogin/handleSignup.
+  const [authSuccess, setAuthSuccess] = useState(false);
   const [guestMode, setGuestMode] = useState(false);
   const [page, setPage] = useState<Page>('dashboard');
   const [guidanceTab, setGuidanceTab] = useState<GuidanceTab>('quran');
@@ -446,6 +452,13 @@ function App() {
     return () => { active = false; };
   }, []);
 
+  // The login screen's success tick is cleared whenever we (re)enter it,
+  // so a fresh visit never starts in the success state. This does not run
+  // while the screen stays on 'login' (e.g. during the success flash).
+  useEffect(() => {
+    if (screen === 'login') setAuthSuccess(false);
+  }, [screen]);
+
   const filteredNav = useMemo(() => {
     if (!query.trim()) return navItems;
     return navItems.filter((item) => item.label.toLowerCase().includes(query.toLowerCase()));
@@ -468,6 +481,12 @@ function App() {
     const result = await apiRequest<{ user: AuthUser }>('/api/auth/login', {
       method: 'POST', body: JSON.stringify({ email, password }),
     });
+    setAuthUser(result.user);
+    setProfileName(result.user.name);
+    // Brief pause so the auth button's success tick is visible before the
+    // profile loads and the screen changes. Auth itself is already done.
+    setAuthSuccess(true);
+    await new Promise((resolve) => window.setTimeout(resolve, 750));
     await hydrateProfile(result.user);
   }
 
@@ -478,6 +497,10 @@ function App() {
     setAuthUser(result.user);
     setProfileName(result.user.name);
     setNewUser(emptyProfile(result.user.name, result.user.email));
+    // Brief pause so the auth button's success tick is visible before the
+    // onboarding screen opens. Auth itself is already done.
+    setAuthSuccess(true);
+    await new Promise((resolve) => window.setTimeout(resolve, 750));
     setScreen('onboarding');
   }
 
@@ -572,7 +595,7 @@ function App() {
     return <Welcome onContinue={() => setScreen('login')} onExplore={() => { setGuestMode(true); setProfileName('Guest'); setScreen('app'); }} />;
   }
   if (screen === 'login') {
-    return <Login onBack={() => setScreen('welcome')} onLogin={handleLogin} onSignup={handleSignup} onForgot={() => setScreen('forgot')} />;
+    return <Login onBack={() => setScreen('welcome')} onLogin={handleLogin} onSignup={handleSignup} onForgot={() => setScreen('forgot')} authSuccess={authSuccess} />;
   }
   if (screen === 'forgot') {
     return <ForgotPassword onBack={() => setScreen('login')} onSent={() => notify('If an account exists for this email, a reset link has been sent.')} />;
@@ -718,11 +741,13 @@ function Login({
   onLogin,
   onSignup,
   onForgot,
+  authSuccess,
 }: {
   onBack: () => void;
   onLogin: (email: string, password: string) => Promise<void>;
   onSignup: (user: { name: string; email: string; password: string }) => Promise<void>;
   onForgot: () => void;
+  authSuccess: boolean;
 }) {
   const [tab, setTab] = useState<'login' | 'signup'>('login');
   const [name, setName] = useState('');
@@ -730,6 +755,18 @@ function Login({
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  // Shows the error and replays the card's shake animation.
+  function fail(message: string) {
+    setError(message);
+    const card = cardRef.current;
+    if (card) {
+      card.classList.remove('auth-shake');
+      void card.offsetWidth;
+      card.classList.add('auth-shake');
+    }
+  }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -738,18 +775,18 @@ function Login({
     setError('');
 
     if (!email.trim() || !password) {
-      setError('Email aur password dono bharna zaroori hai.');
+      fail('Email aur password dono bharna zaroori hai.');
       return;
     }
 
     if (tab === 'signup') {
       if (name.trim().length < 2) {
-        setError('Apna naam sahi se enter karo.');
+        fail('Apna naam sahi se enter karo.');
         return;
       }
 
       if (password.length < 12) {
-        setError('Password kam se kam 12 characters ka rakho.');
+        fail('Password kam se kam 12 characters ka rakho.');
         return;
       }
 
@@ -758,7 +795,7 @@ function Login({
       try {
         await onSignup({ name: name.trim(), email: email.trim(), password });
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Account create nahi ho paya.');
+        fail(err instanceof Error ? err.message : 'Account create nahi ho paya.');
       } finally {
         setBusy(false);
       }
@@ -768,7 +805,7 @@ function Login({
       try {
         await onLogin(email.trim(), password);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Login nahi ho paya.');
+        fail(err instanceof Error ? err.message : 'Login nahi ho paya.');
       } finally {
         setBusy(false);
       }
@@ -776,16 +813,22 @@ function Login({
   }
 
   return (
-    <div className="auth-screen">
-      <button className="back-link" onClick={onBack}>
+    <div className="auth-screen auth-screen-animated">
+      <AuthBackdrop />
+      <button className="back-link" onClick={onBack} disabled={busy || authSuccess}>
         <ArrowRight className="back-arrow" size={16} /> Back to welcome
       </button>
 
-      <div className="auth-card">
+      <div className="auth-card auth-card-animated" ref={cardRef}>
         <div className="auth-brand">
           <img src={logo} alt="AHDORA" />
           <span>AHDORA</span>
         </div>
+
+        <p className="auth-greeting">
+          <span className="auth-greeting-ar" lang="ar">ٱلسَّلَامُ عَلَيْكُمْ</span>
+          <Typewriter text="Assalamu Alaikum" />
+        </p>
 
         <div className="auth-heading">
           <span className="eyebrow">YOUR SPACE, YOUR PACE</span>
@@ -793,7 +836,8 @@ function Login({
           <p>{tab === 'login' ? 'Pick up where you left off.' : 'Create your personal AHDORA space.'}</p>
         </div>
 
-        <div className="auth-tabs">
+        <div className="auth-tabs auth-tabs-animated">
+          <span className={`auth-tab-pill ${tab === 'signup' ? 'auth-tab-pill-right' : ''}`} aria-hidden="true" />
           <button
             type="button"
             className={tab === 'login' ? 'selected' : ''}
@@ -811,47 +855,71 @@ function Login({
         </div>
 
         <form onSubmit={handleSubmit}>
-          {tab === 'signup' && (
-            <>
-              <label className="field-label">Your name</label>
+          <div key={tab} className={`auth-panel ${tab === 'signup' ? 'auth-panel-from-right' : 'auth-panel-from-left'}`}>
+            {tab === 'signup' && (
+              <div className="auth-field">
+                <input
+                  id="auth-name"
+                  className="form-input auth-input"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder=" "
+                  autoComplete="name"
+                  required
+                />
+                <label className="auth-floating-label" htmlFor="auth-name">Your name</label>
+              </div>
+            )}
+
+            <div className="auth-field">
               <input
-                className="form-input"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Enter your name"
-                autoComplete="name"
+                id="auth-email"
+                className="form-input auth-input"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder=" "
+                autoComplete="email"
                 required
               />
-            </>
-          )}
+              <label className="auth-floating-label" htmlFor="auth-email">Email address</label>
+            </div>
 
-          <label className="field-label">Email address</label>
-          <input
-            className="form-input"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            autoComplete="email"
-            required
-          />
+            <div className="auth-field">
+              <input
+                id="auth-password"
+                className="form-input auth-input"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder=" "
+                autoComplete={tab === 'login' ? 'current-password' : 'new-password'}
+                required
+              />
+              <label className="auth-floating-label" htmlFor="auth-password">Password</label>
+            </div>
+            {tab === 'signup' && <small className="auth-hint">Minimum 12 characters</small>}
+          </div>
 
-          <label className="field-label">Password</label>
-          <input
-            className="form-input"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder={tab === 'signup' ? 'Minimum 12 characters' : 'Your password'}
-            autoComplete={tab === 'login' ? 'current-password' : 'new-password'}
-            required
-          />
+          {error && <p className="auth-error" role="alert" style={{ color: '#c45b52', fontSize: 13, marginTop: 12 }}>{error}</p>}
 
-          {error && <p style={{ color: '#c45b52', fontSize: 13, marginTop: 12 }}>{error}</p>}
-
-          <button type="submit" className="primary-button full-width" disabled={busy}>
-            {busy ? 'Please wait...' : tab === 'login' ? 'Log in' : 'Create account'}
-            <ArrowRight size={16} />
+          <button type="submit" className={`primary-button full-width auth-submit ${authSuccess ? 'auth-submit-success' : ''}`} disabled={busy}>
+            {authSuccess ? (
+              <>
+                <svg className="auth-tick-svg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M7 12.5 10.5 16 17 8.5" /></svg>
+                Welcome!
+              </>
+            ) : busy ? (
+              <>
+                <span className="auth-spinner" aria-hidden="true" />
+                Please wait...
+              </>
+            ) : (
+              <>
+                {tab === 'login' ? 'Log in' : 'Create account'}
+                <ArrowRight size={16} />
+              </>
+            )}
           </button>
         </form>
 
