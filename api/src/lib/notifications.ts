@@ -13,11 +13,14 @@ import { userTimezone } from './challengeProgress.js';
  *    anything: the notification is still stored, it is just NOT pushed
  *    live over the socket. The user sees it when they open the app.
  *
- * There is deliberately no scheduled/push reminder system in this
- * codebase: no background job exists that could deliver a prayer
- * reminder while the app is closed, so none is claimed. Live prayer
- * awareness (next prayer + countdown while the app is open) is
- * computed from real prayer times at read time, not from a push.
+ * Time-based reminders are delivered by the in-process scheduler
+ * (lib/scheduler.ts, one tick per minute, in-app + Socket.IO only —
+ * there is no web push). The scheduler creates each event at most
+ * once via createScheduledNotification, which dedupes on
+ * (userId, type, refId) — scheduler refIds always include the date
+ * and event, e.g. `prayer:Fajr:start:2026-11-20`.
+ *
+ * All copy lives in lib/notificationCopy.ts and is Hinglish.
  */
 
 export type NotificationInput = {
@@ -113,6 +116,34 @@ export async function createNotification(
       emitToUser(userId, 'notification_created', { notification: created });
     }
     return created;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Scheduler entry point: create a notification at most ONCE per
+ * (userId, type, refId). The scheduler's refIds always name the exact
+ * event and day (e.g. `prayer:Fajr:start:2026-11-20`), so a tick that
+ * runs twice, or a server restart mid-day, can never double-notify.
+ *
+ * Returns the created notification, or null when it already exists,
+ * when the category is switched off, or on any error. The category
+ * and quiet-hours rules of createNotification still apply.
+ */
+export async function createScheduledNotification(
+  userId: string,
+  input: NotificationInput,
+): Promise<CreatedNotification | null> {
+  try {
+    if (!input.refId) return null;
+    const exists = await Notification.exists({
+      userId,
+      type: input.type,
+      refId: input.refId,
+    });
+    if (exists) return null;
+    return await createNotification(userId, input);
   } catch {
     return null;
   }

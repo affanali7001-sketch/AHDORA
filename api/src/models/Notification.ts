@@ -14,9 +14,10 @@ export type NotificationType = (typeof notificationTypes)[number];
 /**
  * In-app notifications. They are created server-side, only when a real
  * event happens (friend request, invite, challenge day completed,
- * challenge completed, badge earned). There is no background scheduler
- * in this codebase, so no notification is ever claimed to be pushed
- * while the app is closed — see the notes in lib/notifications.ts.
+ * challenge completed, badge earned) or when a real time-based event
+ * falls due (prayer time, task due, bedtime — see lib/scheduler.ts,
+ * which dedupes on (userId, type, refId)). There is no web push:
+ * delivery is in-app + Socket.IO while the app/server is running.
  */
 const notificationSchema = new Schema({
   userId: {
@@ -51,7 +52,7 @@ const notificationSchema = new Schema({
   refId: {
     type: String,
     trim: true,
-    maxlength: 60,
+    maxlength: 100,
     default: '',
   },
   read: {
@@ -61,5 +62,7 @@ const notificationSchema = new Schema({
 }, { timestamps: true, versionKey: false });
 
 notificationSchema.index({ userId: 1, read: 1, createdAt: -1 });
+// Scheduler dedupe: one notification per (user, type, event refId).
+notificationSchema.index({ userId: 1, type: 1, refId: 1 });
 
 export const Notification = mongoose.model('Notification', notificationSchema);

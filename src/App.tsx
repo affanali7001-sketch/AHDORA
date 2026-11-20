@@ -16,6 +16,9 @@ import {
 } from './lib/notificationsApi';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Onboarding from './components/Onboarding';
+import AuthBackdrop from './components/AuthBackdrop';
+import Typewriter from './components/Typewriter';
+import AhdoraMeaning from './components/AhdoraMeaning';
 import { emptyProfile, type UserProfile } from './types/profile';
 import { loadProfile, saveProfile } from './lib/profileApi';
 import { fetchPrayerTimes, type PrayerTimesResponse } from './lib/prayerApi';
@@ -168,6 +171,10 @@ function App() {
   const [screen, setScreen] = useState<'checking' | 'welcome' | 'login' | 'forgot' | 'reset' | 'onboarding' | 'app'>('checking');
   const [resetToken, setResetToken] = useState('');
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  // True briefly after a successful login/signup so the auth button can
+  // show its success tick before the screen changes. Presentation only;
+  // the session itself is established by handleLogin/handleSignup.
+  const [authSuccess, setAuthSuccess] = useState(false);
   const [guestMode, setGuestMode] = useState(false);
   const [page, setPage] = useState<Page>('dashboard');
   const [guidanceTab, setGuidanceTab] = useState<GuidanceTab>('quran');
@@ -446,6 +453,13 @@ function App() {
     return () => { active = false; };
   }, []);
 
+  // The login screen's success tick is cleared whenever we (re)enter it,
+  // so a fresh visit never starts in the success state. This does not run
+  // while the screen stays on 'login' (e.g. during the success flash).
+  useEffect(() => {
+    if (screen === 'login') setAuthSuccess(false);
+  }, [screen]);
+
   const filteredNav = useMemo(() => {
     if (!query.trim()) return navItems;
     return navItems.filter((item) => item.label.toLowerCase().includes(query.toLowerCase()));
@@ -468,6 +482,12 @@ function App() {
     const result = await apiRequest<{ user: AuthUser }>('/api/auth/login', {
       method: 'POST', body: JSON.stringify({ email, password }),
     });
+    setAuthUser(result.user);
+    setProfileName(result.user.name);
+    // Brief pause so the auth button's success tick is visible before the
+    // profile loads and the screen changes. Auth itself is already done.
+    setAuthSuccess(true);
+    await new Promise((resolve) => window.setTimeout(resolve, 750));
     await hydrateProfile(result.user);
   }
 
@@ -478,6 +498,10 @@ function App() {
     setAuthUser(result.user);
     setProfileName(result.user.name);
     setNewUser(emptyProfile(result.user.name, result.user.email));
+    // Brief pause so the auth button's success tick is visible before the
+    // onboarding screen opens. Auth itself is already done.
+    setAuthSuccess(true);
+    await new Promise((resolve) => window.setTimeout(resolve, 750));
     setScreen('onboarding');
   }
 
@@ -572,7 +596,7 @@ function App() {
     return <Welcome onContinue={() => setScreen('login')} onExplore={() => { setGuestMode(true); setProfileName('Guest'); setScreen('app'); }} />;
   }
   if (screen === 'login') {
-    return <Login onBack={() => setScreen('welcome')} onLogin={handleLogin} onSignup={handleSignup} onForgot={() => setScreen('forgot')} />;
+    return <Login onBack={() => setScreen('welcome')} onLogin={handleLogin} onSignup={handleSignup} onForgot={() => setScreen('forgot')} authSuccess={authSuccess} />;
   }
   if (screen === 'forgot') {
     return <ForgotPassword onBack={() => setScreen('login')} onSent={() => notify('If an account exists for this email, a reset link has been sent.')} />;
@@ -593,7 +617,7 @@ function App() {
         <div className="sidebar-bottom"><div className="sidebar-quote"><Sparkles size={15} /><p>Small steps, sincere intentions, steady growth.</p></div><button className="profile-mini" onClick={() => goTo('profile')}><div className="avatar">{initials}</div><div><strong>{displayName}</strong><span>Personal account</span></div><MoreHorizontal size={17} /></button></div>
       </aside>
       <main className="main-area">
-        <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{navItems.find((item) => item.id === page)?.label}</strong></div><div className="topbar-actions"><span className="demo-pill"><span />{authUser ? 'SECURE SESSION' : 'GUEST PREVIEW'}</span><button className="icon-button search-trigger" onClick={() => setSearchOpen(!searchOpen)} aria-label="Search"><Search size={18} /></button><div className="notification-wrap"><button className="icon-button notification-button" onClick={() => { setNotifOpen((open) => !open); if (!notifOpen) refreshNotifications(); }} aria-label="Notifications"><Bell size={18} />{unreadCount > 0 && <span className="notification-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}</button>{notifOpen && <div className="notification-panel"><div className="notification-panel-head"><strong>Notifications</strong>{unreadCount > 0 && <button onClick={async () => { try { await markAllNotificationsRead(); await refreshNotifications(); } catch { notify('Could not mark all as read.'); } }}>Mark all read</button>}</div>{!authUser || guestMode ? <p className="onboarding-help">Sign in to see your notifications.</p> : notifications.length === 0 ? <p className="onboarding-help">No notifications yet. Friend requests, challenge invitations and badges will appear here.</p> : <div className="notification-list">{notifications.map((item) => <button key={item.id} className={`notification-item ${item.read ? 'notification-read' : ''}`} onClick={async () => { if (!item.read) { try { await markNotificationRead(item.id); await refreshNotifications(); } catch { notify('Could not mark as read.'); } } }}><span className="notification-dot" /><span><strong>{item.title}</strong><small>{item.body}</small><small>{new Date(item.createdAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></span></button>)}</div>}</div>}</div><button className="top-avatar" onClick={() => goTo('profile')}>{initials}</button></div></header>
+        <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{navItems.find((item) => item.id === page)?.label}</strong></div><div className="topbar-actions"><span className="demo-pill"><span />{authUser ? 'SECURE SESSION' : 'GUEST PREVIEW'}</span><button className="icon-button search-trigger" onClick={() => setSearchOpen(!searchOpen)} aria-label="Search"><Search size={18} /></button><div className="notification-wrap"><button className="icon-button notification-button" onClick={() => { setNotifOpen((open) => !open); if (!notifOpen) refreshNotifications(); }} aria-label="Notifications"><Bell size={18} />{unreadCount > 0 && <span className="notification-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}</button>{notifOpen && <div className="notification-panel"><div className="notification-panel-head"><strong>Notifications</strong>{unreadCount > 0 && <button onClick={async () => { try { await markAllNotificationsRead(); await refreshNotifications(); } catch { notify('Could not mark all as read.'); } }}>Mark all read</button>}</div>{!authUser || guestMode ? <p className="onboarding-help">Notifications dekhne ke liye sign in karo.</p> : notifications.length === 0 ? <p className="onboarding-help">Abhi koi notification nahi hai. Namaz, padhai, neend aur challenge ki notifications yahan dikhengi.</p> : <div className="notification-list">{notifications.map((item) => <button key={item.id} className={`notification-item ${item.read ? 'notification-read' : ''}`} onClick={async () => { if (!item.read) { try { await markNotificationRead(item.id); await refreshNotifications(); } catch { notify('Could not mark as read.'); } } }}><span className="notification-dot" /><span><strong>{item.title}</strong><small>{item.body}</small><small>{new Date(item.createdAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></span></button>)}</div>}</div>}</div><button className="top-avatar" onClick={() => goTo('profile')}>{initials}</button></div></header>
         {searchOpen && <div className="search-popover"><Search size={17} /><input autoFocus placeholder="Search AHDORA pages..." value={query} onChange={(e) => setQuery(e.target.value)} /><button onClick={() => { setQuery(''); setSearchOpen(false); }}><X size={16} /></button><div className="search-results">{filteredNav.map((item) => <button key={item.id} onClick={() => goTo(item.id)}>{item.label}<ArrowUpRight size={14} /></button>)}</div></div>}
         {authUser && !authUser.emailVerified && !guestMode && (
           <div className="verify-banner">
@@ -718,11 +742,13 @@ function Login({
   onLogin,
   onSignup,
   onForgot,
+  authSuccess,
 }: {
   onBack: () => void;
   onLogin: (email: string, password: string) => Promise<void>;
   onSignup: (user: { name: string; email: string; password: string }) => Promise<void>;
   onForgot: () => void;
+  authSuccess: boolean;
 }) {
   const [tab, setTab] = useState<'login' | 'signup'>('login');
   const [name, setName] = useState('');
@@ -730,6 +756,18 @@ function Login({
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  // Shows the error and replays the card's shake animation.
+  function fail(message: string) {
+    setError(message);
+    const card = cardRef.current;
+    if (card) {
+      card.classList.remove('auth-shake');
+      void card.offsetWidth;
+      card.classList.add('auth-shake');
+    }
+  }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -738,18 +776,18 @@ function Login({
     setError('');
 
     if (!email.trim() || !password) {
-      setError('Email aur password dono bharna zaroori hai.');
+      fail('Email aur password dono bharna zaroori hai.');
       return;
     }
 
     if (tab === 'signup') {
       if (name.trim().length < 2) {
-        setError('Apna naam sahi se enter karo.');
+        fail('Apna naam sahi se enter karo.');
         return;
       }
 
       if (password.length < 12) {
-        setError('Password kam se kam 12 characters ka rakho.');
+        fail('Password kam se kam 12 characters ka rakho.');
         return;
       }
 
@@ -758,7 +796,7 @@ function Login({
       try {
         await onSignup({ name: name.trim(), email: email.trim(), password });
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Account create nahi ho paya.');
+        fail(err instanceof Error ? err.message : 'Account create nahi ho paya.');
       } finally {
         setBusy(false);
       }
@@ -768,7 +806,7 @@ function Login({
       try {
         await onLogin(email.trim(), password);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Login nahi ho paya.');
+        fail(err instanceof Error ? err.message : 'Login nahi ho paya.');
       } finally {
         setBusy(false);
       }
@@ -776,16 +814,22 @@ function Login({
   }
 
   return (
-    <div className="auth-screen">
-      <button className="back-link" onClick={onBack}>
+    <div className="auth-screen auth-screen-animated">
+      <AuthBackdrop />
+      <button className="back-link" onClick={onBack} disabled={busy || authSuccess}>
         <ArrowRight className="back-arrow" size={16} /> Back to welcome
       </button>
 
-      <div className="auth-card">
+      <div className="auth-card auth-card-animated" ref={cardRef}>
         <div className="auth-brand">
           <img src={logo} alt="AHDORA" />
           <span>AHDORA</span>
         </div>
+
+        <p className="auth-greeting">
+          <span className="auth-greeting-ar" lang="ar">ٱلسَّلَامُ عَلَيْكُمْ</span>
+          <Typewriter text="Assalamu Alaikum" />
+        </p>
 
         <div className="auth-heading">
           <span className="eyebrow">YOUR SPACE, YOUR PACE</span>
@@ -793,7 +837,10 @@ function Login({
           <p>{tab === 'login' ? 'Pick up where you left off.' : 'Create your personal AHDORA space.'}</p>
         </div>
 
-        <div className="auth-tabs">
+        <AhdoraMeaning />
+
+        <div className="auth-tabs auth-tabs-animated">
+          <span className={`auth-tab-pill ${tab === 'signup' ? 'auth-tab-pill-right' : ''}`} aria-hidden="true" />
           <button
             type="button"
             className={tab === 'login' ? 'selected' : ''}
@@ -811,47 +858,71 @@ function Login({
         </div>
 
         <form onSubmit={handleSubmit}>
-          {tab === 'signup' && (
-            <>
-              <label className="field-label">Your name</label>
+          <div key={tab} className={`auth-panel ${tab === 'signup' ? 'auth-panel-from-right' : 'auth-panel-from-left'}`}>
+            {tab === 'signup' && (
+              <div className="auth-field">
+                <input
+                  id="auth-name"
+                  className="form-input auth-input"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder=" "
+                  autoComplete="name"
+                  required
+                />
+                <label className="auth-floating-label" htmlFor="auth-name">Your name</label>
+              </div>
+            )}
+
+            <div className="auth-field">
               <input
-                className="form-input"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Enter your name"
-                autoComplete="name"
+                id="auth-email"
+                className="form-input auth-input"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder=" "
+                autoComplete="email"
                 required
               />
-            </>
-          )}
+              <label className="auth-floating-label" htmlFor="auth-email">Email address</label>
+            </div>
 
-          <label className="field-label">Email address</label>
-          <input
-            className="form-input"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            autoComplete="email"
-            required
-          />
+            <div className="auth-field">
+              <input
+                id="auth-password"
+                className="form-input auth-input"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder=" "
+                autoComplete={tab === 'login' ? 'current-password' : 'new-password'}
+                required
+              />
+              <label className="auth-floating-label" htmlFor="auth-password">Password</label>
+            </div>
+            {tab === 'signup' && <small className="auth-hint">Minimum 12 characters</small>}
+          </div>
 
-          <label className="field-label">Password</label>
-          <input
-            className="form-input"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder={tab === 'signup' ? 'Minimum 12 characters' : 'Your password'}
-            autoComplete={tab === 'login' ? 'current-password' : 'new-password'}
-            required
-          />
+          {error && <p className="auth-error" role="alert" style={{ color: '#c45b52', fontSize: 13, marginTop: 12 }}>{error}</p>}
 
-          {error && <p style={{ color: '#c45b52', fontSize: 13, marginTop: 12 }}>{error}</p>}
-
-          <button type="submit" className="primary-button full-width" disabled={busy}>
-            {busy ? 'Please wait...' : tab === 'login' ? 'Log in' : 'Create account'}
-            <ArrowRight size={16} />
+          <button type="submit" className={`primary-button full-width auth-submit ${authSuccess ? 'auth-submit-success' : ''}`} disabled={busy}>
+            {authSuccess ? (
+              <>
+                <svg className="auth-tick-svg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M7 12.5 10.5 16 17 8.5" /></svg>
+                Welcome!
+              </>
+            ) : busy ? (
+              <>
+                <span className="auth-spinner" aria-hidden="true" />
+                Please wait...
+              </>
+            ) : (
+              <>
+                {tab === 'login' ? 'Log in' : 'Create account'}
+                <ArrowRight size={16} />
+              </>
+            )}
           </button>
         </form>
 

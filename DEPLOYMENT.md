@@ -131,10 +131,14 @@ Honest list of what remains before this can be called production:
 5. **Deployment target** — no host is chosen yet (VPS, Render,
    Fly.io, etc.). Pick one, then fill in `FRONTEND_ORIGIN` and
    `CORS_ORIGINS` for real.
-6. **Scheduled/push reminders do not exist** — there is no
-   background scheduler; prayer reminders only appear while the app
-   is open. Do not advertise push notifications until a scheduler
-   (or a push service) is built.
+6. **Scheduled reminders exist, web push does not** — the API now
+   runs an in-process scheduler (one tick per minute, `lib/scheduler.ts`)
+   that creates Hinglish in-app + Socket.IO notifications for real
+   time-based events (prayer start/deadline, tasks, sleep, challenges,
+   onboarding). There is still NO web push (no VAPID/service worker):
+   notifications only arrive while the server runs and the user has
+   the app open or re-opens it. On Android, local notifications are
+   scheduled on-device (Capacitor) — see the APK work.
 7. **Android app does not exist** — see `docs/ANDROID_EVALUATION.md`.
 8. **Scholarly review of Quran content** — the text source is
    verified (Tanzil Uthmani via AlQuran Cloud) but nothing is

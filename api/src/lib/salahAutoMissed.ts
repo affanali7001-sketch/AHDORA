@@ -1,5 +1,7 @@
 import { Profile } from '../models/Profile.js';
 import { SalahDay } from '../models/SalahDay.js';
+import { createScheduledNotification } from './notifications.js';
+import { prayerMissed } from './notificationCopy.js';
 import {
   dateKeyInTimezone,
   nowMinutesInTimezone,
@@ -145,6 +147,12 @@ export async function recomputeDay(
   const pastDeadline = prayersPastDeadline(effective, nowMinutes, isPast);
   if (pastDeadline.length === 0) return null;
 
+  // Prayers newly flipped to missed in this call — each gets exactly
+  // one Hinglish "missed" notification (deduped by refId, and only
+  // when that prayer's own reminder toggle is on). Notifying here is
+  // exact: the flip happens once, so the notification fires once.
+  const newlyMissed: PrayerName[] = [];
+
   const existing = (await SalahDay.findOne({ userId, date: dateKey }).lean()) as unknown as SalahDayDoc | null;
   if (!existing) {
     // Only today gets a record created by auto-marking; past dates are
@@ -157,6 +165,8 @@ export async function recomputeDay(
           : { status: 'pending', updatedAt: null, wasMissed: false, missedAt: null, autoMissed: false };
       }
       const created = await SalahDay.create({ userId, date: dateKey, prayers });
+      newlyMissed.push(...pastDeadline);
+      await notifyNewlyMissed(userId, dateKey, newlyMissed, options.profile ?? null);
       return created.toObject() as unknown as SalahDayDoc;
     }
     return null;
@@ -165,7 +175,10 @@ export async function recomputeDay(
   const prayers = existing.prayers;
   let changed = false;
   for (const prayer of pastDeadline) {
-    if (markMissed(prayers, prayer, true, now)) changed = true;
+    if (markMissed(prayers, prayer, true, now)) {
+      changed = true;
+      newlyMissed.push(prayer);
+    }
   }
   if (!changed) return null;
 
@@ -178,7 +191,41 @@ export async function recomputeDay(
     { $set: update },
     { new: true, runValidators: true },
   ).lean();
+  await notifyNewlyMissed(userId, dateKey, newlyMissed, options.profile ?? null);
   return updated as unknown as SalahDayDoc | null;
+}
+
+/**
+ * Notify for prayers that just flipped to missed. Best-effort and
+ * silent on failure — auto-marking must never break the caller.
+ * Respects the per-prayer reminder toggle from the user's profile.
+ */
+async function notifyNewlyMissed(
+  userId: string,
+  dateKey: string,
+  newlyMissed: PrayerName[],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  profile: any,
+): Promise<void> {
+  if (newlyMissed.length === 0) return;
+  try {
+    const resolved = profile ?? (await Profile.findOne({ userId }).lean());
+    const settings = (resolved?.prayerSettings ?? {}) as Record<
+      string,
+      { reminder?: boolean } | undefined
+    >;
+    for (const prayer of newlyMissed) {
+      if (settings[prayer]?.reminder === false) continue;
+      await createScheduledNotification(userId, {
+        type: 'prayer',
+        ...prayerMissed(prayer),
+        refType: 'SalahDay',
+        refId: `prayer:${prayer}:missed:${dateKey}`,
+      });
+    }
+  } catch {
+    // Notifications must never break auto-marking.
+  }
 }
 
 /** Auto-mark today from fully computed deadlines (called by /api/prayer/times). */

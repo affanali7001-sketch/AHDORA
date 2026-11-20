@@ -446,3 +446,75 @@
 .check-row{display:flex;align-items:center;gap:8px;font-size:13px}
 .danger-button{border-color:#c45b52;color:#e8a0a0}
 .danger-button:disabled{opacity:.5;cursor:not-allowed}
+
+/* Phase 7 — animated auth (Calm & Elegant). Login/signup only; the rest of
+   the app is untouched. The global prefers-reduced-motion rule above already
+   switches all of these animations/transitions off. */
+.auth-screen-animated{position:relative;overflow:hidden;background:#07100d}
+.auth-screen-animated .back-link,.auth-screen-animated .auth-bottom{position:relative;z-index:1}
+.back-link:disabled{opacity:.45;cursor:default}
+.auth-backdrop{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+.auth-orb{position:absolute;border-radius:50%;filter:blur(70px);opacity:.5}
+.auth-orb-one{width:430px;height:430px;left:-120px;top:-110px;background:radial-gradient(circle,rgba(54,191,113,.55),transparent 68%);animation:auth-orb-drift-a 26s ease-in-out infinite alternate}
+.auth-orb-two{width:390px;height:390px;right:-130px;bottom:-120px;background:radial-gradient(circle,rgba(215,189,121,.34),transparent 68%);animation:auth-orb-drift-b 32s ease-in-out infinite alternate}
+.auth-orb-three{width:300px;height:300px;right:18%;top:32%;background:radial-gradient(circle,rgba(46,139,120,.4),transparent 68%);animation:auth-orb-drift-c 38s ease-in-out infinite alternate}
+@keyframes auth-orb-drift-a{0%{transform:translate(0,0) scale(1)}50%{transform:translate(60px,42px) scale(1.12)}100%{transform:translate(-28px,72px) scale(.94)}}
+@keyframes auth-orb-drift-b{0%{transform:translate(0,0) scale(1)}50%{transform:translate(-52px,-38px) scale(1.1)}100%{transform:translate(30px,-64px) scale(.95)}}
+@keyframes auth-orb-drift-c{0%{transform:translate(0,0) scale(1)}100%{transform:translate(-46px,52px) scale(1.14)}}
+.auth-pattern{position:absolute;inset:-60px;width:calc(100% + 120px);height:calc(100% + 120px);opacity:.05;animation:auth-pattern-drift 70s linear infinite alternate}
+@keyframes auth-pattern-drift{from{transform:translate(0,0)}to{transform:translate(-48px,-28px)}}
+.auth-crescent{position:absolute;top:11%;right:9%;font-size:54px;color:rgba(215,189,121,.5);text-shadow:0 0 34px rgba(225,208,145,.25);animation:auth-float-soft 7s ease-in-out infinite}
+.auth-star{position:absolute;color:rgba(217,213,165,.65);animation:auth-twinkle 4.5s ease-in-out infinite}
+.auth-star-one{top:24%;left:12%;font-size:15px}
+.auth-star-two{bottom:16%;left:8%;font-size:19px;animation-delay:1.4s}
+.auth-star-three{top:16%;left:46%;font-size:12px;animation-delay:2.6s}
+@keyframes auth-float-soft{0%,100%{transform:translateY(0) rotate(-18deg)}50%{transform:translateY(-12px) rotate(-14deg)}}
+@keyframes auth-twinkle{0%,100%{opacity:.25}50%{opacity:.9}}
+.auth-card-animated{position:relative;z-index:1;background:linear-gradient(145deg,rgba(18,36,26,.78),rgba(11,23,17,.82));backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid rgba(164,203,177,.2);box-shadow:0 25px 80px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.05);animation:auth-card-in .7s cubic-bezier(.22,.9,.3,1) both}
+@keyframes auth-card-in{from{opacity:0;transform:translateY(18px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+.auth-shake{animation:auth-shake .45s ease}
+@keyframes auth-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-10px)}40%{transform:translateX(9px)}60%{transform:translateX(-6px)}80%{transform:translateX(4px)}}
+.auth-greeting{text-align:center;margin:20px 0 0;font-family:Manrope,sans-serif;font-size:17px;font-weight:700;letter-spacing:.4px;color:#dcca91;min-height:24px}
+.auth-greeting-ar{display:block;font-size:12px;color:#8fae97;margin-bottom:5px}
+.auth-caret{display:inline-block;width:2px;height:15px;margin-left:2px;background:#d7bd79;vertical-align:-2px;animation:auth-caret-blink 1s step-end infinite}
+@keyframes auth-caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+.auth-tabs-animated{position:relative}
+.auth-tab-pill{position:absolute;top:4px;bottom:4px;left:4px;width:calc(50% - 4px);background:#1c3927;border-radius:6px;transition:transform .3s cubic-bezier(.22,.9,.3,1)}
+.auth-tab-pill-right{transform:translateX(100%)}
+.auth-tabs-animated button{position:relative;z-index:1}
+.auth-tabs-animated button.selected{background:transparent}
+.auth-panel{animation:auth-panel-in .4s ease both}
+.auth-panel-from-left{animation-name:auth-panel-in-left}
+.auth-panel-from-right{animation-name:auth-panel-in-right}
+@keyframes auth-panel-in-left{from{opacity:0;transform:translateX(-16px)}to{opacity:1;transform:translateX(0)}}
+@keyframes auth-panel-in-right{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}
+@keyframes auth-panel-in{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}
+.auth-field{position:relative;margin-top:13px}
+.auth-input:focus{border-color:rgba(131,229,157,.55);box-shadow:0 0 0 3px rgba(131,229,157,.14),0 0 18px rgba(131,229,157,.08)}
+.auth-floating-label{position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:12px;color:#8fa499;pointer-events:none;transition:top .18s ease,font-size .18s ease,color .18s ease,background-color .18s ease;padding:0 4px;border-radius:4px}
+.auth-input:focus + .auth-floating-label,.auth-input:not(:placeholder-shown) + .auth-floating-label{top:0;font-size:9px;color:#9fe5ac;background:#0e1d15}
+.auth-hint{display:block;font-size:9px;color:#7d9284;margin-top:6px}
+.auth-error{animation:auth-error-in .3s ease both}
+@keyframes auth-error-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+.auth-spinner{width:15px;height:15px;border-radius:50%;border:2px solid rgba(9,32,18,.25);border-top-color:#092012;animation:auth-spin .7s linear infinite;flex-shrink:0}
+@keyframes auth-spin{to{transform:rotate(360deg)}}
+.auth-submit-success{box-shadow:0 0 0 1px rgba(131,229,157,.5),0 8px 28px rgba(62,190,106,.35)}
+.auth-tick-svg{width:18px;height:18px;flex-shrink:0;animation:auth-tick-pop .35s cubic-bezier(.22,.9,.3,1) both}
+.auth-tick-svg circle,.auth-tick-svg path{fill:none;stroke:#092012;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.auth-tick-svg circle{stroke-dasharray:63;stroke-dashoffset:63;animation:auth-tick-draw .45s ease forwards}
+.auth-tick-svg path{stroke-dasharray:15;stroke-dashoffset:15;animation:auth-tick-draw .35s .3s ease forwards}
+@keyframes auth-tick-draw{to{stroke-dashoffset:0}}
+@keyframes auth-tick-pop{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}
+@media(max-width:760px){.auth-orb-one{width:260px;height:260px}.auth-orb-two{width:250px;height:250px}.auth-crescent{font-size:38px;top:9%;right:7%}.auth-star-one{left:6%}.auth-greeting{font-size:15px}}
+
+/* AHDORA meaning — typed out live on the login card, right after the
+   Salam greeting. Six compact rows; each letter pops in, then its word
+   types out beside it. Rows always take up their space so the card
+   never jumps while the animation plays. */
+.meaning-type{margin:14px 0 4px;display:flex;flex-direction:column;gap:3px}
+.meaning-type-row{display:flex;align-items:baseline;gap:8px;min-height:22px;font-size:14px}
+.meaning-type-letter{display:inline-block;width:16px;text-align:center;font-family:Manrope,sans-serif;font-size:16px;font-weight:800;color:var(--gold);opacity:0;transform:scale(.6);transition:opacity .25s ease,transform .25s ease}
+.meaning-type-letter-in{opacity:1;transform:scale(1)}
+.meaning-type-dash{color:var(--muted2);font-size:12px}
+.meaning-type-word{color:var(--text);font-weight:600;letter-spacing:.3px}
+@media(prefers-reduced-motion:reduce){.meaning-type-letter{opacity:1;transform:none;transition:none}}
