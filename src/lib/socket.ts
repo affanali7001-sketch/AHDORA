@@ -1,4 +1,5 @@
 import { io, type Socket } from 'socket.io-client';
+import { API_BASE } from './http.js';
 
 /**
  * Socket.IO client — realtime PUSH only, never authority.
@@ -9,6 +10,14 @@ import { io, type Socket } from 'socket.io-client';
  * the app to refetch authoritative data over REST; if the socket
  * never connects, every page still works from the list endpoints.
  * A failed connection is silent — it never blocks the UI.
+ *
+ * APK note: in the native build the socket URL is the absolute API
+ * origin (API_BASE from http.ts). The live server rejects the
+ * Capacitor WebView origin at the Socket.IO handshake, so realtime
+ * push does NOT connect inside the APK today — that is expected and
+ * harmless (REST refetch still works); fixing it needs the server to
+ * allow the Capacitor origin, which is a server change, not an APK
+ * change. On web, API_BASE is empty and the URL stays '/'.
  */
 
 let socket: Socket | null = null;
@@ -23,7 +32,7 @@ export type RealtimeEvent =
 
 export function connectSocket(): Socket {
   if (socket) return socket;
-  socket = io('/', {
+  socket = io(API_BASE || '/', {
     path: '/socket.io',
     withCredentials: true,
     transports: ['websocket', 'polling'],

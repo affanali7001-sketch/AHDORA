@@ -20,10 +20,21 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
+    // Keep the server's per-field errors (e.g. the completion check
+    // naming a missing city/state) in the message the UI shows, so a
+    // 400 never degrades to a bare "Invalid profile details".
+    const details = (data as { details?: Record<string, string[] | undefined> }).details;
+    const detailMessages = details
+      ? Object.values(details).flatMap((messages) => messages ?? [])
+      : [];
+    const base =
+      typeof (data as { error?: unknown }).error === 'string'
+        ? (data as { error: string }).error
+        : 'Profile request failed. Please try again.';
     throw new Error(
-      typeof data.error === 'string'
-        ? data.error
-        : 'Profile request failed. Please try again.',
+      detailMessages.length > 0 && !detailMessages.every((message) => base.includes(message))
+        ? `${base} ${detailMessages.join(' ')}`
+        : base,
     );
   }
 

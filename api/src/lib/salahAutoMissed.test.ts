@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   MISSED_GRACE_MINUTES,
   applyStatusCorrection,
+  preSignupPendingDates,
   prayersPastDeadline,
   prayersPastDeadlineSinceSignup,
 } from './salahAutoMissed.js';
@@ -150,5 +151,60 @@ describe('applyStatusCorrection (Qaza preserves miss history)', () => {
     expect(next.status).toBe('qaza');
     expect(next.wasMissed).toBe(false);
     expect(next.missedAt).toBe(null);
+  });
+});
+
+describe('preSignupPendingDates (calendar month totals, P8)', () => {
+  it('returns the 19 pre-signup days of the signup month as pending', () => {
+    // Account created 2026-11-20 19:00 IST; viewing November on the 20th.
+    // This is the reported case: Pending showed 0 although 19 days × 5
+    // prayers are pending.
+    expect(
+      preSignupPendingDates('2026-11', '2026-11-20', CREATED_THIS_EVENING, TZ, []),
+    ).toEqual(
+      Array.from({ length: 19 }, (_, i) => `2026-11-${String(i + 1).padStart(2, '0')}`),
+    );
+  });
+
+  it('skips days that already have a record', () => {
+    expect(
+      preSignupPendingDates('2026-11', '2026-11-20', CREATED_THIS_EVENING, TZ, [
+        '2026-11-05',
+        '2026-11-19',
+      ]),
+    ).toHaveLength(17);
+  });
+
+  it('returns nothing for a month entirely before signup', () => {
+    // October predates the account: showing 155 pending there would read
+    // as a month of neglected prayers for a user who had no account.
+    expect(
+      preSignupPendingDates('2026-10', '2026-11-20', CREATED_THIS_EVENING, TZ, []),
+    ).toEqual([]);
+  });
+
+  it('returns nothing for a month after signup', () => {
+    expect(
+      preSignupPendingDates('2026-12', '2026-12-05', CREATED_THIS_EVENING, TZ, []),
+    ).toEqual([]);
+  });
+
+  it('returns nothing when signup was at the start of the month', () => {
+    expect(
+      preSignupPendingDates('2026-11', '2026-11-20', CREATED_LONG_AGO, TZ, []),
+    ).toEqual([]);
+  });
+
+  it('returns nothing without an account creation time', () => {
+    expect(preSignupPendingDates('2026-11', '2026-11-20', null, TZ, [])).toEqual([]);
+    expect(preSignupPendingDates('2026-11', '2026-11-20', undefined, TZ, [])).toEqual([]);
+  });
+
+  it('includes a day whose end is exactly the creation instant', () => {
+    // Created 2026-11-20 00:00 IST: 19 Nov ends exactly at creation.
+    const createdAtMidnight = new Date('2026-11-19T18:30:00.000Z');
+    const result = preSignupPendingDates('2026-11', '2026-11-20', createdAtMidnight, TZ, []);
+    expect(result).toHaveLength(19);
+    expect(result[result.length - 1]).toBe('2026-11-19');
   });
 });

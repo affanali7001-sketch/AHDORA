@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { refreshChallengeProgress } from '../lib/challengeProgress.js';
 import {
   applyStatusCorrection,
+  preSignupPendingDates,
   recomputeDay,
   userTimezoneAndProfile,
 } from '../lib/salahAutoMissed.js';
@@ -176,9 +177,26 @@ salahRouter.get('/calendar/:month', async (req, res, next) => {
       date: { $regex: `^${req.params.month}-` },
     }).select('date prayers').lean();
 
+    // P8: days before signup in the signup month have no record yet, but
+    // the tracker treats them as pending — include them as all-pending
+    // days so the month totals the client computes from `days` are
+    // honest (a new November account showed Pending 0 although 19 days
+    // × 5 prayers are pending). Response-only synthesis: nothing is
+    // written to MongoDB, and post-signup days are never backfilled.
+    const days = [
+      ...freshRecords.map((day) => ({ date: day.date, prayers: serializePrayers(day) })),
+      ...preSignupPendingDates(
+        req.params.month,
+        today,
+        accountCreatedAt,
+        timezone,
+        freshRecords.map((day) => day.date),
+      ).map((date) => ({ date, prayers: serializePrayers(null) })),
+    ].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
     const totals = { prayed: 0, qaza: 0, missed: 0, pending: 0, qazaWasMissed: 0 };
 
-    for (const day of freshRecords) {
+    for (const day of days) {
       for (const prayer of prayers) {
         const entry = day.prayers?.[prayer] as PrayerEntry | undefined;
         const status = entry?.status ?? 'pending';
@@ -189,7 +207,7 @@ salahRouter.get('/calendar/:month', async (req, res, next) => {
 
     res.json({
       month: req.params.month,
-      days: freshRecords.map((day) => ({ date: day.date, prayers: serializePrayers(day) })),
+      days,
       totals,
     });
   } catch (error) {

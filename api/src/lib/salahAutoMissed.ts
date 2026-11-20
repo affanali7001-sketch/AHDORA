@@ -141,6 +141,52 @@ export function prayersPastDeadlineSinceSignup(
   });
 }
 
+/**
+ * Pure helper for GET /api/salah/calendar/:month (unit-tested): the dates
+ * in `month` that the tracker itself treats as all-pending but that have
+ * no SalahDay document yet — the days BEFORE the account was created, in
+ * the account-creation month only.
+ *
+ * Why: the calendar totals only count days with a stored record, so a new
+ * account saw "Pending 0" for November even though the tracker shows
+ * every unrecorded day as pending when you tap it. Those pre-signup days
+ * genuinely stay pending (they are never auto-marked missed — see
+ * prayersPastDeadlineSinceSignup), so the calendar response synthesises
+ * them as all-pending days and the month totals become honest.
+ *
+ * Deliberately bounded: only the creation month (a whole earlier month
+ * would read as a month of neglected prayers for a user who had no
+ * account then), only dates up to today, only days with no record, and
+ * only days whose whole day ends at or before account creation.
+ * Nothing is persisted — the response just completes the month view.
+ * Post-signup past days with no record are NOT synthesised: backfilling
+ * them would invent missed prayers for days the user never opened.
+ */
+export function preSignupPendingDates(
+  month: string,
+  todayKey: string,
+  accountCreatedAt: Date | null | undefined,
+  timezone: string,
+  existingDates: Iterable<string>,
+): string[] {
+  if (!accountCreatedAt || Number.isNaN(accountCreatedAt.getTime())) return [];
+  const createdMonth = dateKeyInTimezone(timezone, accountCreatedAt).slice(0, 7);
+  if (createdMonth !== month) return [];
+  const createdMs = accountCreatedAt.getTime();
+  const existing = new Set(existingDates);
+  const [year = 1970, monthNumber = 1] = month.split('-').map(Number);
+  const daysInMonth = new Date(year, monthNumber, 0).getDate();
+  const out: string[] = [];
+  for (let day = 1; day <= daysInMonth; day++) {
+    const key = `${month}-${String(day).padStart(2, '0')}`;
+    if (key > todayKey) break;
+    if (existing.has(key)) continue;
+    const dayEndMs = startOfDayUtc(key, timezone).getTime() + 24 * 60 * 60 * 1000;
+    if (dayEndMs <= createdMs) out.push(key);
+  }
+  return out;
+}
+
 export type StatusCorrectionInput = {
   status?: string;
   wasMissed?: boolean;

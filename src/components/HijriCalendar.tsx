@@ -30,23 +30,37 @@ export default function HijriCalendar({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  // The three calls load independently: a failing /today (or
+  // settings) must never blank the month grid — each was a single
+  // Promise.all failure away from "No calendar data for this month."
+  // Only a failed month load is a calendar error.
   const load = useCallback(async (nextYear: number, nextMonth: number) => {
     setLoading(true);
     setError('');
-    try {
-      const [todayData, monthData, settings] = await Promise.all([
-        fetchHijriToday(),
-        fetchHijriMonth(nextYear, nextMonth),
-        guestMode ? Promise.resolve(null) : fetchHijriSettings(),
-      ]);
-      setToday(todayData);
-      setMonth(monthData);
-      if (settings) setOffset(settings.hijriDayOffset);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Hijri calendar could not be loaded.');
-    } finally {
-      setLoading(false);
+    const [todayResult, monthResult, settingsResult] = await Promise.allSettled([
+      fetchHijriToday(),
+      fetchHijriMonth(nextYear, nextMonth),
+      guestMode ? Promise.resolve(null) : fetchHijriSettings(),
+    ]);
+    if (todayResult.status === 'fulfilled') {
+      setToday(todayResult.value);
+    } else {
+      setToday(null);
     }
+    if (monthResult.status === 'fulfilled') {
+      setMonth(monthResult.value);
+    } else {
+      setMonth(null);
+      setError(
+        monthResult.reason instanceof Error
+          ? monthResult.reason.message
+          : 'Hijri calendar could not be loaded.',
+      );
+    }
+    if (settingsResult.status === 'fulfilled' && settingsResult.value) {
+      setOffset(settingsResult.value.hijriDayOffset);
+    }
+    setLoading(false);
   }, [guestMode]);
 
   useEffect(() => {
@@ -73,14 +87,23 @@ export default function HijriCalendar({
       onNotify('Sign in to save a Hijri day adjustment.');
       return;
     }
+    const previous = offset;
     setOffset(next);
     try {
       await setHijriOffset(next);
       await load(year, monthNumber);
     } catch (err) {
+      // Roll the dropdown back: the saved value did not change.
+      setOffset(previous);
       onNotify(err instanceof Error ? err.message : 'Adjustment could not be saved.');
     }
   }
+
+  // Distinct Ramadan/Eid (and other) markers in the viewed month,
+  // from the upstream per-day holiday lists only — nothing invented.
+  const monthHolidays = month
+    ? [...new Set(month.days.flatMap((day) => day.hijri.holidays))]
+    : [];
 
   const firstDay = month?.days[0]?.gregorian.date ?? '';
   const firstWeekday = firstDay ? new Date(`${firstDay}T12:00:00Z`).getUTCDay() : 0;
@@ -138,6 +161,11 @@ export default function HijriCalendar({
 
       {month && (
         <p className="quran-source-line">{month.convention}</p>
+      )}
+      {month && monthHolidays.length > 0 && (
+        <p className="quran-source-line">
+          Is mahine me: {monthHolidays.join(', ')}
+        </p>
       )}
 
       {loading ? (

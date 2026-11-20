@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyOnboardingTransitions,
+  completionLocationErrors,
   onboardingStatus,
   profileSchema,
 } from './profile.js';
@@ -78,6 +79,55 @@ describe('applyOnboardingTransitions', () => {
       city: 'Mumbai',
       onboardingSkipped: false,
     });
+  });
+});
+
+describe('completionLocationErrors (P2: city + state required to finish onboarding)', () => {
+  it('requires both city and state on a first-time completion', () => {
+    expect(
+      completionLocationErrors({ onboardingCompleted: true, city: '', state: '' }),
+    ).toEqual({
+      city: 'City is required to finish onboarding.',
+      state: 'State is required to finish onboarding.',
+    });
+  });
+
+  it('flags the invalid saved shape: a city with an empty state', () => {
+    // Affan's live profile: city "MAHARSTRA", state empty. A fresh
+    // completion with this shape must be rejected, naming the field.
+    expect(
+      completionLocationErrors({ onboardingCompleted: true, city: 'MAHARSTRA', state: '' }),
+    ).toEqual({ state: 'State is required to finish onboarding.' });
+    expect(
+      completionLocationErrors({ onboardingCompleted: true, city: '   ', state: 'Maharashtra' }),
+    ).toEqual({ city: 'City is required to finish onboarding.' });
+  });
+
+  it('accepts a completion with both city and state filled', () => {
+    expect(
+      completionLocationErrors({ onboardingCompleted: true, city: 'Pune', state: 'Maharashtra' }),
+    ).toEqual({});
+  });
+
+  it('never blocks a partial or skip save, even with no location', () => {
+    expect(completionLocationErrors({ city: '', state: '' })).toEqual({});
+    expect(
+      completionLocationErrors({ onboardingCompleted: false, city: 'Pune', state: '' }),
+    ).toEqual({});
+  });
+
+  it('grandfathers an already-completed profile, however invalid its saved city is', () => {
+    // Existing completed accounts (Affan's included) must keep saving
+    // — e.g. Focus sleep saves re-save the full profile — until the
+    // user corrects the city themselves in Profile.
+    expect(
+      completionLocationErrors({
+        onboardingCompleted: true,
+        existingCompleted: true,
+        city: 'MAHARSTRA',
+        state: '',
+      }),
+    ).toEqual({});
   });
 });
 

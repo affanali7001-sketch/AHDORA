@@ -131,6 +131,22 @@ function elapsedMs(doc: PomodoroDoc, now: Date): number {
   );
 }
 
+/**
+ * Whole minutes of focus a finished session earns, from the real
+ * elapsed running time (pauses excluded) — never the planned minutes.
+ *
+ * Rounded to the nearest minute, with a floor of 1 for any session
+ * that actually ran: the old Math.floor meant a session finished
+ * inside its first minute (e.g. "Finish now" straight after starting
+ * a 25-minute session) recorded "0m earned" and "Focused today 0min",
+ * which reads as broken even though the session really completed.
+ * A session that never ran at all (0 ms) still earns 0.
+ */
+export function earnedFocusMinutes(elapsedMsValue: number): number {
+  if (!Number.isFinite(elapsedMsValue) || elapsedMsValue <= 0) return 0;
+  return Math.max(1, Math.round(elapsedMsValue / 60_000));
+}
+
 function serializePomodoro(doc: PomodoroDoc, now = new Date()) {
   const elapsed = elapsedMs(doc, now);
   const finished = doc.status === 'completed' || doc.status === 'abandoned';
@@ -845,7 +861,7 @@ studyRouter.post('/pomodoro/:id/complete', async (req, res, next) => {
     }
     const now = new Date();
     const earned =
-      session.mode === 'focus' ? Math.floor(elapsedMs(session, now) / 60_000) : 0;
+      session.mode === 'focus' ? earnedFocusMinutes(elapsedMs(session, now)) : 0;
     const updated = await PomodoroSession.findOneAndUpdate(
       { _id: session._id, userId: req.authUser!.id, status: { $in: ['active', 'paused'] as const } },
       {

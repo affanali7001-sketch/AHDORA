@@ -18,8 +18,18 @@
  * EveryAyah (everyayah.com/data/<reciter>/<surah><ayah>.mp3), whose
  * files were verified live (HTTP 200, audio/mpeg) for all four
  * reciters we offer; the reciter is credited in the UI. The
- * AlQuran Cloud audio CDN (cdn.islamic.network) returned 403 from
- * this environment, so it is not used.
+ * AlQuran Cloud audio CDN (cdn.islamic.network) is the fallback:
+ * re-checked live 2026-11-21 it serves real audio/mpeg for these
+ * reciters, EXCEPT ar.abdulbasitmurattal at 128 kbps (403) — so
+ * that reciter's fallback uses 64 kbps. The fallback URL uses the
+ * GLOBAL ayah number (1..6236), not surah+ayah:
+ *   https://cdn.islamic.network/quran/audio/<bitrate>/ar.<edition>/<global ayah>.mp3
+ * EveryAyah itself still returns 200 from this environment
+ * (2026-11-21, incl. browser UA + Referer + Range requests), so
+ * the overnight "Play audio" failure was not a wrong URL — it was
+ * a load failure in that browser with no fallback and no media
+ * error handler, so the player had nowhere else to go. The client
+ * now retries the fallback URL automatically before giving up.
  *
  * Upstream text is cached in memory with a short TTL only to avoid
  * hammering a free API. Cached text is still the verified upstream
@@ -197,20 +207,39 @@ export async function searchAyahText(keyword: string): Promise<SearchMatch[]> {
 
 /**
  * Verified EveryAyah reciters. Each folder was checked live
- * (HTTP 200, audio/mpeg) on 2026-11-19 before being listed here.
- * The audio URL pattern is:
+ * (HTTP 200, audio/mpeg) on 2026-11-19 before being listed here,
+ * and re-checked 2026-11-21. The audio URL pattern is:
  *   https://everyayah.com/data/<folder>/<surah 3-digit><ayah 3-digit>.mp3
  * The reciter's name is always shown next to the player.
+ *
+ * `audioEdition` / `fallbackBitrate` drive the fallback audio URL
+ * on cdn.islamic.network (same reciter, global ayah number).
+ * Verified live 2026-11-21: 128 kbps works for Alafasy, Husary
+ * and Maher Al-Muaiqly, but ar.abdulbasitmurattal returns 403 at
+ * 128 kbps, so Abdul Basit's fallback is 64 kbps.
  */
 export const RECITERS = [
-  { id: 'Alafasy_128kbps', name: 'Mishary Rashid Alafasy', bitrate: '128 kbps' },
-  { id: 'Abdul_Basit_Murattal_192kbps', name: 'Abdul Basit (Murattal)', bitrate: '192 kbps' },
-  { id: 'Husary_128kbps', name: 'Mahmoud Khalil Al-Husary', bitrate: '128 kbps' },
-  { id: 'Maher_AlMuaiqly_64kbps', name: 'Maher Al-Muaiqly', bitrate: '64 kbps' },
+  { id: 'Alafasy_128kbps', name: 'Mishary Rashid Alafasy', bitrate: '128 kbps', audioEdition: 'ar.alafasy', fallbackBitrate: 128 },
+  { id: 'Abdul_Basit_Murattal_192kbps', name: 'Abdul Basit (Murattal)', bitrate: '192 kbps', audioEdition: 'ar.abdulbasitmurattal', fallbackBitrate: 64 },
+  { id: 'Husary_128kbps', name: 'Mahmoud Khalil Al-Husary', bitrate: '128 kbps', audioEdition: 'ar.husary', fallbackBitrate: 128 },
+  { id: 'Maher_AlMuaiqly_64kbps', name: 'Maher Al-Muaiqly', bitrate: '64 kbps', audioEdition: 'ar.mahermuaiqly', fallbackBitrate: 128 },
 ] as const;
 
 export function audioUrl(reciterId: string, surahNumber: number, ayahNumber: number): string {
   const surah = String(surahNumber).padStart(3, '0');
   const ayah = String(ayahNumber).padStart(3, '0');
   return `https://everyayah.com/data/${reciterId}/${surah}${ayah}.mp3`;
+}
+
+/**
+ * Fallback audio URL for the same reciter on the AlQuran Cloud
+ * CDN. Takes the GLOBAL ayah number (1..6236, `ayah.number` in
+ * the API response), not the number within the surah. Unknown
+ * reciter ids fall back to Alafasy rather than producing a
+ * broken URL.
+ */
+export function audioFallbackUrl(reciterId: string, globalAyahNumber: number): string {
+  const reciter = RECITERS.find((item) => item.id === reciterId) ?? RECITERS[0];
+  if (!reciter) return audioUrl('Alafasy_128kbps', 1, 1);
+  return `https://cdn.islamic.network/quran/audio/${reciter.fallbackBitrate}/${reciter.audioEdition}/${globalAyahNumber}.mp3`;
 }

@@ -46,7 +46,11 @@ function toEntry(value: unknown): PrayerEntry {
   };
 }
 
-/** Honest label: a Qaza keeps its original miss visible, never erased. */
+/** Honest label: a Qaza keeps its original miss visible, never erased.
+ * A prayer recorded as prayed is labelled "Prayed" — never "was
+ * missed earlier" (P13): the select's own "Prayed on time" status
+ * must not carry a contradictory miss label. Miss history itself is
+ * still preserved in the record (wasMissed/missedAt) for Qaza. */
 function statusLabel(entry: PrayerEntry): string {
   const base = entry.status[0].toUpperCase() + entry.status.slice(1);
   if (entry.status === 'missed' && entry.autoMissed) {
@@ -54,9 +58,6 @@ function statusLabel(entry: PrayerEntry): string {
   }
   if (entry.status === 'qaza' && entry.wasMissed) {
     return 'Qaza (was missed)';
-  }
-  if (entry.status === 'prayed' && entry.wasMissed) {
-    return 'Prayed (was missed earlier)';
   }
   return base;
 }
@@ -141,7 +142,12 @@ export default function SalahTracker({ onNotify }: Props) {
     setTimesNote('');
     fetchPrayerTimes(selectedDate)
       .then(data => {
-        if (active) setTimes(data);
+        if (active) {
+          setTimes(data);
+          // Manual fallback (P2/P6): Aladhan failed but manual times
+          // are being served — say so instead of showing nothing.
+          if (data.aladhanFailed && data.notice) setTimesNote(data.notice);
+        }
       })
       .catch(err => {
         if (active) {
@@ -281,7 +287,7 @@ export default function SalahTracker({ onNotify }: Props) {
           <h3>Your Salah calendar</h3>
           <p>Track each prayer honestly. Only your account can access these records.</p>
         </div>
-        <span className="salah-sync account"><ShieldCheck size={13} /> Account records</span>
+        <span className="salah-sync account"><ShieldCheck size={13} /> {monthTitle} · this month</span>
       </div>
 
       <div className="salah-summary">
@@ -373,11 +379,21 @@ export default function SalahTracker({ onNotify }: Props) {
                 <strong>{prayer}</strong>
                 {selectedDate === today && times && (
                   <small>
-                    {times.perPrayer[prayer].time}
-                    {' · '}
-                    {times.perPrayer[prayer].source === 'manual' ? 'Manual time' : 'Calculated time'}
-                    {' · deadline '}
-                    {times.perPrayer[prayer].deadline}
+                    {times.perPrayer[prayer].source === 'unavailable'
+                      ? 'Time set nahi hai — neeche manual time set karo'
+                      : (
+                        <>
+                          {times.perPrayer[prayer].time}
+                          {' · '}
+                          {times.perPrayer[prayer].source === 'manual' ? 'Manual time' : 'Calculated time'}
+                          {times.perPrayer[prayer].deadline && (
+                            <>
+                              {' · deadline '}
+                              {times.perPrayer[prayer].deadline}
+                            </>
+                          )}
+                        </>
+                      )}
                   </small>
                 )}
                 <small>{statusLabel(selected[prayer])}</small>
@@ -396,7 +412,7 @@ export default function SalahTracker({ onNotify }: Props) {
             </div>
           ))}
 
-          {selectedDate === today && !times && timesNote && (
+          {selectedDate === today && timesNote && (
             <p className="salah-loading">{timesNote}</p>
           )}
 

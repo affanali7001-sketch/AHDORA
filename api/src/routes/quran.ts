@@ -10,6 +10,7 @@ import {
   TRANSLATION_EDITION,
   TRANSLATION_NAME,
   TRANSLITERATION_EDITION,
+  audioFallbackUrl,
   audioUrl,
   fetchSurah,
   fetchSurahList,
@@ -138,6 +139,9 @@ quranRouter.get('/surahs/:number', async (req, res, next) => {
           page: ayah.page,
           sajda: ayah.sajda,
           audioUrl: audioUrl(reciter.id, surahNumber, ayah.numberInSurah),
+          // Same reciter, AlQuran Cloud CDN, global ayah number —
+          // the client tries this if EveryAyah fails to load.
+          audioFallbackUrl: audioFallbackUrl(reciter.id, ayah.number),
         })),
       },
     });

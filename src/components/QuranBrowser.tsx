@@ -149,21 +149,61 @@ export default function QuranBrowser({
     }
   }
 
-  function playAyah(ayahNumber: number, url: string) {
+  /**
+   * Play one ayah. The primary URL is EveryAyah; if it fails to
+   * load in this browser/network (play() rejects, or the media
+   * element fires an error later — previously unhandled, so the
+   * UI sat on the Pause icon in silence), the same reciter's
+   * AlQuran Cloud CDN URL is tried once before telling the user.
+   * The playing state is set only after play() actually resolves,
+   * so a failed attempt never flashes the Pause icon.
+   */
+  function playAyah(ayah: { numberInSurah: number; audioUrl: string; audioFallbackUrl: string }) {
     if (!selected) return;
+    const ayahNumber = ayah.numberInSurah;
     if (playingAyah === ayahNumber) {
       audioRef.current?.pause();
       setPlayingAyah(null);
       return;
     }
-    if (!audioRef.current) audioRef.current = new Audio();
-    audioRef.current.src = url;
-    audioRef.current.play().catch(() => {
+    audioRef.current?.pause();
+    const audio = new Audio();
+    audioRef.current = audio;
+    let triedFallback = false;
+
+    const fail = () => {
       onNotify('Audio could not be played. Check your connection and try again.');
       setPlayingAyah(null);
-    });
-    audioRef.current.onended = () => setPlayingAyah(null);
-    setPlayingAyah(ayahNumber);
+    };
+    const trySrc = (src: string) => {
+      audio.src = src;
+      audio.load();
+      return audio.play();
+    };
+    const tryFallbackOrFail = () => {
+      if (!triedFallback && ayah.audioFallbackUrl) {
+        triedFallback = true;
+        trySrc(ayah.audioFallbackUrl)
+          .then(() => setPlayingAyah(ayahNumber))
+          .catch(fail);
+      } else {
+        fail();
+      }
+    };
+
+    audio.onended = () => setPlayingAyah(null);
+    // A load/decode failure after play() resolved (e.g. the
+    // stream drops mid-ayah) must also fall back, not hang. The
+    // ref check ignores errors from an element the user has
+    // already moved away from (paused / switched ayah).
+    audio.onerror = () => {
+      if (audioRef.current !== audio) return;
+      if (!triedFallback) tryFallbackOrFail();
+      else fail();
+    };
+    trySrc(ayah.audioUrl)
+      .then(() => setPlayingAyah(ayahNumber))
+      .catch(tryFallbackOrFail);
     if (!guestMode) {
       recordRead(selected.surah.number, ayahNumber).catch(() => undefined);
     }
@@ -308,7 +348,7 @@ export default function QuranBrowser({
                   <button
                     className="icon-button"
                     aria-label={playingAyah === ayah.numberInSurah ? 'Pause audio' : 'Play audio'}
-                    onClick={() => playAyah(ayah.numberInSurah, ayah.audioUrl)}
+                    onClick={() => playAyah(ayah)}
                   >
                     {playingAyah === ayah.numberInSurah ? <Pause size={16} /> : <Play size={16} />}
                   </button>

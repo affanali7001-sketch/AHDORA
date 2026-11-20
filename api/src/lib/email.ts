@@ -21,6 +21,12 @@ function getTransporter(): Transporter | null {
       port: config.SMTP_PORT,
       secure: config.SMTP_SECURE === 'true',
       auth: { user: config.SMTP_USER, pass: config.SMTP_PASS },
+      // P7: signup awaits sendEmail — without timeouts a stalled SMTP
+      // connection blocked signup for ~20 s. Bound it so a slow mail
+      // server fails fast instead of hanging the request.
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 15_000,
     });
   }
   return transporter;

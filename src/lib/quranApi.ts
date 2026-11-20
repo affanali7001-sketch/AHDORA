@@ -27,6 +27,8 @@ export type QuranAyah = {
   page: number;
   sajda: boolean;
   audioUrl: string;
+  /** Same reciter on the AlQuran Cloud CDN (global ayah number) — tried if EveryAyah fails. */
+  audioFallbackUrl: string;
 };
 
 export type SurahDetail = {

@@ -37,7 +37,9 @@ import { ChallengeProgress } from '../models/ChallengeProgress.js';
 import { Profile } from '../models/Profile.js';
 import { SalahDay } from '../models/SalahDay.js';
 import { StudyTask } from '../models/StudyTask.js';
+import { User } from '../models/User.js';
 import { createScheduledNotification } from './notifications.js';
+import { markTodayMissed, recomputeDay } from './salahAutoMissed.js';
 import {
   challengeCheckinReminder,
   challengeStreakAtRisk,
@@ -397,6 +399,7 @@ async function tickPrayer(
   profiles: ProfileLike[],
   now: Date,
   fetchTimings: FetchTimings,
+  accountCreatedAtByUser: Map<string, Date | null>,
 ): Promise<void> {
   for (const profile of profiles) {
     try {
@@ -405,6 +408,7 @@ async function tickPrayer(
       const nowMinutes = nowMinutesInTimezone(timezone, now);
       if (nowMinutes === null) continue;
       const userId = String(profile.userId);
+      const accountCreatedAt = accountCreatedAtByUser.get(userId) ?? null;
 
       // Manual times win outright: with all five overrides set, the
       // scheduler never needs Aladhan (or even a city) to fire the
@@ -415,8 +419,29 @@ async function tickPrayer(
       const city = profile.city?.trim();
       const calculated =
         manual ?? (city ? await timingsForUser(profile, todayKey, fetchTimings) : null);
-      if (!calculated) continue;
+      if (!calculated) {
+        // No times at all (bad city / upstream down): auto-miss still
+        // runs from the user's own per-prayer endTimes, if any (P14).
+        // A bad city must not freeze the tracker at "Pending".
+        try {
+          await recomputeDay(userId, todayKey, { timezone, profile, accountCreatedAt });
+        } catch {
+          // Auto-marking must never break the tick.
+        }
+        continue;
+      }
       const effective = effectivePrayerTimes(profile, calculated);
+
+      // Auto-miss (P14): the tick itself flips past-deadline prayers
+      // to missed server-side, every minute, regardless of page
+      // visits — the help text promises "marked missed automatically",
+      // and until now this only happened when a page was loaded.
+      // Prayers due at or before account creation are never missed.
+      const deadlines = Object.fromEntries(
+        PRAYERS.map((prayer) => [prayer, effective[prayer].deadline]),
+      ) as Record<PrayerName, string>;
+      await markTodayMissed(userId, todayKey, timezone, deadlines, accountCreatedAt);
+
       for (const event of prayerEventsDue(effective, nowMinutes)) {
         const copy =
           event.kind === 'start'
@@ -651,7 +676,23 @@ export async function runNotificationTick(
           'onboardingCompleted createdAt',
       )
       .lean()) as unknown as ProfileLike[];
-    await tickPrayer(profiles, now, fetchTimings);
+    // Account creation instants for the auto-miss exclusion (P14):
+    // one batched lookup, not one query per user per tick.
+    const accountCreatedAtByUser = new Map<string, Date | null>();
+    try {
+      const users = (await User.find({
+        _id: { $in: profiles.map((p) => String(p.userId)) },
+      })
+        .select('_id createdAt')
+        .lean()) as unknown as { _id: unknown; createdAt?: Date }[];
+      for (const user of users) {
+        accountCreatedAtByUser.set(String(user._id), user.createdAt ?? null);
+      }
+    } catch {
+      // Missing creation times only disable the exclusion (old-account
+      // behaviour); the tick still runs.
+    }
+    await tickPrayer(profiles, now, fetchTimings, accountCreatedAtByUser);
     await tickTasksAndSleep(profiles, now);
     await tickChallenges(now);
   } catch {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Compass, MapPin, Navigation, Phone, Search } from 'lucide-react';
 import {
   fetchMosquesNearMe,
@@ -28,10 +28,16 @@ export default function MosqueFinder({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [locating, setLocating] = useState(false);
+  // The last search, so a timeout/error can be retried with one
+  // tap instead of retyping the city. A ref (not state) because
+  // it only needs to exist when the Retry button is shown.
+  const lastSearchRef = useRef<(() => void) | null>(null);
+  const [canRetry, setCanRetry] = useState(false);
 
   async function run(promise: Promise<MosqueResult>) {
     setLoading(true);
     setError('');
+    setCanRetry(false);
     try {
       const data = await promise;
       setResult(data);
@@ -40,6 +46,7 @@ export default function MosqueFinder({
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Mosque search failed.');
+      setCanRetry(lastSearchRef.current !== null);
     } finally {
       setLoading(false);
     }
@@ -50,7 +57,11 @@ export default function MosqueFinder({
       onNotify('Enter a city name first.');
       return;
     }
-    run(searchMosquesByCity(city.trim(), radiusKm));
+    const query = city.trim();
+    const radius = radiusKm;
+    const doSearch = () => run(searchMosquesByCity(query, radius));
+    lastSearchRef.current = doSearch;
+    doSearch();
   }
 
   function useMyLocation() {
@@ -62,7 +73,12 @@ export default function MosqueFinder({
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setLocating(false);
-        run(fetchNearbyMosques(position.coords.latitude, position.coords.longitude, radiusKm));
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const radius = radiusKm;
+        const doSearch = () => run(fetchNearbyMosques(lat, lng, radius));
+        lastSearchRef.current = doSearch;
+        doSearch();
       },
       () => {
         setLocating(false);
@@ -119,7 +135,11 @@ export default function MosqueFinder({
         {!guestMode && profileCity && (
           <button
             className="outline-button"
-            onClick={() => run(fetchMosquesNearMe())}
+            onClick={() => {
+              const doSearch = () => run(fetchMosquesNearMe());
+              lastSearchRef.current = doSearch;
+              doSearch();
+            }}
             disabled={loading}
           >
             <MapPin size={15} /> Near {profileCity}
@@ -127,7 +147,15 @@ export default function MosqueFinder({
         )}
       </div>
 
-      {loading && <p className="empty-note">Searching OpenStreetMap… this can take a few seconds.</p>}
+      {error && canRetry && !loading && (
+        <p>
+          <button className="outline-button" onClick={() => lastSearchRef.current?.()}>
+            Try again · Dobara koshish karein
+          </button>
+        </p>
+      )}
+
+      {loading && <p className="empty-note">Searching OpenStreetMap… this can take up to 30 seconds when OpenStreetMap is slow.</p>}
 
       {result && !loading && (
         <>

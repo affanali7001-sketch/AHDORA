@@ -17,9 +17,23 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
  * frontend uses to refresh the token once and retry. This replaces the
  * previous origin-check middleware, which blocked legitimate
  * non-browser clients and was not a real CSRF defence.
+ *
+ * The token response is marked `Cache-Control: no-store` and is
+ * fetched with `cache: 'no-store'` on the client. That matters: the
+ * cookie is shared across tabs, so any tab can rotate it by fetching
+ * a new token. If the browser served a cached token body, the header
+ * would hold a stale token while the cookie holds the newer one, and
+ * even the client's one retry would fetch the same stale token from
+ * cache and fail again — an intermittent "Invalid CSRF token" on
+ * login that a page refresh appeared to fix.
  */
 export function issueCsrfToken(_req: Request, res: Response): void {
   const token = generateCsrfToken();
+  // Never cache the token response: a cached body can hold a token
+  // the cookie no longer matches (another tab rotated it), which
+  // makes even a retry fail with the same stale token.
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Pragma', 'no-cache');
   res.cookie(config.CSRF_COOKIE_NAME, token, {
     httpOnly: false,
     secure: isProduction,

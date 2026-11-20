@@ -8,11 +8,15 @@ export type PrayerTimesResponse = {
   timezone: string;
   method: string;
   source: string;
+  /** True when Aladhan failed and the response carries manual times instead (P2/P6 fallback). */
+  aladhanFailed?: boolean;
+  /** Human-readable note to show when aladhanFailed is true. */
+  notice?: string;
   hijri: { date: string | null; month: string | null; year: string | null } | null;
   timings: Record<PrayerName | 'Sunrise', string>;
   perPrayer: Record<
     PrayerName,
-    { time: string; deadline: string; reminder: boolean; source: 'manual' | 'calculated' }
+    { time: string; deadline: string; reminder: boolean; source: 'manual' | 'calculated' | 'unavailable' }
   >;
   nextPrayer: { name: PrayerName; time: string } | null;
 };

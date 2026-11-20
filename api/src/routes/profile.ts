@@ -130,6 +130,43 @@ export function applyOnboardingTransitions<
   return update;
 }
 
+/**
+ * Location required to *finish* onboarding (P2): a city Aladhan cannot
+ * resolve — or a city with no state, as Affan's saved "MAHARSTRA" with
+ * an empty state shows — leaves prayer times unloadable. A save that
+ * marks onboarding completed for the first time must therefore carry
+ * both a non-empty city and a non-empty state. Returns per-field
+ * errors ({} when the location is fine).
+ *
+ * Deliberately narrow, so it never blocks anything else:
+ * - partial / skip saves (onboardingCompleted !== true) are untouched —
+ *   skipping must never validate;
+ * - profiles that are ALREADY completed are grandfathered: their saved
+ *   values are never rewritten or judged here, so an existing account
+ *   with an invalid city (Affan's) keeps working — including Focus
+ *   sleep saves, which re-save the full profile — until the user
+ *   corrects the city themselves in Profile. `existingCompleted`
+ *   is the profile already stored in MongoDB, `city`/`state` are the
+ *   merged values (incoming payload falling back to the stored ones).
+ */
+export function completionLocationErrors(input: {
+  onboardingCompleted?: boolean;
+  existingCompleted?: boolean;
+  city?: string | null;
+  state?: string | null;
+}): { city?: string; state?: string } {
+  if (input.onboardingCompleted !== true) return {};
+  if (input.existingCompleted === true) return {};
+  const errors: { city?: string; state?: string } = {};
+  if (typeof input.city !== 'string' || input.city.trim() === '') {
+    errors.city = 'City is required to finish onboarding.';
+  }
+  if (typeof input.state !== 'string' || input.state.trim() === '') {
+    errors.state = 'State is required to finish onboarding.';
+  }
+  return errors;
+}
+
 profileRouter.get('/', async (req, res, next) => {
   try {
     if (!req.authUser) {
@@ -180,6 +217,34 @@ profileRouter.post('/', async (req, res, next) => {
     // whatever is saved so far. The transitions below keep the
     // skipped/completed state consistent (see applyOnboardingTransitions).
     const update = applyOnboardingTransitions(parsed.data);
+
+    // First-time completion requires a resolvable location (P2): a
+    // city with no state (or no city) cannot produce prayer times.
+    // Merged with the stored profile so a value saved by an earlier
+    // partial save still counts. Partial/skip saves and already
+    // completed profiles are never blocked by this check.
+    if (update.onboardingCompleted === true) {
+      const existing = await Profile.findOne({ userId: req.authUser.id })
+        .select('city state onboardingCompleted')
+        .lean();
+      const locationErrors = completionLocationErrors({
+        onboardingCompleted: true,
+        existingCompleted: existing?.onboardingCompleted === true,
+        city: typeof update.city === 'string' ? update.city : existing?.city,
+        state: typeof update.state === 'string' ? update.state : existing?.state,
+      });
+      if (Object.keys(locationErrors).length > 0) {
+        const missing = Object.values(locationErrors).join(' ');
+        res.status(400).json({
+          error: `Cannot finish onboarding: ${missing}`,
+          details: {
+            city: locationErrors.city ? [locationErrors.city] : undefined,
+            state: locationErrors.state ? [locationErrors.state] : undefined,
+          },
+        });
+        return;
+      }
+    }
 
     const profile = await Profile.findOneAndUpdate(
       { userId: req.authUser.id },

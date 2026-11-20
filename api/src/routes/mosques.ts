@@ -15,9 +15,14 @@ import { Profile } from '../models/Profile.js';
  *
  * Nominatim usage policy: a proper identifying User-Agent is sent
  * on every request. Overpass is slow (tens of seconds on the public
- * instance), so the timeout is generous and failures are honest
- * 502s. Phone/website are included ONLY when OSM tags provide
- * them; nothing is ever invented. Results are sorted by distance.
+ * instance — a 10 km query around Pune measured 36 s on
+ * 2026-11-21), so every upstream call has a hard timeout and the
+ * client has one too: worst case for a city search is ~35 s
+ * (10 s geocode + 25 s Overpass), never an endless hang, and a
+ * timeout is an honest 504 ("took too long, try again") instead
+ * of a silent spinner. Phone/website are included ONLY when OSM
+ * tags provide them; nothing is ever invented. Results are sorted
+ * by distance.
  */
 
 export const mosquesRouter = Router();
@@ -27,6 +32,38 @@ mosquesRouter.use(requireAuth);
 const USER_AGENT = 'AHDORA/1.0 (Islamic learning app; educational use)';
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
+
+/**
+ * Upstream time budgets. The public Overpass instance is slow
+ * (36 s measured for Pune, 10 km), so these are a compromise:
+ * long enough for a normal query to finish, short enough that no
+ * request hangs forever. Worst case for one city search is
+ * NOMINATIM_TIMEOUT_MS + OVERPASS_TIMEOUT_MS (~35 s); the
+ * client aborts at 35 s as a backstop (see src/lib/mosquesApi.ts).
+ * Keep OVERPASS_QUERY_TIMEOUT_SECONDS below the fetch timeout so
+ * the Overpass server aborts first and returns its own 504.
+ */
+export const NOMINATIM_TIMEOUT_MS = 10_000;
+export const OVERPASS_TIMEOUT_MS = 25_000;
+export const OVERPASS_QUERY_TIMEOUT_SECONDS = 20;
+
+/** Map an upstream failure to the honest HTTP response for it. */
+export function mosqueUpstreamError(error: unknown): { status: number; error: string } {
+  if (error instanceof Error && error.message === 'UPSTREAM_TIMEOUT') {
+    return {
+      status: 504,
+      error: 'OpenStreetMap took too long to respond. Try again, or try a smaller radius.',
+    };
+  }
+  return {
+    status: 502,
+    error: 'Mosque data could not be loaded from OpenStreetMap. Please try again later.',
+  };
+}
+
+function isTimeout(error: unknown): boolean {
+  return error instanceof Error && error.name === 'TimeoutError';
+}
 
 type Mosque = {
   id: string;
@@ -109,7 +146,7 @@ function parseOverpass(payload: unknown, lat: number, lng: number): Mosque[] {
 async function fetchNearbyMosques(lat: number, lng: number, radiusKm: number): Promise<Mosque[]> {
   const radiusM = Math.round(radiusKm * 1000);
   const query =
-    `[out:json][timeout:45];` +
+    `[out:json][timeout:${OVERPASS_QUERY_TIMEOUT_SECONDS}];` +
     `(node["amenity"="place_of_worship"]["religion"="muslim"](around:${radiusM},${lat},${lng});` +
     `way["amenity"="place_of_worship"]["religion"="muslim"](around:${radiusM},${lat},${lng}););` +
     `out center 50;`;
@@ -117,17 +154,18 @@ async function fetchNearbyMosques(lat: number, lng: number, radiusKm: number): P
   try {
     response = await fetch(OVERPASS_URL, {
       method: 'POST',
-      signal: AbortSignal.timeout(50000),
+      signal: AbortSignal.timeout(OVERPASS_TIMEOUT_MS),
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'User-Agent': USER_AGENT,
       },
       body: new URLSearchParams({ data: query }),
     });
-  } catch {
-    throw new Error('UPSTREAM_UNREACHABLE');
+  } catch (error) {
+    throw new Error(isTimeout(error) ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNREACHABLE');
   }
-  if (!response.ok) throw new Error('UPSTREAM_FAILED');
+  // Overpass answers its own query timeout with 504.
+  if (!response.ok) throw new Error(response.status === 504 ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_FAILED');
   const payload = (await response.json().catch(() => null)) as unknown;
   return parseOverpass(payload, lat, lng);
 }
@@ -142,11 +180,11 @@ async function geocodeCity(
   let response: Response;
   try {
     response = await fetch(url, {
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(NOMINATIM_TIMEOUT_MS),
       headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
     });
-  } catch {
-    throw new Error('UPSTREAM_UNREACHABLE');
+  } catch (error) {
+    throw new Error(isTimeout(error) ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNREACHABLE');
   }
   if (!response.ok) throw new Error('UPSTREAM_FAILED');
   const payload = (await response.json().catch(() => null)) as unknown;
@@ -189,8 +227,9 @@ mosquesRouter.get('/nearby', async (req, res) => {
       count: mosques.length,
       mosques,
     });
-  } catch {
-    res.status(502).json({ error: 'Mosque data could not be loaded from OpenStreetMap. Please try again later.' });
+  } catch (error) {
+    const upstream = mosqueUpstreamError(error);
+    res.status(upstream.status).json({ error: upstream.error });
   }
 });
 
@@ -238,8 +277,9 @@ mosquesRouter.get('/search', async (req, res) => {
       count: mosques.length,
       mosques,
     });
-  } catch {
-    res.status(502).json({ error: 'Mosque data could not be loaded from OpenStreetMap. Please try again later.' });
+  } catch (error) {
+    const upstream = mosqueUpstreamError(error);
+    res.status(upstream.status).json({ error: upstream.error });
   }
 });
 
@@ -283,7 +323,8 @@ mosquesRouter.get('/near-me', async (req, res, next) => {
       count: mosques.length,
       mosques,
     });
-  } catch {
-    res.status(502).json({ error: 'Mosque data could not be loaded from OpenStreetMap. Please try again later.' });
+  } catch (error) {
+    const upstream = mosqueUpstreamError(error);
+    res.status(upstream.status).json({ error: upstream.error });
   }
 });

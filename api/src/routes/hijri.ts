@@ -17,6 +17,16 @@ import { addDays, dateKeyInTimezone } from '../lib/timezone.js';
  * `hijri.holidays` arrays in the calendar data — nothing is
  * computed or invented here.
  *
+ * DATE-FORMAT TRAP (P1, 2026-11-21): Aladhan returns every date as
+ * "DD-MM-YYYY" (gregorian.date "01-11-2026", hijri.date
+ * "21-05-1448"), while this codebase keys days as ISO "YYYY-MM-DD".
+ * Comparing the two formats directly NEVER matches, so /today always
+ * 502'd and the month lookup never shifted — the whole calendar
+ * rendered blank ("·2026", "No calendar data for this month") and
+ * the ± adjustment silently did nothing. Every Aladhan day is
+ * therefore normalised to ISO at the fetch boundary
+ * (normaliseAladhanDay) and all lookups below use ISO keys only.
+ *
  * Adjustment: the user's hijriDayOffset (-2..+2, stored on the
  * profile) shifts the displayed Hijri date by that many days, for
  * local moon-sighting differences. The source and convention are
@@ -59,6 +69,39 @@ function isAladhanDay(data: unknown): data is AladhanDay {
   );
 }
 
+/** "01-11-2026" (Aladhan DD-MM-YYYY) -> "2026-11-01" (ISO). Returns '' when the input is not a valid DD-MM-YYYY date. */
+export function ddmmyyyyToIso(value: string): string {
+  const match = /^(\d{2})-(\d{2})-(\d{4})$/.exec(value.trim());
+  if (!match) return '';
+  const [, day, month, year] = match as unknown as [string, string, string, string];
+  const dayNum = Number(day);
+  const monthNum = Number(month);
+  const yearNum = Number(year);
+  if (monthNum < 1 || monthNum > 12 || dayNum < 1 || dayNum > 31) return '';
+  // Reject impossible dates (e.g. 31-02-2026) via a round-trip check.
+  const probe = new Date(Date.UTC(yearNum, monthNum - 1, dayNum));
+  if (
+    probe.getUTCFullYear() !== yearNum ||
+    probe.getUTCMonth() !== monthNum - 1 ||
+    probe.getUTCDate() !== dayNum
+  ) {
+    return '';
+  }
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Normalise one raw Aladhan day to this codebase's ISO date keys.
+ * The Hijri date itself stays in the upstream DD-MM-YYYY display
+ * form (its day/month/year fields are what the UI renders); only
+ * gregorian.date — the lookup key — is converted.
+ */
+export function normaliseAladhanDay(day: AladhanDay): AladhanDay | null {
+  const iso = ddmmyyyyToIso(day.gregorian.date);
+  if (!iso) return null;
+  return { ...day, gregorian: { ...day.gregorian, date: iso } };
+}
+
 async function fetchGregorianMonthCalendar(month: number, year: number): Promise<AladhanDay[]> {
   const key = `${year}-${month}`;
   const cached = calendarCache.get(key);
@@ -80,7 +123,12 @@ async function fetchGregorianMonthCalendar(month: number, year: number): Promise
   if (!payload || payload.code !== 200 || !Array.isArray(payload.data)) {
     throw new Error('UPSTREAM_BAD_RESPONSE');
   }
-  const days = payload.data.filter(isAladhanDay);
+  // Normalise at the boundary: Aladhan dates are DD-MM-YYYY, all
+  // lookups below use ISO YYYY-MM-DD keys (see the header note).
+  const days = payload.data
+    .filter(isAladhanDay)
+    .map(normaliseAladhanDay)
+    .filter((day): day is AladhanDay => day !== null);
   if (days.length === 0) throw new Error('UPSTREAM_BAD_RESPONSE');
   if (calendarCache.size > 60) calendarCache.clear();
   calendarCache.set(key, { at: Date.now(), days });
@@ -98,8 +146,8 @@ async function fetchSingleDay(dateKey: string): Promise<AladhanDay | null> {
   }
 }
 
-/** Apply the user's day offset: the Hijri date shown for a Gregorian day is the conversion of (day + offset). */
-function shiftedLookup(days: AladhanDay[], gregorianDate: string, offset: number): AladhanDay | null {
+/** Apply the user's day offset: the Hijri date shown for a Gregorian day is the conversion of (day + offset). Both dates are ISO keys. */
+export function shiftedLookup(days: AladhanDay[], gregorianDate: string, offset: number): AladhanDay | null {
   const target = addDays(gregorianDate, offset);
   return days.find((item) => item.gregorian.date === target) ?? null;
 }

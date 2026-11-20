@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import AhdoraLogo from './AhdoraLogo';
@@ -48,12 +48,45 @@ function isValidTime(value: string): boolean {
 export default function Onboarding({ user, onChange, onComplete, onSkip, initialStep = 0, mode = 'initial', onCancel }: Props) {
   const [step, setStep] = useState(initialStep);
   const [error, setError] = useState('');
+  /**
+   * Per-field errors (P9): the old single generic message ("Please
+   * complete your education details.") never said WHICH field was
+   * missing — it took 3 attempts to find out. Each missing field now
+   * gets its own message, shown under that field, and the summary
+   * above the buttons names them all.
+   */
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [skipping, setSkipping] = useState(false);
+
+  /**
+   * Resume safety (P9): `initialStep` is only the opening step, but
+   * if the parent ever re-opens the form at a different step while
+   * this component is still mounted, follow it — never sit on a stale
+   * step. (The App-level fix is resetting the requested step on
+   * signup/logout; this is the backstop inside the form.)
+   */
+  const prevInitialStepRef = useRef(initialStep);
+  if (prevInitialStepRef.current !== initialStep) {
+    prevInitialStepRef.current = initialStep;
+    setStep(initialStep);
+    setError('');
+    setFieldErrors({});
+  }
+
+  const clearFieldError = (key: string) => {
+    setFieldErrors((current) => {
+      if (!(key in current)) return current;
+      const nextErrors = { ...current };
+      delete nextErrors[key];
+      return nextErrors;
+    });
+  };
 
   const update = <K extends keyof UserProfile>(field: K, value: UserProfile[K]) => {
     onChange({ ...user, [field]: value });
     setError('');
+    clearFieldError(field as string);
   };
 
   const updatePrayer = (prayer: PrayerName, field: 'timeOverride' | 'endTime' | 'reminder', value: string | boolean) => {
@@ -65,6 +98,7 @@ export default function Onboarding({ user, onChange, onComplete, onSkip, initial
       },
     });
     setError('');
+    clearFieldError(`prayer:${prayer}`);
   };
 
   const steps = useMemo(() => [
@@ -78,50 +112,111 @@ export default function Onboarding({ user, onChange, onComplete, onSkip, initial
     { title: 'Review & save', text: 'Check everything, then save to your account.' },
   ], []);
 
-  function validateCurrentStep(): string {
-    if (step === 1 && (!user.education || !user.course.trim() || !user.semester.trim() || !user.subjects.trim())) {
-      return 'Please complete your education details.';
+  /**
+   * Per-step validation. Returns one message per missing/invalid
+   * field, keyed by field name, plus a summary that names them all.
+   * Required set per step (the audit's "ALL fields" confusion came
+   * from this never being shown): step 1 — education, course,
+   * semester, subjects (college, class/year and branch are optional);
+   * step 2 — college start/end + at least one college day; step 3 —
+   * study start/end, daily target + at least one study day; step 4 —
+   * city AND state, both (P2: a city with no state cannot be resolved
+   * for prayer times — Affan's saved "MAHARSTRA" with an empty state
+   * is the live example). Steps 5–6 only check HH:mm formats.
+   */
+  function validateStep(targetStep: number): { message: string; fields: Record<string, string> } {
+    const fields: Record<string, string> = {};
+    if (targetStep === 1) {
+      if (!user.education.trim()) fields.education = 'Education level is required.';
+      if (!user.course.trim()) fields.course = 'Course / programme is required.';
+      if (!user.semester.trim()) fields.semester = 'Semester is required.';
+      if (!user.subjects.trim()) fields.subjects = 'Subjects are required.';
     }
-    if (step === 2 && (!user.collegeStart || !user.collegeEnd || user.collegeDays.length === 0)) {
-      return 'Add college hours and at least one college day.';
+    if (targetStep === 2) {
+      if (!user.collegeStart) fields.collegeStart = 'College start time is required.';
+      if (!user.collegeEnd) fields.collegeEnd = 'College end time is required.';
+      if (user.collegeDays.length === 0) fields.collegeDays = 'Select at least one college day.';
     }
-    if (step === 3 && (!user.studyStart || !user.studyEnd || !user.dailyStudyTarget || user.preferredStudyDays.length === 0)) {
-      return 'Add study hours, a daily target, and preferred study days.';
+    if (targetStep === 3) {
+      if (!user.studyStart) fields.studyStart = 'Study start time is required.';
+      if (!user.studyEnd) fields.studyEnd = 'Study end time is required.';
+      if (!user.dailyStudyTarget) fields.dailyStudyTarget = 'Daily study target is required.';
+      if (user.preferredStudyDays.length === 0) fields.preferredStudyDays = 'Select at least one preferred study day.';
     }
-    if (step === 4 && !user.city.trim()) return 'Please enter your city.';
-    if (step === 5) {
+    if (targetStep === 4) {
+      if (!user.city.trim()) fields.city = 'City is required — prayer times are calculated for your city.';
+      if (!(user.state ?? '').trim()) fields.state = 'State is required — it helps find your city for prayer times.';
+    }
+    if (targetStep === 5) {
       for (const prayer of prayerNames) {
         const setting = user.prayerSettings[prayer];
         if (!isValidTime(setting.timeOverride ?? '') || !isValidTime(setting.endTime ?? '')) {
-          return `Please use HH:mm times for ${prayer}, or leave them blank.`;
+          fields[`prayer:${prayer}`] = `Please use HH:mm times for ${prayer}, or leave them blank.`;
         }
       }
     }
-    if (step === 6) {
+    if (targetStep === 6) {
       for (const value of [user.sleepStartTime, user.sleepEndTime, user.focusStartTime ?? '', user.focusEndTime ?? '']) {
-        if (!isValidTime(value)) return 'Please use HH:mm times for sleep and focus, or leave focus blank.';
+        if (!isValidTime(value)) {
+          fields.sleepTimes = 'Please use HH:mm times for sleep and focus, or leave focus blank.';
+          break;
+        }
       }
     }
-    return '';
+    const messages = Object.values(fields);
+    return { fields, message: messages.join(' ') };
   }
+
+  function validateCurrentStep(): { message: string; fields: Record<string, string> } {
+    return validateStep(step);
+  }
+
+  /** Inline helpers for the per-field errors + required markers. */
+  const fieldErrorText = (key: string) =>
+    fieldErrors[key] ? (
+      <p style={{ color: 'var(--red)', fontSize: 12, margin: '4px 0 0' }}>{fieldErrors[key]}</p>
+    ) : null;
+  const requiredMark = <span style={{ color: 'var(--red)' }}> *</span>;
+  const invalidStyle = (key: string) =>
+    fieldErrors[key] ? { borderColor: 'var(--red)' } : undefined;
 
   function next(e?: FormEvent) {
     e?.preventDefault();
     const validation = validateCurrentStep();
-    if (validation) {
-      setError(validation);
+    if (validation.message) {
+      setFieldErrors(validation.fields);
+      setError(validation.message);
       return;
     }
     setError('');
+    setFieldErrors({});
     setStep((current) => Math.min(current + 1, steps.length - 1));
   }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (busy) return;
+    // Final save must not slip past an earlier step: a fresh signup
+    // could otherwise reach Review with an empty city/state and save
+    // an unresolvable location. Re-check steps 1–6 and jump to the
+    // first incomplete one. Edit mode is exempt — it re-saves an
+    // already-completed profile, whose saved values are never judged
+    // here (same grandfathering as the API's completion check).
+    if (mode === 'initial') {
+      for (let target = 1; target <= 6; target += 1) {
+        const check = validateStep(target);
+        if (check.message) {
+          setFieldErrors(check.fields);
+          setError(check.message);
+          setStep(target);
+          return;
+        }
+      }
+    }
     const validation = validateCurrentStep();
-    if (validation) {
-      setError(validation);
+    if (validation.message) {
+      setFieldErrors(validation.fields);
+      setError(validation.message);
       return;
     }
     setBusy(true);
@@ -245,6 +340,10 @@ export default function Onboarding({ user, onChange, onComplete, onSkip, initial
           <span style={{ width: `${((step + 1) / steps.length) * 100}%` }} />
         </div>
 
+        {(step === 1 || step === 2 || step === 3 || step === 4) && (
+          <p className="onboarding-help">Fields marked <span style={{ color: 'var(--red)' }}>*</span> are required. If something is missing, the exact field is named under it.</p>
+        )}
+
         {step === 0 && (
           <div>
             <label className="field-label">Full name</label>
@@ -263,36 +362,40 @@ export default function Onboarding({ user, onChange, onComplete, onSkip, initial
 
         {step === 1 && (
           <div>
-            <label className="field-label">Education level</label>
-            <select className="form-input" value={user.education} onChange={(e) => update('education', e.target.value)}>
+            <label className="field-label">Education level{requiredMark}</label>
+            <select className="form-input" style={invalidStyle('education')} value={user.education} onChange={(e) => update('education', e.target.value)}>
               <option value="">Select education level</option>
               <option>School</option><option>Diploma / Polytechnic</option><option>Undergraduate degree</option>
               <option>Postgraduate degree</option><option>Competitive exam preparation</option><option>Other</option>
             </select>
-            <label className="field-label">Course / programme</label>
-            <input className="form-input" value={user.course} onChange={(e) => update('course', e.target.value)} />
-            <label className="field-label">College / institute</label>
+            {fieldErrorText('education')}
+            <label className="field-label">Course / programme{requiredMark}</label>
+            <input className="form-input" style={invalidStyle('course')} value={user.course} onChange={(e) => update('course', e.target.value)} />
+            {fieldErrorText('course')}
+            <label className="field-label">College / institute (optional)</label>
             <input className="form-input" value={user.collegeName} onChange={(e) => update('collegeName', e.target.value)} />
             <div className="onboarding-two-col">
-              <div><label className="field-label">Class / year</label><input className="form-input" value={user.classYear} onChange={(e) => update('classYear', e.target.value)} /></div>
-              <div><label className="field-label">Semester</label><input className="form-input" value={user.semester} onChange={(e) => update('semester', e.target.value)} /></div>
+              <div><label className="field-label">Class / year (optional)</label><input className="form-input" value={user.classYear} onChange={(e) => update('classYear', e.target.value)} /></div>
+              <div><label className="field-label">Semester{requiredMark}</label><input className="form-input" style={invalidStyle('semester')} value={user.semester} onChange={(e) => update('semester', e.target.value)} />{fieldErrorText('semester')}</div>
             </div>
-            <label className="field-label">Branch</label>
+            <label className="field-label">Branch (optional)</label>
             <input className="form-input" value={user.branch} onChange={(e) => update('branch', e.target.value)} />
-            <label className="field-label">Subjects (comma separated)</label>
-            <textarea className="form-input onboarding-textarea" value={user.subjects} onChange={(e) => update('subjects', e.target.value)} />
+            <label className="field-label">Subjects (comma separated){requiredMark}</label>
+            <textarea className="form-input onboarding-textarea" style={invalidStyle('subjects')} value={user.subjects} onChange={(e) => update('subjects', e.target.value)} />
+            {fieldErrorText('subjects')}
           </div>
         )}
 
         {step === 2 && (
           <div>
             <div className="onboarding-two-col">
-              <div><label className="field-label">College starts</label><input className="form-input" type="time" value={user.collegeStart} onChange={(e) => update('collegeStart', e.target.value)} /></div>
-              <div><label className="field-label">College ends</label><input className="form-input" type="time" value={user.collegeEnd} onChange={(e) => update('collegeEnd', e.target.value)} /></div>
+              <div><label className="field-label">College starts{requiredMark}</label><input className="form-input" style={invalidStyle('collegeStart')} type="time" value={user.collegeStart} onChange={(e) => update('collegeStart', e.target.value)} />{fieldErrorText('collegeStart')}</div>
+              <div><label className="field-label">College ends{requiredMark}</label><input className="form-input" style={invalidStyle('collegeEnd')} type="time" value={user.collegeEnd} onChange={(e) => update('collegeEnd', e.target.value)} />{fieldErrorText('collegeEnd')}</div>
             </div>
-            <label className="field-label">College days</label>
+            <label className="field-label">College days{requiredMark}</label>
             <DayPicker selected={user.collegeDays} onToggle={(day) => toggleDay('collegeDays', day)} />
-            <label className="field-label">Weekly off days</label>
+            {fieldErrorText('collegeDays')}
+            <label className="field-label">Weekly off days (optional)</label>
             <DayPicker selected={user.weeklyOffDays} onToggle={(day) => toggleDay('weeklyOffDays', day)} />
             <label className="field-label">Weekend schedule (optional)</label>
             <input className="form-input" value={user.weekendSchedule ?? ''} onChange={(e) => update('weekendSchedule', e.target.value)} placeholder="e.g. Saturday 09:00–13:00, Sunday off" />
@@ -304,21 +407,23 @@ export default function Onboarding({ user, onChange, onComplete, onSkip, initial
         {step === 3 && (
           <div>
             <div className="onboarding-two-col">
-              <div><label className="field-label">Study starts</label><input className="form-input" type="time" value={user.studyStart} onChange={(e) => update('studyStart', e.target.value)} /></div>
-              <div><label className="field-label">Study ends</label><input className="form-input" type="time" value={user.studyEnd} onChange={(e) => update('studyEnd', e.target.value)} /></div>
+              <div><label className="field-label">Study starts{requiredMark}</label><input className="form-input" style={invalidStyle('studyStart')} type="time" value={user.studyStart} onChange={(e) => update('studyStart', e.target.value)} />{fieldErrorText('studyStart')}</div>
+              <div><label className="field-label">Study ends{requiredMark}</label><input className="form-input" style={invalidStyle('studyEnd')} type="time" value={user.studyEnd} onChange={(e) => update('studyEnd', e.target.value)} />{fieldErrorText('studyEnd')}</div>
             </div>
-            <label className="field-label">Daily study target</label>
-            <select className="form-input" value={user.dailyStudyTarget} onChange={(e) => update('dailyStudyTarget', e.target.value)}>
+            <label className="field-label">Daily study target{requiredMark}</label>
+            <select className="form-input" style={invalidStyle('dailyStudyTarget')} value={user.dailyStudyTarget} onChange={(e) => update('dailyStudyTarget', e.target.value)}>
               <option value="">Select target</option><option>30 minutes</option><option>1 hour</option><option>2 hours</option><option>3 hours</option><option>4+ hours</option>
             </select>
+            {fieldErrorText('dailyStudyTarget')}
             <div className="onboarding-two-col">
               <div><label className="field-label">Daily study hours (optional)</label><input className="form-input" value={user.dailyStudyHours ?? ''} onChange={(e) => update('dailyStudyHours', e.target.value)} placeholder="e.g. 4" /></div>
               <div><label className="field-label">Break duration in minutes (optional)</label><input className="form-input" inputMode="numeric" value={user.studyBreakMinutes ?? ''} onChange={(e) => update('studyBreakMinutes', e.target.value)} placeholder="e.g. 10" /></div>
             </div>
             <label className="field-label">Subject-wise targets (optional)</label>
             <textarea className="form-input onboarding-textarea" value={user.subjectTargets ?? ''} onChange={(e) => update('subjectTargets', e.target.value)} placeholder="e.g. Maths: 1h, DBMS: 1h" />
-            <label className="field-label">Preferred study days</label>
+            <label className="field-label">Preferred study days{requiredMark}</label>
             <DayPicker selected={user.preferredStudyDays} onToggle={(day) => toggleDay('preferredStudyDays', day)} />
+            {fieldErrorText('preferredStudyDays')}
           </div>
         )}
 
@@ -326,10 +431,11 @@ export default function Onboarding({ user, onChange, onComplete, onSkip, initial
           <div>
             <div className="onboarding-two-col">
               <div><label className="field-label">Country</label><input className="form-input" value={user.country ?? 'India'} onChange={(e) => update('country', e.target.value)} /></div>
-              <div><label className="field-label">State</label><input className="form-input" value={user.state ?? ''} onChange={(e) => update('state', e.target.value)} placeholder="e.g. Maharashtra" /></div>
+              <div><label className="field-label">State{requiredMark}</label><input className="form-input" style={invalidStyle('state')} value={user.state ?? ''} onChange={(e) => update('state', e.target.value)} placeholder="e.g. Maharashtra" />{fieldErrorText('state')}</div>
             </div>
-            <label className="field-label">Your city</label>
-            <input className="form-input" value={user.city} onChange={(e) => update('city', e.target.value)} placeholder="e.g. Pune, Maharashtra" />
+            <label className="field-label">Your city{requiredMark}</label>
+            <input className="form-input" style={invalidStyle('city')} value={user.city} onChange={(e) => update('city', e.target.value)} placeholder="e.g. Pune, Maharashtra" />
+            {fieldErrorText('city')}
             <label className="field-label">Timezone</label>
             <select className="form-input" value={user.timezone ?? 'Asia/Kolkata'} onChange={(e) => update('timezone', e.target.value)}>
               {timezones.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
@@ -366,6 +472,7 @@ export default function Onboarding({ user, onChange, onComplete, onSkip, initial
                     <input type="checkbox" checked={setting.reminder ?? true} onChange={(e) => updatePrayer(prayer, 'reminder', e.target.checked)} />{' '}
                     Remind me for {prayer}
                   </label>
+                  {fieldErrorText(`prayer:${prayer}`)}
                 </div>
               );
             })}
@@ -387,6 +494,7 @@ export default function Onboarding({ user, onChange, onComplete, onSkip, initial
               <input type="checkbox" checked={user.sleepReminder ?? true} onChange={(e) => update('sleepReminder', e.target.checked)} />{' '}
               Remind me at sleep time
             </label>
+            {fieldErrorText('sleepTimes')}
             <p className="onboarding-help">Sleep and focus settings are saved to your profile. App blocking is an Android-only feature and is not active on the web.</p>
           </div>
         )}
@@ -397,7 +505,7 @@ export default function Onboarding({ user, onChange, onComplete, onSkip, initial
               <div key={group.label} style={{ marginBottom: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <strong>{group.label}</strong>
-                  <button type="button" className="text-button" onClick={() => { setStep(group.step); setError(''); }}>
+                  <button type="button" className="text-button" onClick={() => { setStep(group.step); setError(''); setFieldErrors({}); }}>
                     Edit <ArrowRight size={13} />
                   </button>
                 </div>
@@ -412,7 +520,7 @@ export default function Onboarding({ user, onChange, onComplete, onSkip, initial
 
         {error && <p style={{ color: 'var(--red)', fontSize: 13, marginTop: 12 }}>{error}</p>}
         <form onSubmit={step === steps.length - 1 ? submit : next} className="onboarding-actions">
-          {step > 0 && <button type="button" className="outline-button" onClick={() => { setStep((current) => current - 1); setError(''); }}><ArrowLeft size={15} /> Back</button>}
+          {step > 0 && <button type="button" className="outline-button" onClick={() => { setStep((current) => current - 1); setError(''); setFieldErrors({}); }}><ArrowLeft size={15} /> Back</button>}
           <button type="submit" className="primary-button" disabled={busy || skipping}>
             {busy ? 'Saving profile...' : step === steps.length - 1 ? (mode === 'edit' ? 'Save karo' : 'Confirm & save') : 'Continue'} <ArrowRight size={16} />
           </button>
@@ -420,6 +528,7 @@ export default function Onboarding({ user, onChange, onComplete, onSkip, initial
         <button type="button" className="text-button" onClick={skip} disabled={busy || skipping} style={{ marginTop: 10 }}>
           {skipping ? 'Save ho raha hai…' : 'Baad me bharenge — Skip karo'}
         </button>
+        {' '}
         {mode === 'edit' && onCancel && (
           <button type="button" className="text-button" onClick={onCancel} disabled={busy || skipping} style={{ marginTop: 6 }}>
             Wapas jao (bina save kiye)

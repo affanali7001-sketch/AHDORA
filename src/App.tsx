@@ -71,11 +71,13 @@ import {
   type ChallengeTemplate,
 } from './lib/challengesApi';
 import {
+  fetchPointsHistory,
   fetchRewardsSummary,
   POINT_REASON_LABELS,
+  type PointTransaction,
   type RewardsSummary,
 } from './lib/rewardsApi';
-import { apiFetch, clearCsrfToken } from './lib/http.js';
+import { apiFetch, clearCsrfToken, isCsrfError, refreshCsrfToken } from './lib/http.js';
 import type { CSSProperties, ReactNode, FormEvent } from 'react';
 import {
   Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpen, BookMarked,
@@ -219,14 +221,41 @@ function App() {
   const [onboardingInitialStep, setOnboardingInitialStep] = useState(0);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [focusSaving, setFocusSaving] = useState(false);
+  // P7: the dashboard must not show "0 prayers / No activity recorded
+  // yet" while today's data is still loading — those are real zeros
+  // only after the first load finishes. Guests never load study/Salah
+  // data, so the dashboard gates the loading state on guestMode.
+  // Reset on logout / account deletion (see handleLogout).
+  const [studyLoaded, setStudyLoaded] = useState(false);
+  const [salahLoaded, setSalahLoaded] = useState(false);
+  // P7: mark-all-read / clear-all took ~1–2 min to reflect live, with
+  // no feedback while pending. One in-flight action at a time.
+  const [notifBusy, setNotifBusy] = useState<'read-all' | 'clear-all' | null>(null);
   // Honest signup notice from the server (POST /api/auth/signup returns
   // verificationEmailSent + notice). Shown in the verify banner when the
   // verification email could not be sent — never claim it was sent.
+  // Also carries the resend result (P10): on success the banner itself
+  // confirms "Verification email sent", so the confirmation survives
+  // even if the toast is missed; on failure it shows the error.
   const [emailNotice, setEmailNotice] = useState<string | null>(null);
+  // P10: a resend in flight (slow server must not look dead, and a
+  // double-click must not fire the request twice).
+  const [resendingVerification, setResendingVerification] = useState(false);
+  // P9: the saved resume step from GET /api/profile (the step a skip
+  // was saved at). Used only when no step has incomplete required
+  // fields — firstIncompleteStep() decides first.
+  const [onboardingResumeStep, setOnboardingResumeStep] = useState(0);
 
+  // P10: every notify() used to schedule its own 2.6s clear, so a
+  // toast from an earlier action could wipe a newer toast almost
+  // instantly (a stale timer firing right after a new toast appears).
+  // One shared timer, reset on every notify, so each toast is actually
+  // visible for the full duration.
+  const toastTimer = useRef<number | null>(null);
   const notify = (message: string) => {
     setToast(message);
-    window.setTimeout(() => setToast(''), 2600);
+    if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(''), 2600);
   };
 
   async function hydrateProfile(user: AuthUser) {
@@ -237,6 +266,7 @@ function App() {
       if (loaded) {
         setNewUser(loaded.profile);
         setOnboardingCompleted(loaded.onboardingCompleted);
+        setOnboardingResumeStep(loaded.onboardingStep);
         // A skipped (incomplete) profile still enters the app — the
         // dashboard works with whatever is filled in, and Profile shows
         // "Profile poora karo" until onboarding is finished.
@@ -244,12 +274,18 @@ function App() {
       } else {
         setNewUser(emptyProfile(user.name, user.email));
         setOnboardingCompleted(false);
+        // No saved profile: the form opens at the very first step, never
+        // at a step left over from a previous account in this tab (P9).
+        setOnboardingInitialStep(0);
+        setOnboardingResumeStep(0);
         setScreen('onboarding');
       }
     } catch (error) {
       // A missing /api/profile route is not treated as a completed profile.
       setNewUser(emptyProfile(user.name, user.email));
       setOnboardingCompleted(false);
+      setOnboardingInitialStep(0);
+      setOnboardingResumeStep(0);
       setScreen('onboarding');
       notify(error instanceof Error ? error.message : 'Profile load nahi ho payi.');
     }
@@ -262,6 +298,10 @@ function App() {
     } catch {
       // Dashboard completion stays empty rather than showing invented data.
       setSalahToday({});
+    } finally {
+      // P7: first load done (even on error) — the dashboard may now
+      // show real zeros instead of a loading state.
+      setSalahLoaded(true);
     }
   }
 
@@ -293,6 +333,9 @@ function App() {
         ? failed.reason instanceof Error ? failed.reason.message : 'Study data could not be loaded.'
         : '',
     );
+    // P7: first load done (even on partial failure) — the dashboard
+    // may now show real zeros instead of a loading state.
+    setStudyLoaded(true);
   }
 
   // Challenges and rewards live in MongoDB; every load re-fetches them so
@@ -462,16 +505,21 @@ function App() {
           if (loaded) {
             setNewUser(loaded.profile);
             setOnboardingCompleted(loaded.onboardingCompleted);
+            setOnboardingResumeStep(loaded.onboardingStep);
             setScreen('app');
           } else {
             setNewUser(emptyProfile(user.name, user.email));
             setOnboardingCompleted(false);
+            setOnboardingInitialStep(0);
+            setOnboardingResumeStep(0);
             setScreen('onboarding');
           }
         } catch {
           if (!active) return;
           setNewUser(emptyProfile(user.name, user.email));
           setOnboardingCompleted(false);
+          setOnboardingInitialStep(0);
+          setOnboardingResumeStep(0);
           setScreen('onboarding');
         }
       })
@@ -505,9 +553,27 @@ function App() {
   };
 
   async function handleLogin(email: string, password: string) {
-    const result = await apiRequest<{ user: AuthUser }>('/api/auth/login', {
-      method: 'POST', body: JSON.stringify({ email, password }),
-    });
+    // Fresh CSRF token immediately before the login POST: a token
+    // cached from an earlier page lifetime can already be stale (the
+    // CSRF cookie is shared across tabs, so another tab may have
+    // rotated it). apiFetch still retries once on a 403, but starting
+    // fresh is what keeps login from failing in the first place.
+    // A failed refresh is ignored — the POST goes ahead with the
+    // normal retry path.
+    await refreshCsrfToken().catch(() => null);
+    let result: { user: AuthUser };
+    try {
+      result = await apiRequest<{ user: AuthUser }>('/api/auth/login', {
+        method: 'POST', body: JSON.stringify({ email, password }),
+      });
+    } catch (err) {
+      // If the token still failed after the retry, say plainly what
+      // fixes it instead of showing the server's terse CSRF error.
+      if (isCsrfError(err)) {
+        throw new Error('Security check fail ho gaya. Page ko refresh karke dobara login karo.');
+      }
+      throw err;
+    }
     setAuthUser(result.user);
     setProfileName(result.user.name);
     // Brief pause so the auth button's success tick is visible before the
@@ -524,6 +590,13 @@ function App() {
     setAuthUser(result.user);
     setProfileName(result.user.name);
     setNewUser(emptyProfile(result.user.name, result.user.email));
+    // P9: a fresh signup ALWAYS starts onboarding at Step 1.
+    // onboardingInitialStep is sticky state: opening Profile's
+    // "Prayer calculation" row sets it to 4, and nothing reset it, so
+    // a signup in the same tab after that (the overnight check's test
+    // account) landed on Step 5 with steps 1–4 still empty.
+    setOnboardingInitialStep(0);
+    setOnboardingResumeStep(0);
     // Honest verification notice: the server says whether the
     // verification email actually went out. If it did not (SMTP not
     // configured or send failed), keep its notice for the verify
@@ -576,6 +649,7 @@ function App() {
       setNewUser(saved);
       setProfileName(authUser.name);
       setOnboardingCompleted(false);
+      setOnboardingResumeStep(step);
       setPrayerStatus('idle');
       setPrayerTimes(null);
       setEditingProfile(false);
@@ -593,7 +667,26 @@ function App() {
     if (!profile.education || !profile.course.trim() || !profile.semester.trim() || !profile.subjects.trim()) return 1;
     if (!profile.collegeStart || !profile.collegeEnd || profile.collegeDays.length === 0) return 2;
     if (!profile.studyStart || !profile.studyEnd || !profile.dailyStudyTarget || profile.preferredStudyDays.length === 0) return 3;
-    if (!profile.city.trim()) return 4;
+    // P2: city AND state are both required — a city with an empty state
+    // (Affan's saved "MAHARSTRA") cannot be resolved for prayer times,
+    // so it counts as incomplete and resumes at the Location step.
+    if (!profile.city.trim() || !(profile.state ?? '').trim()) return 4;
+    return 0;
+  }
+
+  /**
+   * Where "Profile poora karo" should open (P9): the first step with
+   * incomplete required fields. When steps 1–4 are all filled but
+   * onboarding still isn't finished (the user skipped at a later,
+   * all-optional step), fall back to the saved resume step instead of
+   * sending them back to Step 1.
+   */
+  function resumeStep(profile: UserProfile): number {
+    const first = firstIncompleteStep(profile);
+    if (first !== 0) return first;
+    if (onboardingCompleted === false) {
+      return Math.min(7, Math.max(0, onboardingResumeStep));
+    }
     return 0;
   }
 
@@ -614,13 +707,18 @@ function App() {
     setPage('profile');
   }
 
-  /** Focus & sleep: save the sleep window to MongoDB for real. */
-  async function handleSaveFocus() {
+  /**
+   * Focus & sleep: save the sleep window to MongoDB for real.
+   * Returns true when the save landed, false otherwise, so the Focus
+   * screen can show a persistent confirmation (P15) — the 2.6s toast
+   * alone was missed whenever the save itself was slow.
+   */
+  async function handleSaveFocus(): Promise<boolean> {
     if (!authUser || guestMode) {
       notify('Neend ka time save karne ke liye pehle sign in karo.');
-      return;
+      return false;
     }
-    if (focusSaving) return;
+    if (focusSaving) return false;
     setFocusSaving(true);
     try {
       const profileToSave = { ...newUser, name: authUser.name, email: authUser.email };
@@ -632,8 +730,10 @@ function App() {
         : await saveProfile(profileToSave);
       setNewUser(saved);
       notify('Neend ka time save ho gaya. App restrictions Android app me kaam karenge.');
+      return true;
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Neend ka time save nahi ho paya.');
+      return false;
     } finally {
       setFocusSaving(false);
     }
@@ -650,13 +750,18 @@ function App() {
     setAuthUser(null);
     setGuestMode(false);
     setEmailNotice(null);
+    setResendingVerification(false);
     setOnboardingCompleted(null);
+    setOnboardingInitialStep(0);
+    setOnboardingResumeStep(0);
     setEditingProfile(false);
     setProfileName('');
     setNewUser(emptyProfile());
     setPrayerTimes(null);
     setPrayerStatus('idle');
     setSalahToday({});
+    setStudyLoaded(false);
+    setSalahLoaded(false);
     setSubjects([]);
     setTasks([]);
     setTodayTasks([]);
@@ -683,16 +788,33 @@ function App() {
     setAuthUser(null);
     setGuestMode(false);
     setEmailNotice(null);
+    setResendingVerification(false);
     setOnboardingCompleted(null);
+    setOnboardingInitialStep(0);
+    setOnboardingResumeStep(0);
     setEditingProfile(false);
     setProfileName('');
     setNewUser(emptyProfile());
+    setStudyLoaded(false);
+    setSalahLoaded(false);
     setScreen('welcome');
     setPage('dashboard');
     notify('Your account and all its data were deleted.');
   }
 
+  /**
+   * Resend the verification email (P10). The overnight check found
+   * this gave no confirmation: the banner vanished with no toast, so
+   * delivery could not be confirmed. Now: the button shows "Sending…"
+   * and disables while the request is in flight; on success BOTH a
+   * toast and the banner itself confirm ("Verification email sent.
+   * Check your inbox.") and the banner stays until the email is
+   * actually verified; on failure BOTH a toast and the banner show
+   * the error — the banner never silently vanishes on failure.
+   */
   async function handleResendVerification() {
+    if (resendingVerification) return;
+    setResendingVerification(true);
     try {
       const result = await apiRequest<{ sent?: boolean; alreadyVerified?: boolean }>('/api/auth/verify-email', { method: 'POST' });
       if (result.alreadyVerified) {
@@ -700,11 +822,15 @@ function App() {
         setEmailNotice(null);
         notify('Your email is already verified.');
       } else {
-        setEmailNotice(null);
+        setEmailNotice('Verification email sent. Check your inbox.');
         notify('Verification email sent. Check your inbox.');
       }
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Could not send the verification email.');
+      const message = error instanceof Error ? error.message : 'Could not send the verification email.';
+      setEmailNotice(message);
+      notify(message);
+    } finally {
+      setResendingVerification(false);
     }
   }
 
@@ -739,7 +865,7 @@ function App() {
         <div className="sidebar-bottom"><div className="sidebar-quote"><Sparkles size={15} /><p>Small steps, sincere intentions, steady growth.</p></div><button className="profile-mini" onClick={() => goTo('profile')}><div className="avatar">{initials}</div><div><strong>{displayName}</strong><span>Personal account</span></div><MoreHorizontal size={17} /></button></div>
       </aside>
       <main className="main-area">
-        <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{navItems.find((item) => item.id === page)?.label}</strong></div><div className="topbar-actions"><span className="demo-pill"><span />{authUser ? 'SECURE SESSION' : 'GUEST PREVIEW'}</span><button className="icon-button search-trigger" onClick={() => setSearchOpen(!searchOpen)} aria-label="Search"><Search size={18} /></button><div className="notification-wrap"><button className="icon-button notification-button" onClick={() => { setNotifOpen((open) => !open); if (!notifOpen) { refreshNotifications(); setConfirmClearNotif(false); } }} aria-label="Notifications"><Bell size={18} />{unreadCount > 0 && <span className="notification-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}</button>{notifOpen && <div className="notification-panel"><div className="notification-panel-head"><strong>Notifications</strong><span style={{ display: 'flex', gap: 12 }}><span>{unreadCount > 0 && <button onClick={async () => { try { await markAllNotificationsRead(); await refreshNotifications(); } catch { notify('Could not mark all as read.'); } }}>Mark all read</button>}</span>{notifications.length > 0 && (confirmClearNotif ? <button onClick={async () => { try { await clearAllNotifications(); setNotifications([]); setUnreadCount(0); setConfirmClearNotif(false); notify('Saari notifications hata di gayi.'); } catch { notify('Clear nahi ho paya. Dobara try karo.'); } }}>Pakka saaf karein?</button> : <button onClick={() => setConfirmClearNotif(true)}>Clear all</button>)}</span></div>{!authUser || guestMode ? <p className="onboarding-help">Notifications dekhne ke liye sign in karo.</p> : notifications.length === 0 ? <p className="onboarding-help">Abhi koi notification nahi hai. Namaz, padhai, neend aur challenge ki notifications yahan dikhengi.</p> : <div className="notification-list">{notifications.map((item) => (
+        <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{navItems.find((item) => item.id === page)?.label}</strong></div><div className="topbar-actions"><span className="demo-pill"><span />{authUser ? 'SECURE SESSION' : 'GUEST PREVIEW'}</span><button className="icon-button search-trigger" onClick={() => setSearchOpen(!searchOpen)} aria-label="Search"><Search size={18} /></button><div className="notification-wrap"><button className="icon-button notification-button" onClick={() => { setNotifOpen((open) => !open); if (!notifOpen) { refreshNotifications(); setConfirmClearNotif(false); } }} aria-label="Notifications"><Bell size={18} />{unreadCount > 0 && <span className="notification-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}</button>{notifOpen && <div className="notification-panel"><div className="notification-panel-head"><strong>Notifications</strong><span style={{ display: 'flex', gap: 12 }}><span>{unreadCount > 0 && <button disabled={notifBusy !== null} onClick={async () => { if (notifBusy) return; setNotifBusy('read-all'); try { await markAllNotificationsRead(); await refreshNotifications(); } catch { notify('Could not mark all as read.'); } finally { setNotifBusy(null); } }}>{notifBusy === 'read-all' ? 'Marking…' : 'Mark all read'}</button>}</span>{notifications.length > 0 && (confirmClearNotif ? <button disabled={notifBusy === 'clear-all'} onClick={async () => { if (notifBusy) return; setNotifBusy('clear-all'); try { await clearAllNotifications(); setNotifications([]); setUnreadCount(0); setConfirmClearNotif(false); notify('Saari notifications hata di gayi.'); } catch { notify('Clear nahi ho paya. Dobara try karo.'); } finally { setNotifBusy(null); } }}>{notifBusy === 'clear-all' ? 'Clearing…' : 'Pakka saaf karein?'}</button> : <button disabled={notifBusy !== null} onClick={() => setConfirmClearNotif(true)}>Clear all</button>)}</span></div>{!authUser || guestMode ? <p className="onboarding-help">Notifications dekhne ke liye sign in karo.</p> : notifications.length === 0 ? <p className="onboarding-help">Abhi koi notification nahi hai. Namaz, padhai, neend aur challenge ki notifications yahan dikhengi.</p> : <div className="notification-list">{notifications.map((item) => (
   <div key={item.id} className={`notification-item ${item.read ? 'notification-read' : ''}`}>
     <button
       type="button"
@@ -776,26 +902,26 @@ function App() {
           <div className="verify-banner">
             <Shield size={16} />
             <span>{emailNotice ?? 'Your email is not verified yet. Some account features need verification.'}</span>
-            <button className="text-button" onClick={handleResendVerification}>Resend verification email</button>
+            <button className="text-button" onClick={handleResendVerification} disabled={resendingVerification}>{resendingVerification ? 'Sending…' : 'Resend verification email'}</button>
           </div>
         )}
         {authUser && !guestMode && onboardingCompleted === false && (
           <div className="verify-banner">
             <UserRound size={16} />
             <span>Aapka profile adhoora hai — kuch details abhi baki hain.</span>
-            <button className="text-button" onClick={() => handleEditProfile(firstIncompleteStep(newUser))}>Profile poora karo</button>
+            <button className="text-button" onClick={() => handleEditProfile(resumeStep(newUser))}>Profile poora karo</button>
           </div>
         )}
         <div className="page-content">
-          {page === 'dashboard' && <Dashboard userName={profileName || 'there'} onNavigate={goTo} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} onPrayerToggle={() => goTo('deen')} subjects={subjects} todayTasks={todayTasks} studyStats={studyStats} guestMode={guestMode} activeChallenges={activeChallenges} rewards={rewards} />}
+          {page === 'dashboard' && <Dashboard userName={profileName || 'there'} onNavigate={goTo} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} onPrayerToggle={() => goTo('deen')} subjects={subjects} todayTasks={todayTasks} studyStats={studyStats} guestMode={guestMode} activeChallenges={activeChallenges} rewards={rewards} dataLoading={!guestMode && (!studyLoaded || !salahLoaded)} />}
           {page === 'deen' && <Deen onNotify={notify} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} onOpenGuidance={goToGuidance} />}
           {page === 'study' && <Study subjects={subjects} tasks={tasks} todayTasks={todayTasks} schedule={todaySchedule} stats={studyStats} activeSession={activePomodoro} history={pomodoroHistory} studyError={studyError} guestMode={guestMode} profile={newUser} onRefresh={refreshStudy} onNotify={notify} />}
           {page === 'challenges' && <Challenges onNotify={notify} onRefresh={refreshChallenges} guestMode={guestMode} />}
           {page === 'friends' && <Friends onNotify={notify} refreshKey={friendsRefreshKey} guestMode={guestMode} />}
           {page === 'guidance' && <Guidance onNotify={notify} onOpenFeedback={() => setFeedbackOpen(true)} tab={guidanceTab} onTabChange={setGuidanceTab} guestMode={guestMode} profileCity={newUser.city} initialSurah={guidanceSurah} onInitialSurahOpened={() => setGuidanceSurah(null)} onOpenSurah={(surahNumber) => goToGuidance('quran', surahNumber)} />}
           {page === 'focus' && <Focus sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} onSleepChange={(start, end) => setNewUser((current) => ({ ...current, sleepStartTime: start, sleepEndTime: end }))} onSaveFocus={handleSaveFocus} focusSaving={focusSaving} focusEnabled={focusEnabled} setFocusEnabled={setFocusEnabled} youtubeAllowed={youtubeAllowed} setYoutubeAllowed={setYoutubeAllowed} onNotify={notify} />}
-          {page === 'analytics' && <Analytics stats={studyStats} guestMode={guestMode} rewards={rewards} activeChallenges={activeChallenges} challengeHistory={challengeHistory} />}
-          {page === 'profile' && <Profile onNotify={notify} user={authUser} guestMode={guestMode} onLogout={handleLogout} onAccountDeleted={handleAccountDeleted} onboardingIncomplete={onboardingCompleted === false} onEditProfile={handleEditProfile} onOpenFeedback={() => setFeedbackOpen(true)} onNavigate={goTo} />}
+          {page === 'analytics' && <Analytics stats={studyStats} guestMode={guestMode} rewards={rewards} activeChallenges={activeChallenges} challengeHistory={challengeHistory} focusHistory={pomodoroHistory} onNotify={notify} />}
+          {page === 'profile' && <Profile onNotify={notify} user={authUser} guestMode={guestMode} onLogout={handleLogout} onAccountDeleted={handleAccountDeleted} onboardingIncomplete={onboardingCompleted === false} onEditProfile={handleEditProfile} onboardingResumeStep={resumeStep(newUser)} onOpenFeedback={() => setFeedbackOpen(true)} onNavigate={goTo} />}
         </div>
         <footer className="app-footer"><span>© 2026 AHDORA</span><span>Built around what matters.</span><button onClick={() => setFeedbackOpen(true)}><CircleHelp size={14} /> Help & feedback</button></footer>
       </main>
@@ -1141,7 +1267,7 @@ function Login({
         <div className="auth-notice">
           <Shield size={15} />
           <span>
-            Secure session is handled by the AHDORA API. Use a unique password. Email verification is available once email sending is set up on the server — until then the app will tell you it is not configured.
+            Secure session is handled by the AHDORA API. Use a unique password. Email verification ka link aapke email par bheja jata hai — inbox aur spam folder check karo.
           </span>
         </div>
       </div>
@@ -1419,6 +1545,7 @@ function Dashboard({
   guestMode,
   activeChallenges,
   rewards,
+  dataLoading,
 }: {
   userName: string;
   onNavigate: (page: Page) => void;
@@ -1433,6 +1560,10 @@ function Dashboard({
   guestMode: boolean;
   activeChallenges: ChallengeParticipation[];
   rewards: RewardsSummary | null;
+  /** P7: true while today's Salah/study data is still loading — the
+   * dashboard shows a loading state instead of "0 prayers / No
+   * activity recorded yet" (those zeros are only real after load). */
+  dataLoading: boolean;
 }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -1493,16 +1624,18 @@ function Dashboard({
           </div>
           <div className="progress-main">
             <div>
-              <strong>{hasActivity ? 'Today so far' : 'Your activity will appear here.'}</strong>
+              <strong>{dataLoading ? 'Loading today…' : hasActivity ? 'Today so far' : 'Your activity will appear here.'}</strong>
               <span>
-                {hasActivity
-                  ? `${prayedCount} of 5 prayers · ${tasksCompletedToday} task${tasksCompletedToday === 1 ? '' : 's'} completed · ${todayFocusMinutes}m focused`
-                  : 'Complete a Salah check-in or add a study task to start tracking progress.'}
+                {dataLoading
+                  ? 'Aaj ka data load ho raha hai — thoda sabr karo.'
+                  : hasActivity
+                    ? `${prayedCount} of 5 prayers · ${tasksCompletedToday} task${tasksCompletedToday === 1 ? '' : 's'} completed · ${todayFocusMinutes}m focused`
+                    : 'Complete a Salah check-in or add a study task to start tracking progress.'}
               </span>
-              <small><ArrowUpRight size={13} /> {hasActivity ? (streak > 0 ? `${streak}-day streak — a day counts when a focus session finishes or a task is completed.` : 'No streak yet — finish a focus session or a task.') : 'No activity recorded yet'}</small>
+              <small><ArrowUpRight size={13} /> {dataLoading ? 'Loading…' : hasActivity ? (streak > 0 ? `${streak}-day streak — a day counts when a focus session finishes or a task is completed.` : 'No streak yet — finish a focus session or a task.') : 'No activity recorded yet'}</small>
             </div>
           </div>
-          <div className="progress-footer"><span>Keep showing up.</span><span>{hasActivity ? `${completionPct}% prayers` : 'Not enough data'}</span></div>
+          <div className="progress-footer"><span>Keep showing up.</span><span>{dataLoading ? 'Loading…' : hasActivity ? `${completionPct}% prayers` : 'Not enough data'}</span></div>
         </section>
 
         <section className="panel prayer-panel">
@@ -1580,16 +1713,18 @@ function Dashboard({
           ) : (
             <>
               <div className="study-stat-row">
-                <div><strong>{tasksCompletedToday}</strong><span>Completed today</span></div>
+                <div><strong>{dataLoading ? '–' : tasksCompletedToday}</strong><span>Completed today</span></div>
                 <div className="study-stat-divider" />
-                <div><strong>{todayFocusMinutes}m</strong><span>Focused today</span></div>
+                <div><strong>{dataLoading ? '–' : `${todayFocusMinutes}m`}</strong><span>Focused today</span></div>
                 <div className="study-stat-divider" />
-                <div><strong>{streak}d</strong><span>Day streak</span></div>
+                <div><strong>{dataLoading ? '–' : `${streak}d`}</strong><span>Day streak</span></div>
               </div>
               <div className="task-list compact">
-                {todayTasks.length === 0 && (
+                {dataLoading ? (
+                  <p className="onboarding-help">Aaj ke tasks load ho rahe hain…</p>
+                ) : todayTasks.length === 0 ? (
                   <p className="onboarding-help">No tasks for today yet. Add one from the Study planner.</p>
-                )}
+                ) : null}
                 {todayTasks.slice(0, 3).map((task) => (
                   <div className="task-row" key={task.id}>
                     <span className={`task-dot ${subjectById.get(task.subjectId ?? '')?.colour ?? 'mint'}`} />
@@ -1787,6 +1922,14 @@ function Study({
   const [selectedMinutes, setSelectedMinutes] = useState(25);
   const [focusTaskId, setFocusTaskId] = useState('');
   const [busy, setBusy] = useState(false);
+  // P7: which action is in flight, so its button can say so
+  // ("Starting…", "Finishing…") instead of just sitting disabled while
+  // the server is slow. `busy` stays the single disable guard.
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  // P7: task Complete had no pending state at all — the button looked
+  // dead while the request + refresh were in flight. One status
+  // change at a time, tracked per task so only its row is affected.
+  const [statusPending, setStatusPending] = useState<{ id: string; status: TaskStatus } | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const completingRef = useRef(false);
 
@@ -1919,6 +2062,7 @@ function Study({
       durationMinutes: duration,
     };
     setBusy(true);
+    setPendingAction('save-task');
     try {
       if (taskModal?.task) {
         await updateTask(taskModal.task.id, input);
@@ -1933,16 +2077,21 @@ function Study({
       onNotify(error instanceof Error ? error.message : 'Task save nahi ho payi.');
     } finally {
       setBusy(false);
+      setPendingAction(null);
     }
   }
 
   async function changeStatus(task: StudyTask, status: TaskStatus) {
+    if (statusPending) return;
+    setStatusPending({ id: task.id, status });
     try {
       await setTaskStatus(task.id, status);
       await onRefresh();
       onNotify(status === 'Completed' ? 'Task completed.' : `Task marked ${status}.`);
     } catch (error) {
       onNotify(error instanceof Error ? error.message : 'Task update nahi ho paya.');
+    } finally {
+      setStatusPending(null);
     }
   }
 
@@ -1963,6 +2112,7 @@ function Study({
       return;
     }
     setBusy(true);
+    setPendingAction('save-subject');
     try {
       if (subjectForm.id) {
         await updateSubject(subjectForm.id, { name: subjectForm.name.trim(), label: subjectForm.label.trim(), colour: subjectForm.colour });
@@ -1977,6 +2127,7 @@ function Study({
       onNotify(error instanceof Error ? error.message : 'Subject save nahi ho paya.');
     } finally {
       setBusy(false);
+      setPendingAction(null);
     }
   }
 
@@ -1994,6 +2145,7 @@ function Study({
   async function handleStartTimer() {
     if (busy) return;
     setBusy(true);
+    setPendingAction('start');
     try {
       const task = timerMode === 'focus' && focusTaskId ? tasks.find((t) => t.id === focusTaskId) : undefined;
       await startPomodoro({
@@ -2009,12 +2161,14 @@ function Study({
       onNotify(error instanceof Error ? error.message : 'Timer could not be started.');
     } finally {
       setBusy(false);
+      setPendingAction(null);
     }
   }
 
   async function handlePauseTimer() {
     if (!activeSession || busy) return;
     setBusy(true);
+    setPendingAction('pause');
     try {
       await pausePomodoro(activeSession.id);
       await onRefresh();
@@ -2023,12 +2177,14 @@ function Study({
       onNotify(error instanceof Error ? error.message : 'Session pause nahi ho paya.');
     } finally {
       setBusy(false);
+      setPendingAction(null);
     }
   }
 
   async function handleResumeTimer() {
     if (!activeSession || busy) return;
     setBusy(true);
+    setPendingAction('resume');
     try {
       await resumePomodoro(activeSession.id);
       await onRefresh();
@@ -2037,12 +2193,16 @@ function Study({
       onNotify(error instanceof Error ? error.message : 'Session resume nahi ho paya.');
     } finally {
       setBusy(false);
+      setPendingAction(null);
     }
   }
 
   async function handleCompleteTimer() {
-    if (!activeSession || busy) return;
+    // The auto-complete effect may already be finishing this session
+    // (timer hit zero) — a second tap must not race it into a 409.
+    if (!activeSession || busy || completingRef.current) return;
     setBusy(true);
+    setPendingAction('complete');
     try {
       await completePomodoro(activeSession.id);
       await onRefresh();
@@ -2051,12 +2211,14 @@ function Study({
       onNotify(error instanceof Error ? error.message : 'Session complete nahi ho paya.');
     } finally {
       setBusy(false);
+      setPendingAction(null);
     }
   }
 
   async function handleAbandonTimer() {
     if (!activeSession || busy) return;
     setBusy(true);
+    setPendingAction('abandon');
     try {
       await abandonPomodoro(activeSession.id);
       setConfirmReset(false);
@@ -2066,6 +2228,7 @@ function Study({
       onNotify(error instanceof Error ? error.message : 'Session reset nahi ho paya.');
     } finally {
       setBusy(false);
+      setPendingAction(null);
     }
   }
 
@@ -2110,6 +2273,9 @@ function Study({
             )}
             {todayTasks.map((task) => {
               const subject = task.subjectId ? subjectById.get(task.subjectId) : undefined;
+              // P7: only this row's buttons disable + show "Saving…"
+              // while its status change is in flight.
+              const rowPending = statusPending?.id === task.id;
               return (
                 <div className="task-row large-task" key={task.id}>
                   <span className={`task-dot ${subject?.colour ?? 'mint'}`} />
@@ -2129,11 +2295,11 @@ function Study({
                   <div className="task-actions">
                     {task.status !== 'Completed' && (
                       <>
-                        {task.status !== 'In Progress' && <button onClick={() => changeStatus(task, 'In Progress')}>Start</button>}
-                        <button onClick={() => changeStatus(task, 'Completed')}>Complete</button>
+                        {task.status !== 'In Progress' && <button disabled={rowPending} onClick={() => changeStatus(task, 'In Progress')}>{rowPending && statusPending?.status === 'In Progress' ? 'Saving…' : 'Start'}</button>}
+                        <button disabled={rowPending} onClick={() => changeStatus(task, 'Completed')}>{rowPending && statusPending?.status === 'Completed' ? 'Saving…' : 'Complete'}</button>
                       </>
                     )}
-                    {task.status === 'Completed' && <button onClick={() => changeStatus(task, 'Pending')}>Reopen</button>}
+                    {task.status === 'Completed' && <button disabled={rowPending} onClick={() => changeStatus(task, 'Pending')}>{rowPending && statusPending?.status === 'Pending' ? 'Saving…' : 'Reopen'}</button>}
                     <button onClick={() => openTaskModal(task)}>Edit</button>
                     {confirmDeleteTaskId === task.id ? (
                       <button onClick={() => removeTask(task)}>Confirm?</button>
@@ -2222,7 +2388,7 @@ function Study({
                 <small className="muted-footnote">Break default ({breakDefault} min) comes from your onboarding study settings.</small>
               )}
               <button className="primary-button full-width" disabled={busy} onClick={handleStartTimer}>
-                Start {timerMode === 'focus' ? 'focus' : 'break'} session <ArrowRight size={15} />
+                {pendingAction === 'start' ? 'Starting…' : `Start ${timerMode === 'focus' ? 'focus' : 'break'} session`} <ArrowRight size={15} />
               </button>
             </>
           )}
@@ -2230,19 +2396,19 @@ function Study({
             <div className="timer-actions">
               {activeSession.status === 'active' ? (
                 <button className="primary-button full-width" disabled={busy} onClick={handlePauseTimer}>
-                  <Timer size={15} /> Pause session
+                  <Timer size={15} /> {pendingAction === 'pause' ? 'Pausing…' : 'Pause session'}
                 </button>
               ) : (
                 <button className="primary-button full-width" disabled={busy} onClick={handleResumeTimer}>
-                  Resume session <ArrowRight size={15} />
+                  {pendingAction === 'resume' ? 'Resuming…' : 'Resume session'} <ArrowRight size={15} />
                 </button>
               )}
               <button className="outline-button full-width" disabled={busy} onClick={handleCompleteTimer}>
-                Finish now
+                {pendingAction === 'complete' ? 'Finishing…' : 'Finish now'}
               </button>
               {confirmReset ? (
                 <button className="outline-button full-width" disabled={busy} onClick={handleAbandonTimer}>
-                  Confirm reset — session stays in history as abandoned (0 min)
+                  {pendingAction === 'abandon' ? 'Resetting…' : 'Confirm reset — session stays in history as abandoned (0 min)'}
                 </button>
               ) : (
                 <button className="text-button" disabled={busy} onClick={() => setConfirmReset(true)}>
@@ -2283,7 +2449,7 @@ function Study({
                 ))}
               </div>
               <button className="primary-button" disabled={busy} onClick={saveSubject}>
-                {subjectForm.id ? 'Save subject' : 'Add subject'}
+                {pendingAction === 'save-subject' ? 'Saving…' : subjectForm.id ? 'Save subject' : 'Add subject'}
               </button>
               {subjectForm.id && (
                 <button className="text-button" onClick={() => setSubjectForm({ id: null, name: '', label: '', colour: 'mint' })}>
@@ -2395,7 +2561,7 @@ function Study({
               </div>
             </div>
             <button className="primary-button full-width" disabled={busy} onClick={saveTask}>
-              {taskModal.task ? 'Save changes' : 'Add task'} <ArrowRight size={16} />
+              {pendingAction === 'save-task' ? 'Saving…' : taskModal.task ? 'Save changes' : 'Add task'} <ArrowRight size={16} />
             </button>
             <p className="modal-note">Tasks are saved to your account in MongoDB and stay in sync across devices.</p>
           </div>
@@ -3172,7 +3338,8 @@ function Focus({
   sleepEndTime: string;
   /** Edit the sleep window; saved to MongoDB by onSaveFocus. */
   onSleepChange: (start: string, end: string) => void;
-  onSaveFocus: () => Promise<void>;
+  /** Saves the sleep window; true when it landed (P15). */
+  onSaveFocus: () => Promise<boolean>;
   focusSaving: boolean;
   focusEnabled: boolean;
   setFocusEnabled: (value: boolean) => void;
@@ -3184,6 +3351,21 @@ function Focus({
   const sleepEnd = formatTime12h(sleepEndTime || '04:00');
   const sleepDuration = sleepDurationLabel(sleepStartTime || '22:00', sleepEndTime || '04:00');
   const [socialApps, setSocialApps] = useState(['Instagram', 'Facebook', 'Snapchat', 'WhatsApp', 'Telegram', 'X']);
+  // P15: the toast alone was missed whenever the save was slow, so the
+  // result also stays on screen under the button until the user edits
+  // the sleep window again. 'idle' = nothing to report yet.
+  const [saveResult, setSaveResult] = useState<'idle' | 'saved' | 'error'>('idle');
+
+  async function handleSaveClick() {
+    const ok = await onSaveFocus();
+    setSaveResult(ok ? 'saved' : 'error');
+  }
+
+  function handleSleepChange(start: string, end: string) {
+    // A new edit makes the old confirmation stale — clear it.
+    setSaveResult('idle');
+    onSleepChange(start, end);
+  }
 
   return (
     <>
@@ -3232,11 +3414,11 @@ function Focus({
           <div className="onboarding-two-col" style={{ marginTop: 14 }}>
             <div>
               <label className="field-label">Neend ka time (start)</label>
-              <input className="form-input" type="time" value={sleepStartTime || '22:00'} onChange={(e) => onSleepChange(e.target.value, sleepEndTime || '04:00')} />
+              <input className="form-input" type="time" value={sleepStartTime || '22:00'} onChange={(e) => handleSleepChange(e.target.value, sleepEndTime || '04:00')} />
             </div>
             <div>
               <label className="field-label">Uthne ka time (end)</label>
-              <input className="form-input" type="time" value={sleepEndTime || '04:00'} onChange={(e) => onSleepChange(sleepStartTime || '22:00', e.target.value)} />
+              <input className="form-input" type="time" value={sleepEndTime || '04:00'} onChange={(e) => handleSleepChange(sleepStartTime || '22:00', e.target.value)} />
             </div>
           </div>
 
@@ -3246,7 +3428,10 @@ function Focus({
                 <strong>Apps to restrict</strong>
                 <small>Choose the apps you want out of reach.</small>
               </div>
-              <span>{socialApps.length} selected</span>
+              {/* P12: one template string, so the space between the
+                  count and the word can never be dropped by JSX
+                  whitespace handling — it rendered as "6selected". */}
+              <span>{`${socialApps.length} selected`}</span>
             </div>
 
             <div className="app-chip-list">
@@ -3286,9 +3471,18 @@ function Focus({
             </div>
           </div>
 
-          <button className="primary-button" disabled={focusSaving} onClick={() => void onSaveFocus()}>
+          <button className="primary-button" disabled={focusSaving} onClick={() => void handleSaveClick()}>
             {focusSaving ? 'Save ho raha hai…' : 'Save focus schedule'} <ArrowRight size={15} />
           </button>
+          {/* P15: persistent confirmation — the toast alone was missed
+              whenever the save was slow. Stays until the sleep window
+              is edited again. */}
+          {saveResult === 'saved' && (
+            <p className="onboarding-help" role="status">✓ Save ho gaya — neend ka time ({sleepStart} – {sleepEnd}) aapke account me save hai.</p>
+          )}
+          {saveResult === 'error' && (
+            <p className="salah-error" role="status">Save nahi ho paya. Dobara try karo.</p>
+          )}
           <p className="onboarding-help">Neend ka time aapke account me save hota hai. App restrictions Android-only hain — web par ye sirf preview hai.</p>
         </section>
 
@@ -3330,13 +3524,128 @@ function Analytics({
   rewards,
   activeChallenges,
   challengeHistory,
+  focusHistory,
+  onNotify,
 }: {
   stats: StudyStats | null;
   guestMode: boolean;
   rewards: RewardsSummary | null;
   activeChallenges: ChallengeParticipation[];
   challengeHistory: ChallengeParticipation[];
+  /** Finished/abandoned focus sessions, loaded at app level (latest 20). */
+  focusHistory: PomodoroSession[];
+  onNotify: (message: string) => void;
 }) {
+  // P5: the "Activity history" pill used to be a dead <div>. It is now a
+  // real button that opens the history panel below, built only from real
+  // saved activity — points, focus sessions and challenge attempts.
+  const [showHistory, setShowHistory] = useState(false);
+  const [pointsHistory, setPointsHistory] = useState<(PointTransaction & { refType: string })[] | null>(null);
+  const [pointsHistoryTotal, setPointsHistoryTotal] = useState(0);
+  const [pointsHistoryLoading, setPointsHistoryLoading] = useState(false);
+  const [pointsHistoryError, setPointsHistoryError] = useState('');
+
+  async function toggleHistory() {
+    const next = !showHistory;
+    setShowHistory(next);
+    // Lazy-load the full points history (up to 20) the first time the
+    // panel opens; the summary's recent-10 list stays as the fallback.
+    if (!next || pointsHistory !== null || pointsHistoryLoading) return;
+    setPointsHistoryLoading(true);
+    setPointsHistoryError('');
+    try {
+      const result = await fetchPointsHistory(1, 20);
+      setPointsHistory(result.transactions);
+      setPointsHistoryTotal(result.total);
+    } catch (err) {
+      setPointsHistoryError(err instanceof Error ? err.message : 'Points history load nahi ho payi.');
+    } finally {
+      setPointsHistoryLoading(false);
+    }
+  }
+
+  const historyPanel = (
+    <section className="panel history-card" style={{ marginTop: 14 }}>
+      <SectionTitle title="Activity history" />
+      <div>
+        <span className="eyebrow">POINTS</span>
+        {pointsHistoryLoading ? (
+          <p className="onboarding-help">Loading your points history…</p>
+        ) : pointsHistoryError ? (
+          <>
+            <p className="onboarding-help">{pointsHistoryError}</p>
+            {rewards && rewards.recent.length > 0 && (
+              <div className="history-list">
+                {rewards.recent.map((entry) => (
+                  <div className="history-row" key={entry.id}>
+                    <div><strong>+{entry.amount} points</strong><small>{POINT_REASON_LABELS[entry.reason]} · {new Date(entry.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</small></div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : pointsHistory && pointsHistory.length > 0 ? (
+          <div className="history-list">
+            {pointsHistory.map((entry) => (
+              <div className="history-row" key={entry.id}>
+                <div><strong>+{entry.amount} points</strong><small>{POINT_REASON_LABELS[entry.reason]} · {new Date(entry.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</small></div>
+              </div>
+            ))}
+            {pointsHistoryTotal > pointsHistory.length && (
+              <p className="onboarding-help">Showing latest {pointsHistory.length} of {pointsHistoryTotal} point awards.</p>
+            )}
+          </div>
+        ) : (
+          <p className="onboarding-help">No points earned yet. Finish a focus session, complete a task, or complete a challenge day to earn your first points.</p>
+        )}
+      </div>
+      <div style={{ marginTop: 18 }}>
+        <span className="eyebrow">FOCUS SESSIONS</span>
+        {focusHistory.length === 0 ? (
+          <p className="onboarding-help">No focus sessions yet. Finished and abandoned sessions will appear here with their real minutes.</p>
+        ) : (
+          <div className="history-list">
+            {focusHistory.slice(0, 10).map((session) => (
+              <div className="history-row" key={session.id}>
+                <div>
+                  <strong>{session.mode === 'focus' ? 'Focus' : 'Break'} · {session.plannedMinutes} min</strong>
+                  <small>
+                    {new Date(session.completedAt ?? session.startedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  </small>
+                </div>
+                <span className={`status-tag ${session.status === 'completed' ? 'status-done' : ''}`}>
+                  {session.status === 'completed' ? `${session.focusMinutesEarned}m earned` : 'Abandoned · 0m'}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div style={{ marginTop: 18 }}>
+        <span className="eyebrow">CHALLENGES</span>
+        {activeChallenges.length === 0 && challengeHistory.length === 0 ? (
+          <p className="onboarding-help">No challenges joined yet. Join one from the Challenges screen and your attempts will appear here.</p>
+        ) : (
+          <div className="history-list">
+            {[...activeChallenges, ...challengeHistory].map((participation) => (
+              <div className="history-row" key={participation.id}>
+                <div>
+                  <strong>{participation.challenge.title}</strong>
+                  <small>
+                    Day {participation.currentDay} of {participation.totalDays} · {participation.status === 'active' ? 'Active' : participation.status === 'completed' ? 'Completed' : 'Left'} · {participation.pointsEarned} points
+                  </small>
+                </div>
+                <span className="status-tag">
+                  {new Date(participation.joinedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+
   if (guestMode) {
     return (
       <>
@@ -3344,7 +3653,7 @@ function Analytics({
           eyebrow="DISCIPLINE · REFLECTION"
           title="Notice the progress you're making."
           text="Look at patterns, celebrate consistency and find where a small adjustment could help."
-          action={<div className="date-chip"><CalendarDays size={15} /> Activity history</div>}
+          action={<button type="button" className="date-chip" onClick={() => onNotify('Sign in to see your activity history.')}><CalendarDays size={15} /> Activity history</button>}
         />
         <section className="panel" style={{ padding: 28 }}>
           <span className="eyebrow">SIGN IN TO TRACK</span>
@@ -3364,7 +3673,7 @@ function Analytics({
           eyebrow="DISCIPLINE · REFLECTION"
           title="Notice the progress you're making."
           text="Look at patterns, celebrate consistency and find where a small adjustment could help."
-          action={<div className="date-chip"><CalendarDays size={15} /> Activity history</div>}
+          action={<button type="button" className="date-chip" onClick={() => onNotify('Your progress is still loading…')}><CalendarDays size={15} /> Activity history</button>}
         />
         <section className="panel" style={{ padding: 28 }}>
           <span className="eyebrow">PRIVATE ACTIVITY DATA</span>
@@ -3391,8 +3700,20 @@ function Analytics({
         eyebrow="DISCIPLINE · REFLECTION"
         title="Notice the progress you're making."
         text="Look at patterns, celebrate consistency and find where a small adjustment could help."
-        action={<div className="date-chip"><CalendarDays size={15} /> Activity history</div>}
+        action={(
+          <button
+            type="button"
+            className="date-chip"
+            aria-expanded={showHistory}
+            aria-label="Activity history"
+            onClick={() => void toggleHistory()}
+            style={showHistory ? { borderColor: 'var(--teal-2)', color: 'var(--teal-2)', background: 'rgba(15,118,110,.06)' } : undefined}
+          >
+            <CalendarDays size={15} /> Activity history
+          </button>
+        )}
       />
+      {showHistory && historyPanel}
       {!hasActivity ? (
         <section className="panel" style={{ padding: 28 }}>
           <span className="eyebrow">PRIVATE ACTIVITY DATA</span>
@@ -3496,6 +3817,7 @@ function Profile({
   onAccountDeleted,
   onboardingIncomplete,
   onEditProfile,
+  onboardingResumeStep,
   onOpenFeedback,
   onNavigate,
 }: {
@@ -3508,6 +3830,8 @@ function Profile({
   onboardingIncomplete: boolean;
   /** Reopen the onboarding form, pre-filled, at the given step. */
   onEditProfile: (step: number) => void;
+  /** First incomplete onboarding step (P9) — where "Profile poora karo" opens. */
+  onboardingResumeStep: number;
   onOpenFeedback: () => void;
   onNavigate: (page: Page) => void;
 }) {
@@ -3541,7 +3865,7 @@ function Profile({
               {user ? 'Authenticated account · Session active' : 'Guest preview · Not signed in'}
             </span>
             {onboardingIncomplete && !guestMode && (
-              <button className="primary-button" onClick={() => onEditProfile(0)}>
+              <button className="primary-button" onClick={() => onEditProfile(onboardingResumeStep)}>
                 <UserRound size={15} /> Profile poora karo
               </button>
             )}
