@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.js';
 import { refreshChallengeProgress } from '../lib/challengeProgress.js';
 import {
+  applyStatusCorrection,
   recomputeDay,
   userTimezoneAndProfile,
 } from '../lib/salahAutoMissed.js';
@@ -65,12 +66,13 @@ salahRouter.get('/day/:date', async (req, res, next) => {
       return;
     }
 
-    const { timezone, profile } = await userTimezoneAndProfile(req.authUser!.id);
+    const { timezone, profile, accountCreatedAt } = await userTimezoneAndProfile(req.authUser!.id);
     // Reading a day also recomputes auto-missed for it: past dates mark
     // every still-pending prayer missed; today uses the user's own
     // per-prayer endTime overrides (the full deadlines are applied when
-    // prayer times are loaded). Never assumes prayed.
-    await recomputeDay(req.authUser!.id, parsedDate.data, { timezone, profile });
+    // prayer times are loaded). Never assumes prayed. Prayers due at or
+    // before account creation are never marked missed.
+    await recomputeDay(req.authUser!.id, parsedDate.data, { timezone, profile, accountCreatedAt });
 
     const record = await SalahDay.findOne({
       userId: req.authUser!.id,
@@ -100,7 +102,7 @@ salahRouter.put('/day/:date', async (req, res, next) => {
     }
 
     // "Today" is the user's own timezone, not the server's local date.
-    const { timezone, profile } = await userTimezoneAndProfile(req.authUser!.id);
+    const { timezone, profile, accountCreatedAt } = await userTimezoneAndProfile(req.authUser!.id);
     const todayKey = dateKeyInTimezone(timezone);
 
     // A user cannot write records for a future date.
@@ -117,24 +119,11 @@ salahRouter.put('/day/:date', async (req, res, next) => {
       date: parsedDate.data,
     }).lean();
     const prevEntry = previous?.prayers?.[prayer] as PrayerEntry | undefined;
-    const wasMissedBefore = Boolean(prevEntry?.wasMissed || prevEntry?.status === 'missed');
 
     // Miss history is preserved across corrections: a prayer that was
     // missed and is later corrected to Qaza (or prayed) keeps wasMissed
     // and the original missedAt, so the UI can show "Qaza (was missed)".
-    const nextEntry: PrayerEntry = {
-      status: newStatus,
-      updatedAt: now,
-      wasMissed: newStatus === 'missed' ? true : wasMissedBefore,
-      missedAt:
-        newStatus === 'missed'
-          ? (prevEntry?.missedAt ?? now)
-          : (prevEntry?.missedAt ?? null),
-      autoMissed:
-        newStatus === 'missed'
-          ? false // a manual correction is never an auto-miss
-          : (prevEntry?.autoMissed ?? false),
-    };
+    const nextEntry: PrayerEntry = applyStatusCorrection(prevEntry, newStatus, now);
 
     const record = await SalahDay.findOneAndUpdate(
       { userId: req.authUser!.id, date: parsedDate.data },
@@ -143,7 +132,8 @@ salahRouter.put('/day/:date', async (req, res, next) => {
     ).lean();
 
     // Other pending prayers of this day may now be past their deadline.
-    await recomputeDay(req.authUser!.id, parsedDate.data, { timezone, profile });
+    // Pre-signup prayers are never auto-missed by this recompute either.
+    await recomputeDay(req.authUser!.id, parsedDate.data, { timezone, profile, accountCreatedAt });
     const fresh = await SalahDay.findOne({
       userId: req.authUser!.id,
       date: parsedDate.data,
@@ -168,7 +158,7 @@ salahRouter.get('/calendar/:month', async (req, res, next) => {
       return;
     }
 
-    const { timezone, profile } = await userTimezoneAndProfile(req.authUser!.id);
+    const { timezone, profile, accountCreatedAt } = await userTimezoneAndProfile(req.authUser!.id);
     const records = await SalahDay.find({
       userId: req.authUser!.id,
       date: { $regex: `^${req.params.month}-` },
@@ -178,7 +168,7 @@ salahRouter.get('/calendar/:month', async (req, res, next) => {
     const today = dateKeyInTimezone(timezone);
     for (const day of records) {
       if (day.date < today) {
-        await recomputeDay(req.authUser!.id, day.date, { timezone, profile });
+        await recomputeDay(req.authUser!.id, day.date, { timezone, profile, accountCreatedAt });
       }
     }
     const freshRecords = await SalahDay.find({

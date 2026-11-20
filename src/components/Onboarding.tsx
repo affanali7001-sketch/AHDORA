@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
+import AhdoraLogo from './AhdoraLogo';
 import type { PrayerName, UserProfile } from '../types/profile';
 import { prayerNames, sleepDurationLabel } from '../types/profile';
 
-const logo = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Crect width="64" height="64" rx="16" fill="%23d9b36c"/%3E%3Cpath d="M16 45 32 15l16 30h-8l-3.2-7H27.2L24 45h-8Zm14-14-2.8 6h5.6L30 31Z" fill="%23343d35"/%3E%3C/svg%3E';
 
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const timezones = [
@@ -24,6 +24,19 @@ type Props = {
   user: UserProfile;
   onChange: (user: UserProfile) => void;
   onComplete: () => Promise<void>;
+  /**
+   * Skip this step (and the whole flow): the parent saves whatever has
+   * been filled in so far as a partial profile and lets the user into
+   * the app. Skipping never validates the current step. Receives the
+   * step the user was on, so it can be stored as the resume point.
+   */
+  onSkip: (step: number) => Promise<void>;
+  /** Step to open on (used when returning from Profile to finish/edit). */
+  initialStep?: number;
+  /** 'edit' when reopened from Profile & settings; 'initial' on signup. */
+  mode?: 'initial' | 'edit';
+  /** Edit mode only: go back to Profile without saving. */
+  onCancel?: () => void;
 };
 
 function isValidTime(value: string): boolean {
@@ -32,10 +45,11 @@ function isValidTime(value: string): boolean {
   return Boolean(match);
 }
 
-export default function Onboarding({ user, onChange, onComplete }: Props) {
-  const [step, setStep] = useState(0);
+export default function Onboarding({ user, onChange, onComplete, onSkip, initialStep = 0, mode = 'initial', onCancel }: Props) {
+  const [step, setStep] = useState(initialStep);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [skipping, setSkipping] = useState(false);
 
   const update = <K extends keyof UserProfile>(field: K, value: UserProfile[K]) => {
     onChange({ ...user, [field]: value });
@@ -117,6 +131,18 @@ export default function Onboarding({ user, onChange, onComplete }: Props) {
       setError(err instanceof Error ? err.message : 'Profile could not be saved.');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function skip() {
+    if (busy || skipping) return;
+    setSkipping(true);
+    try {
+      await onSkip(step);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Skip nahi ho paya. Dobara try karo.');
+    } finally {
+      setSkipping(false);
     }
   }
 
@@ -208,7 +234,7 @@ export default function Onboarding({ user, onChange, onComplete }: Props) {
   return (
     <div className="auth-screen onboarding-screen">
       <div className="auth-card onboarding-card" style={{ maxWidth: 620 }}>
-        <div className="auth-brand"><img src={logo} alt="AHDORA" /><span>AHDORA</span></div>
+        <div className="auth-brand"><AhdoraLogo size={42} /><span>AHDORA</span></div>
         <div className="auth-heading">
           <span className="eyebrow">STEP {step + 1} OF {steps.length}</span>
           <h1>{steps[step].title}</h1>
@@ -384,14 +410,22 @@ export default function Onboarding({ user, onChange, onComplete }: Props) {
           </div>
         )}
 
-        {error && <p style={{ color: '#c45b52', fontSize: 13, marginTop: 12 }}>{error}</p>}
+        {error && <p style={{ color: 'var(--red)', fontSize: 13, marginTop: 12 }}>{error}</p>}
         <form onSubmit={step === steps.length - 1 ? submit : next} className="onboarding-actions">
           {step > 0 && <button type="button" className="outline-button" onClick={() => { setStep((current) => current - 1); setError(''); }}><ArrowLeft size={15} /> Back</button>}
-          <button type="submit" className="primary-button" disabled={busy}>
-            {busy ? 'Saving profile...' : step === steps.length - 1 ? 'Confirm & save' : 'Continue'} <ArrowRight size={16} />
+          <button type="submit" className="primary-button" disabled={busy || skipping}>
+            {busy ? 'Saving profile...' : step === steps.length - 1 ? (mode === 'edit' ? 'Save karo' : 'Confirm & save') : 'Continue'} <ArrowRight size={16} />
           </button>
         </form>
-        <p className="onboarding-help">Your profile is saved to your private AHDORA account.</p>
+        <button type="button" className="text-button" onClick={skip} disabled={busy || skipping} style={{ marginTop: 10 }}>
+          {skipping ? 'Save ho raha hai…' : 'Baad me bharenge — Skip karo'}
+        </button>
+        {mode === 'edit' && onCancel && (
+          <button type="button" className="text-button" onClick={onCancel} disabled={busy || skipping} style={{ marginTop: 6 }}>
+            Wapas jao (bina save kiye)
+          </button>
+        )}
+        <p className="onboarding-help">Skip karne par jo kuch bhara hai wo save ho jayega — kuch bhi lost nahi hoga. Baad me Profile se poora kar sakte ho. Your profile is saved to your private AHDORA account.</p>
       </div>
     </div>
   );

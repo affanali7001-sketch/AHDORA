@@ -61,6 +61,12 @@ export default function QuranBrowser({
   const [history, setHistory] = useState<QuranHistory | null>(null);
   const [targetInput, setTargetInput] = useState('10');
   const [showBookmarks, setShowBookmarks] = useState(false);
+  // Hinglish transliteration is the point of this screen for many
+  // readers, so it is on by default and can be hidden — never the
+  // other way round. Both toggles do real work (they re-render the
+  // ayah list); Arabic is always shown.
+  const [showTransliteration, setShowTransliteration] = useState(true);
+  const [showTranslation, setShowTranslation] = useState(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const loadMeta = useCallback(async () => {
@@ -228,7 +234,7 @@ export default function QuranBrowser({
             loadMeta();
           }}
         >
-          <ArrowLeft size={15} /> Back to all surahs
+          <ArrowLeft size={15} /> Back to all surahs · Saari surahein
         </button>
 
         <div className="quran-reader-head">
@@ -244,7 +250,7 @@ export default function QuranBrowser({
             </p>
           </div>
           <label className="field-label">
-            Reciter
+            Reciter · Qari
             <select
               className="form-input"
               value={reciter}
@@ -272,9 +278,26 @@ export default function QuranBrowser({
 
         <p className="quran-source-line">
           Source: {selected.source} · Translation: {selected.translation.name} (
-          {selected.translation.edition}) · Transliteration: {selected.transliteration.edition} ·
+          {selected.translation.edition}) · Transliteration (Hinglish): {selected.transliteration.edition} ·
           Audio: {selected.audio.reciter.name} via {selected.audio.source}
         </p>
+
+        <div className="quran-toolbar">
+          <button
+            className="outline-button"
+            aria-pressed={showTransliteration}
+            onClick={() => setShowTransliteration((value) => !value)}
+          >
+            Hinglish transliteration: {showTransliteration ? 'On · Dikhao' : 'Off · Chhupao'}
+          </button>
+          <button
+            className="outline-button"
+            aria-pressed={showTranslation}
+            onClick={() => setShowTranslation((value) => !value)}
+          >
+            English tarjuma: {showTranslation ? 'On · Dikhao' : 'Off · Chhupao'}
+          </button>
+        </div>
 
         <div className="quran-ayah-list">
           {selected.surah.ayahs.map((ayah) => (
@@ -305,9 +328,19 @@ export default function QuranBrowser({
               <p className="quran-arabic" dir="rtl" lang="ar">
                 {ayah.text}
               </p>
-              <p className="quran-transliteration">{ayah.transliteration}</p>
-              <p className="quran-translation">{ayah.translation}</p>
-              {ayah.sajda && <span className="quran-sajda">Sajda ayah</span>}
+              {showTransliteration && ayah.transliteration && (
+                <p className="quran-transliteration">
+                  <span className="eyebrow">HINGLISH MEIN PADHEIN · </span>
+                  {ayah.transliteration}
+                </p>
+              )}
+              {showTranslation && ayah.translation && (
+                <p className="quran-translation">
+                  <span className="eyebrow">TARJUMA · ENGLISH · </span>
+                  {ayah.translation}
+                </p>
+              )}
+              {ayah.sajda && <span className="quran-sajda">Sajda ayah · Sajda wali ayat</span>}
             </article>
           ))}
         </div>
@@ -320,8 +353,8 @@ export default function QuranBrowser({
       <div className="quran-browser-head">
         <div>
           <span className="eyebrow">QUR'AN · VERIFIED TEXT</span>
-          <h3>Read the Qur'an</h3>
-          <p>Arabic, transliteration and translation from a verified source — nothing is invented here.</p>
+          <h3>Read the Qur'an · Qur'an padhein</h3>
+          <p>Arabic ke saath Hinglish transliteration aur English tarjuma — verified source se, kuch bhi banaya hua nahi.</p>
           {source && <p className="quran-source-line">Source: {source}</p>}
         </div>
         <BookOpen size={22} />
@@ -336,7 +369,7 @@ export default function QuranBrowser({
             className="form-input"
             value={query}
             onChange={(event) => runSearch(event.target.value)}
-            placeholder="Search surahs by name or number, or search ayah text…"
+            placeholder="Surah ka naam ya number khojein, ya ayah ka text…"
           />
         </label>
         <button
@@ -344,7 +377,7 @@ export default function QuranBrowser({
           onClick={() => setShowBookmarks((value) => !value)}
           disabled={guestMode}
         >
-          <Bookmark size={15} /> Bookmarks ({guestMode ? 'sign in' : bookmarks.length})
+          <Bookmark size={15} /> Bookmarks · Saved ({guestMode ? 'sign in' : bookmarks.length})
         </button>
       </div>
 
@@ -380,7 +413,7 @@ export default function QuranBrowser({
       {!guestMode && history && (
         <div className="panel quran-progress">
           <div>
-            <span className="eyebrow">READING TODAY · {history.date}</span>
+            <span className="eyebrow">READING TODAY · AAJ KI READING · {history.date}</span>
             <h4>
               {history.ayahsOpenedToday} of {history.dailyTarget} ayahs opened
             </h4>
@@ -391,7 +424,7 @@ export default function QuranBrowser({
             </p>
           </div>
           <label className="field-label">
-            <Target size={14} /> Daily target (ayahs)
+            <Target size={14} /> Roz ka target (ayahs) · Daily target
             <span className="quran-target-row">
               <input
                 className="form-input"
@@ -414,7 +447,7 @@ export default function QuranBrowser({
       {ayahSearchError && <p className="form-error">{ayahSearchError}</p>}
       {ayahMatches.length > 0 && (
         <div className="panel quran-search-results">
-          <h4>Ayah matches (translation)</h4>
+          <h4>Ayah matches · Tarjume mein mile</h4>
           <ul>
             {ayahMatches.slice(0, 10).map((match) => (
               <li key={match.number}>

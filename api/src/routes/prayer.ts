@@ -3,6 +3,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { markTodayMissed } from '../lib/salahAutoMissed.js';
 import { dateKeyInTimezone, toMinutes } from '../lib/timezone.js';
 import { Profile } from '../models/Profile.js';
+import { User } from '../models/User.js';
 
 export const prayerRouter = Router();
 
@@ -172,11 +173,19 @@ prayerRouter.get('/times', async (req, res, next) => {
     // Auto-missed: now that today's deadlines are known, any prayer whose
     // deadline + 5-minute grace has passed and is still pending is marked
     // missed and persisted. Best-effort — it never fails this response.
+    // Prayers due at or before account creation are never marked missed.
     if (requestedDate === today) {
       const deadlines = Object.fromEntries(
         prayers.map((prayer) => [prayer, perPrayer[prayer].deadline]),
       ) as Record<PrayerName, string>;
-      await markTodayMissed(req.authUser.id, requestedDate, timezone, deadlines);
+      const account = await User.findById(req.authUser.id).select('createdAt').lean();
+      await markTodayMissed(
+        req.authUser.id,
+        requestedDate,
+        timezone,
+        deadlines,
+        account?.createdAt ?? null,
+      );
     }
 
     const hijri = payload?.data?.date?.hijri;

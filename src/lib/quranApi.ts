@@ -76,6 +76,48 @@ export type AyahSearchMatch = {
   };
 };
 
+export type DuaTopic = 'sleep' | 'morning' | 'daily' | 'wudu';
+
+export type Dua =
+  | {
+      id: string;
+      title: string;
+      topics: DuaTopic[];
+      when: string;
+      source: string;
+      note?: string;
+      kind: 'dua';
+      arabic: string;
+      transliteration: string;
+      meaning: string;
+    }
+  | {
+      id: string;
+      title: string;
+      topics: DuaTopic[];
+      when: string;
+      source: string;
+      note?: string;
+      kind: 'quran-amal';
+      quranSurah: number;
+      quranSurahName: string;
+      quranAyahStart: number;
+      quranAyahEnd: number;
+      practice: string;
+    };
+
+export type DuasResponse = {
+  source: string;
+  count: number;
+  topics: { id: DuaTopic; label: string; hinglish: string }[];
+  duas: Dua[];
+};
+
+export async function fetchDuas(topic?: string): Promise<DuasResponse> {
+  const query = topic ? `?topic=${encodeURIComponent(topic)}` : '';
+  return request(`/api/duas${query}`);
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(path, { credentials: 'include', ...init });
   const data = (await response.json().catch(() => ({}))) as { error?: string } & T;

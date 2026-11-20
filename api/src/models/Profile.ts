@@ -267,6 +267,18 @@ const profileSchema = new Schema({
     type: Boolean,
     default: false,
   },
+
+  onboardingSkipped: {
+    type: Boolean,
+    default: false,
+  },
+
+  onboardingStep: {
+    type: Number,
+    min: 0,
+    max: 8,
+    default: 0,
+  },
 }, {
   timestamps: true,
   versionKey: false,

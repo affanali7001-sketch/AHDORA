@@ -8,19 +8,24 @@ import MosqueFinder from './components/MosqueFinder';
 import SecuritySettings from './components/SecuritySettings';
 import { connectSocket, disconnectSocket } from './lib/socket';
 import {
+  deleteNotification,
+  clearAllNotifications,
   fetchNotifications,
   fetchUnreadCount,
   markAllNotificationsRead,
   markNotificationRead,
   type AppNotification,
 } from './lib/notificationsApi';
+import FeedbackForm from './components/FeedbackForm';
+import PasswordField from './components/PasswordField';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Onboarding from './components/Onboarding';
 import AuthBackdrop from './components/AuthBackdrop';
 import Typewriter from './components/Typewriter';
 import AhdoraMeaning from './components/AhdoraMeaning';
+import AhdoraLogo from './components/AhdoraLogo';
 import { emptyProfile, type UserProfile } from './types/profile';
-import { loadProfile, saveProfile } from './lib/profileApi';
+import { loadProfileWithCompletion, saveProfile, saveProfilePartial } from './lib/profileApi';
 import { fetchPrayerTimes, type PrayerTimesResponse } from './lib/prayerApi';
 import {
   abandonPomodoro,
@@ -75,12 +80,11 @@ import type { CSSProperties, ReactNode, FormEvent } from 'react';
 import {
   Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpen, BookMarked,
   CalendarDays, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3,
-  Compass, Flame, Footprints, GraduationCap, Heart, Home, LayoutDashboard, Lock,
+  Compass, Eye, EyeOff, Flame, Footprints, GraduationCap, Heart, Home, LayoutDashboard, Lock,
   LockKeyhole, LogOut, Menu, Moon, MoreHorizontal, Plus, Search, Settings, Shield,
   ShieldCheck, Sparkles, Sun, Target, Timer, Trophy, UserRound, Users, X, Zap,
 } from 'lucide-react';
 
-const logo = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Crect width="64" height="64" rx="16" fill="%23d9b36c"/%3E%3Cpath d="M16 45 32 15l16 30h-8l-3.2-7H27.2L24 45h-8Zm14-14-2.8 6h5.6L30 31Z" fill="%23343d35"/%3E%3C/svg%3E';
 
 type AuthUser = { id: string; name: string; email: string; emailVerified: boolean; role: string };
 type ApiResponse<T> = T;
@@ -206,7 +210,19 @@ function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [confirmClearNotif, setConfirmClearNotif] = useState(false);
   const [friendsRefreshKey, setFriendsRefreshKey] = useState(0);
+  // false = profile exists but onboarding was skipped / never finished.
+  // null = not known yet (before the first profile load).
+  const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [onboardingInitialStep, setOnboardingInitialStep] = useState(0);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [focusSaving, setFocusSaving] = useState(false);
+  // Honest signup notice from the server (POST /api/auth/signup returns
+  // verificationEmailSent + notice). Shown in the verify banner when the
+  // verification email could not be sent — never claim it was sent.
+  const [emailNotice, setEmailNotice] = useState<string | null>(null);
 
   const notify = (message: string) => {
     setToast(message);
@@ -217,17 +233,23 @@ function App() {
     setAuthUser(user);
     setProfileName(user.name);
     try {
-      const saved = await loadProfile(user.name, user.email);
-      if (saved) {
-        setNewUser(saved);
+      const loaded = await loadProfileWithCompletion(user.name, user.email);
+      if (loaded) {
+        setNewUser(loaded.profile);
+        setOnboardingCompleted(loaded.onboardingCompleted);
+        // A skipped (incomplete) profile still enters the app — the
+        // dashboard works with whatever is filled in, and Profile shows
+        // "Profile poora karo" until onboarding is finished.
         setScreen('app');
       } else {
         setNewUser(emptyProfile(user.name, user.email));
+        setOnboardingCompleted(false);
         setScreen('onboarding');
       }
     } catch (error) {
       // A missing /api/profile route is not treated as a completed profile.
       setNewUser(emptyProfile(user.name, user.email));
+      setOnboardingCompleted(false);
       setScreen('onboarding');
       notify(error instanceof Error ? error.message : 'Profile load nahi ho payi.');
     }
@@ -415,6 +437,7 @@ function App() {
       apiRequest<{ verified: boolean }>(`/api/auth/verify-email?token=${encodeURIComponent(verifyToken)}`)
         .then(() => {
           notify('Email verified. Welcome to AHDORA.');
+          setEmailNotice(null);
           setAuthUser((current) => (current ? { ...current, emailVerified: true } : current));
         })
         .catch((err) => notify(err instanceof Error ? err.message : 'Verification link did not work.'));
@@ -434,18 +457,21 @@ function App() {
         setAuthUser(user);
         setProfileName(user.name);
         try {
-          const saved = await loadProfile(user.name, user.email);
+          const loaded = await loadProfileWithCompletion(user.name, user.email);
           if (!active) return;
-          if (saved) {
-            setNewUser(saved);
+          if (loaded) {
+            setNewUser(loaded.profile);
+            setOnboardingCompleted(loaded.onboardingCompleted);
             setScreen('app');
           } else {
             setNewUser(emptyProfile(user.name, user.email));
+            setOnboardingCompleted(false);
             setScreen('onboarding');
           }
         } catch {
           if (!active) return;
           setNewUser(emptyProfile(user.name, user.email));
+          setOnboardingCompleted(false);
           setScreen('onboarding');
         }
       })
@@ -492,12 +518,21 @@ function App() {
   }
 
   async function handleSignup(user: { name: string; email: string; password: string }) {
-    const result = await apiRequest<{ user: AuthUser }>('/api/auth/signup', {
+    const result = await apiRequest<{ user: AuthUser; verificationEmailSent?: boolean; notice?: string }>('/api/auth/signup', {
       method: 'POST', body: JSON.stringify(user),
     });
     setAuthUser(result.user);
     setProfileName(result.user.name);
     setNewUser(emptyProfile(result.user.name, result.user.email));
+    // Honest verification notice: the server says whether the
+    // verification email actually went out. If it did not (SMTP not
+    // configured or send failed), keep its notice for the verify
+    // banner instead of ever claiming the email was sent.
+    if (result.verificationEmailSent === false) {
+      setEmailNotice(result.notice ?? 'Email verification is not set up yet — your account is created but your email is unverified.');
+    } else {
+      setEmailNotice(null);
+    }
     // Brief pause so the auth button's success tick is visible before the
     // onboarding screen opens. Auth itself is already done.
     setAuthSuccess(true);
@@ -515,13 +550,92 @@ function App() {
       const saved = await saveProfile(profileToSave);
       setNewUser(saved);
       setProfileName(authUser.name);
+      setOnboardingCompleted(true);
       setPrayerStatus('idle');
       setPrayerTimes(null);
+      const wasEditing = editingProfile;
+      setEditingProfile(false);
       setScreen('app');
+      if (wasEditing) setPage('profile');
       notify('Profile MongoDB API par save ho gayi.');
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Profile save nahi ho payi.');
       throw error;
+    }
+  }
+
+  /** Skip: save whatever is filled in as a partial profile and enter the app. */
+  async function handleOnboardingSkip(step: number) {
+    if (!authUser) {
+      notify('Profile save karne ke liye pehle account mein login karo.');
+      return;
+    }
+    const profileToSave = { ...newUser, name: authUser.name, email: authUser.email };
+    try {
+      const saved = await saveProfilePartial(profileToSave, step);
+      setNewUser(saved);
+      setProfileName(authUser.name);
+      setOnboardingCompleted(false);
+      setPrayerStatus('idle');
+      setPrayerTimes(null);
+      setEditingProfile(false);
+      setScreen('app');
+      setPage('dashboard');
+      notify('Theek hai — jo bhara tha wo save ho gaya. Baad me Profile se poora kar lena.');
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Skip nahi ho paya. Dobara try karo.');
+      throw error;
+    }
+  }
+
+  /** First onboarding step that still needs input (0 = start from the top). */
+  function firstIncompleteStep(profile: UserProfile): number {
+    if (!profile.education || !profile.course.trim() || !profile.semester.trim() || !profile.subjects.trim()) return 1;
+    if (!profile.collegeStart || !profile.collegeEnd || profile.collegeDays.length === 0) return 2;
+    if (!profile.studyStart || !profile.studyEnd || !profile.dailyStudyTarget || profile.preferredStudyDays.length === 0) return 3;
+    if (!profile.city.trim()) return 4;
+    return 0;
+  }
+
+  /** Reopen the onboarding form from Profile, pre-filled, at a given step. */
+  function handleEditProfile(step: number) {
+    if (!authUser || guestMode) {
+      notify('Profile edit karne ke liye pehle sign in karo.');
+      return;
+    }
+    setOnboardingInitialStep(step);
+    setEditingProfile(true);
+    setScreen('onboarding');
+  }
+
+  function handleOnboardingCancel() {
+    setEditingProfile(false);
+    setScreen('app');
+    setPage('profile');
+  }
+
+  /** Focus & sleep: save the sleep window to MongoDB for real. */
+  async function handleSaveFocus() {
+    if (!authUser || guestMode) {
+      notify('Neend ka time save karne ke liye pehle sign in karo.');
+      return;
+    }
+    if (focusSaving) return;
+    setFocusSaving(true);
+    try {
+      const profileToSave = { ...newUser, name: authUser.name, email: authUser.email };
+      // Never mark a skipped profile complete just because the sleep
+      // window was saved from the Focus screen. Keep the skip with the
+      // first incomplete step as the resume point.
+      const saved = onboardingCompleted === false
+        ? await saveProfilePartial(profileToSave, firstIncompleteStep(newUser))
+        : await saveProfile(profileToSave);
+      setNewUser(saved);
+      notify('Neend ka time save ho gaya. App restrictions Android app me kaam karenge.');
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Neend ka time save nahi ho paya.');
+    } finally {
+      setFocusSaving(false);
     }
   }
 
@@ -535,6 +649,9 @@ function App() {
     clearCsrfToken();
     setAuthUser(null);
     setGuestMode(false);
+    setEmailNotice(null);
+    setOnboardingCompleted(null);
+    setEditingProfile(false);
     setProfileName('');
     setNewUser(emptyProfile());
     setPrayerTimes(null);
@@ -565,6 +682,9 @@ function App() {
     clearCsrfToken();
     setAuthUser(null);
     setGuestMode(false);
+    setEmailNotice(null);
+    setOnboardingCompleted(null);
+    setEditingProfile(false);
     setProfileName('');
     setNewUser(emptyProfile());
     setScreen('welcome');
@@ -577,8 +697,10 @@ function App() {
       const result = await apiRequest<{ sent?: boolean; alreadyVerified?: boolean }>('/api/auth/verify-email', { method: 'POST' });
       if (result.alreadyVerified) {
         setAuthUser((current) => (current ? { ...current, emailVerified: true } : current));
+        setEmailNotice(null);
         notify('Your email is already verified.');
       } else {
+        setEmailNotice(null);
         notify('Verification email sent. Check your inbox.');
       }
     } catch (error) {
@@ -590,7 +712,7 @@ function App() {
   const initials = displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0].toUpperCase()).join('') || 'AH';
 
   if (screen === 'checking') {
-    return <div className="auth-screen"><div className="auth-card"><div className="auth-brand"><img src={logo} alt="AHDORA" /><span>AHDORA</span></div><p>Checking your secure session...</p></div></div>;
+    return <div className="auth-screen"><div className="auth-card"><div className="auth-brand"><AhdoraLogo size={42} /><span>AHDORA</span></div><p>Checking your secure session...</p></div></div>;
   }
   if (screen === 'welcome') {
     return <Welcome onContinue={() => setScreen('login')} onExplore={() => { setGuestMode(true); setProfileName('Guest'); setScreen('app'); }} />;
@@ -605,25 +727,63 @@ function App() {
     return <ResetPassword token={resetToken} onDone={() => { setResetToken(''); setScreen('login'); notify('Password reset. Please log in with your new password.'); }} onBack={() => { setResetToken(''); setScreen('login'); }} />;
   }
   if (screen === 'onboarding') {
-    return <Onboarding user={newUser} onChange={setNewUser} onComplete={handleOnboardingComplete} />;
+    return <Onboarding user={newUser} onChange={setNewUser} onComplete={handleOnboardingComplete} onSkip={handleOnboardingSkip} initialStep={onboardingInitialStep} mode={editingProfile ? 'edit' : 'initial'} onCancel={handleOnboardingCancel} />;
   }
 
   return (
     <div className="app-shell">
       <aside className={`sidebar ${mobileNav ? 'sidebar-open' : ''}`}>
-        <div className="brand-lockup"><img src={logo} alt="AHDORA logo" /><div><strong>AHDORA</strong><span>DEEN · ILM · DISCIPLINE</span></div><button className="icon-button mobile-close" onClick={() => setMobileNav(false)} aria-label="Close menu"><X size={18} /></button></div>
+        <div className="brand-lockup"><AhdoraLogo size={38} alt="AHDORA logo" /><div><strong>AHDORA</strong><span>DEEN · ILM · DISCIPLINE</span></div><button className="icon-button mobile-close" onClick={() => setMobileNav(false)} aria-label="Close menu"><X size={18} /></button></div>
         <div className="workspace-switch"><span className="workspace-dot" /><span>Personal space</span><ChevronDown size={14} /></div>
         {['Workspace', 'Community', 'Tools'].map((group) => <div className="nav-group" key={group}><div className="nav-caption">{group}</div>{navItems.filter((item) => item.group === group).map((item) => { const Icon = item.icon; return <button key={item.id} className={`nav-link ${page === item.id ? 'active' : ''}`} onClick={() => goTo(item.id)}><Icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.id === 'challenges' && activeChallenges.length > 0 && <span className="nav-count">{activeChallenges.length}</span>}</button>; })}</div>)}
         <div className="sidebar-bottom"><div className="sidebar-quote"><Sparkles size={15} /><p>Small steps, sincere intentions, steady growth.</p></div><button className="profile-mini" onClick={() => goTo('profile')}><div className="avatar">{initials}</div><div><strong>{displayName}</strong><span>Personal account</span></div><MoreHorizontal size={17} /></button></div>
       </aside>
       <main className="main-area">
-        <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{navItems.find((item) => item.id === page)?.label}</strong></div><div className="topbar-actions"><span className="demo-pill"><span />{authUser ? 'SECURE SESSION' : 'GUEST PREVIEW'}</span><button className="icon-button search-trigger" onClick={() => setSearchOpen(!searchOpen)} aria-label="Search"><Search size={18} /></button><div className="notification-wrap"><button className="icon-button notification-button" onClick={() => { setNotifOpen((open) => !open); if (!notifOpen) refreshNotifications(); }} aria-label="Notifications"><Bell size={18} />{unreadCount > 0 && <span className="notification-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}</button>{notifOpen && <div className="notification-panel"><div className="notification-panel-head"><strong>Notifications</strong>{unreadCount > 0 && <button onClick={async () => { try { await markAllNotificationsRead(); await refreshNotifications(); } catch { notify('Could not mark all as read.'); } }}>Mark all read</button>}</div>{!authUser || guestMode ? <p className="onboarding-help">Notifications dekhne ke liye sign in karo.</p> : notifications.length === 0 ? <p className="onboarding-help">Abhi koi notification nahi hai. Namaz, padhai, neend aur challenge ki notifications yahan dikhengi.</p> : <div className="notification-list">{notifications.map((item) => <button key={item.id} className={`notification-item ${item.read ? 'notification-read' : ''}`} onClick={async () => { if (!item.read) { try { await markNotificationRead(item.id); await refreshNotifications(); } catch { notify('Could not mark as read.'); } } }}><span className="notification-dot" /><span><strong>{item.title}</strong><small>{item.body}</small><small>{new Date(item.createdAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></span></button>)}</div>}</div>}</div><button className="top-avatar" onClick={() => goTo('profile')}>{initials}</button></div></header>
+        <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{navItems.find((item) => item.id === page)?.label}</strong></div><div className="topbar-actions"><span className="demo-pill"><span />{authUser ? 'SECURE SESSION' : 'GUEST PREVIEW'}</span><button className="icon-button search-trigger" onClick={() => setSearchOpen(!searchOpen)} aria-label="Search"><Search size={18} /></button><div className="notification-wrap"><button className="icon-button notification-button" onClick={() => { setNotifOpen((open) => !open); if (!notifOpen) { refreshNotifications(); setConfirmClearNotif(false); } }} aria-label="Notifications"><Bell size={18} />{unreadCount > 0 && <span className="notification-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}</button>{notifOpen && <div className="notification-panel"><div className="notification-panel-head"><strong>Notifications</strong><span style={{ display: 'flex', gap: 12 }}><span>{unreadCount > 0 && <button onClick={async () => { try { await markAllNotificationsRead(); await refreshNotifications(); } catch { notify('Could not mark all as read.'); } }}>Mark all read</button>}</span>{notifications.length > 0 && (confirmClearNotif ? <button onClick={async () => { try { await clearAllNotifications(); setNotifications([]); setUnreadCount(0); setConfirmClearNotif(false); notify('Saari notifications hata di gayi.'); } catch { notify('Clear nahi ho paya. Dobara try karo.'); } }}>Pakka saaf karein?</button> : <button onClick={() => setConfirmClearNotif(true)}>Clear all</button>)}</span></div>{!authUser || guestMode ? <p className="onboarding-help">Notifications dekhne ke liye sign in karo.</p> : notifications.length === 0 ? <p className="onboarding-help">Abhi koi notification nahi hai. Namaz, padhai, neend aur challenge ki notifications yahan dikhengi.</p> : <div className="notification-list">{notifications.map((item) => (
+  <div key={item.id} className={`notification-item ${item.read ? 'notification-read' : ''}`}>
+    <button
+      type="button"
+      onClick={async () => { if (!item.read) { try { await markNotificationRead(item.id); await refreshNotifications(); } catch { notify('Could not mark as read.'); } } }}
+      style={{ flex: 1, display: 'flex', gap: 11, minWidth: 0, textAlign: 'left', background: 'none', border: 0, padding: 0, color: 'inherit', cursor: 'pointer' }}
+    >
+      <span className="notification-dot" />
+      <span><strong>{item.title}</strong><small>{item.body}</small><small>{new Date(item.createdAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></span>
+    </button>
+    <button
+      type="button"
+      className="notification-dismiss"
+      aria-label={`"${item.title}" notification hatao`}
+      title="Hatao"
+      onClick={async () => {
+        const wasUnread = !item.read;
+        setNotifications((list) => list.filter((n) => n.id !== item.id));
+        if (wasUnread) setUnreadCount((count) => Math.max(0, count - 1));
+        try {
+          await deleteNotification(item.id);
+        } catch {
+          notify('Notification delete nahi ho payi.');
+          await refreshNotifications();
+        }
+      }}
+      style={{ flexShrink: 0, background: 'none', border: 0, padding: '2px 4px', color: 'inherit', cursor: 'pointer', opacity: 0.75 }}
+    >
+      <X size={14} />
+    </button>
+  </div>
+))}</div>}</div>}</div><button className="top-avatar" onClick={() => goTo('profile')}>{initials}</button></div></header>
         {searchOpen && <div className="search-popover"><Search size={17} /><input autoFocus placeholder="Search AHDORA pages..." value={query} onChange={(e) => setQuery(e.target.value)} /><button onClick={() => { setQuery(''); setSearchOpen(false); }}><X size={16} /></button><div className="search-results">{filteredNav.map((item) => <button key={item.id} onClick={() => goTo(item.id)}>{item.label}<ArrowUpRight size={14} /></button>)}</div></div>}
         {authUser && !authUser.emailVerified && !guestMode && (
           <div className="verify-banner">
             <Shield size={16} />
-            <span>Your email is not verified yet. Some account features need verification.</span>
+            <span>{emailNotice ?? 'Your email is not verified yet. Some account features need verification.'}</span>
             <button className="text-button" onClick={handleResendVerification}>Resend verification email</button>
+          </div>
+        )}
+        {authUser && !guestMode && onboardingCompleted === false && (
+          <div className="verify-banner">
+            <UserRound size={16} />
+            <span>Aapka profile adhoora hai — kuch details abhi baki hain.</span>
+            <button className="text-button" onClick={() => handleEditProfile(firstIncompleteStep(newUser))}>Profile poora karo</button>
           </div>
         )}
         <div className="page-content">
@@ -632,14 +792,15 @@ function App() {
           {page === 'study' && <Study subjects={subjects} tasks={tasks} todayTasks={todayTasks} schedule={todaySchedule} stats={studyStats} activeSession={activePomodoro} history={pomodoroHistory} studyError={studyError} guestMode={guestMode} profile={newUser} onRefresh={refreshStudy} onNotify={notify} />}
           {page === 'challenges' && <Challenges onNotify={notify} onRefresh={refreshChallenges} guestMode={guestMode} />}
           {page === 'friends' && <Friends onNotify={notify} refreshKey={friendsRefreshKey} guestMode={guestMode} />}
-          {page === 'guidance' && <Guidance onNotify={notify} tab={guidanceTab} onTabChange={setGuidanceTab} guestMode={guestMode} profileCity={newUser.city} initialSurah={guidanceSurah} onInitialSurahOpened={() => setGuidanceSurah(null)} onOpenSurah={(surahNumber) => goToGuidance('quran', surahNumber)} />}
-          {page === 'focus' && <Focus sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} focusEnabled={focusEnabled} setFocusEnabled={setFocusEnabled} youtubeAllowed={youtubeAllowed} setYoutubeAllowed={setYoutubeAllowed} onNotify={notify} />}
+          {page === 'guidance' && <Guidance onNotify={notify} onOpenFeedback={() => setFeedbackOpen(true)} tab={guidanceTab} onTabChange={setGuidanceTab} guestMode={guestMode} profileCity={newUser.city} initialSurah={guidanceSurah} onInitialSurahOpened={() => setGuidanceSurah(null)} onOpenSurah={(surahNumber) => goToGuidance('quran', surahNumber)} />}
+          {page === 'focus' && <Focus sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} onSleepChange={(start, end) => setNewUser((current) => ({ ...current, sleepStartTime: start, sleepEndTime: end }))} onSaveFocus={handleSaveFocus} focusSaving={focusSaving} focusEnabled={focusEnabled} setFocusEnabled={setFocusEnabled} youtubeAllowed={youtubeAllowed} setYoutubeAllowed={setYoutubeAllowed} onNotify={notify} />}
           {page === 'analytics' && <Analytics stats={studyStats} guestMode={guestMode} rewards={rewards} activeChallenges={activeChallenges} challengeHistory={challengeHistory} />}
-          {page === 'profile' && <Profile onNotify={notify} user={authUser} guestMode={guestMode} onLogout={handleLogout} onAccountDeleted={handleAccountDeleted} />}
+          {page === 'profile' && <Profile onNotify={notify} user={authUser} guestMode={guestMode} onLogout={handleLogout} onAccountDeleted={handleAccountDeleted} onboardingIncomplete={onboardingCompleted === false} onEditProfile={handleEditProfile} onOpenFeedback={() => setFeedbackOpen(true)} onNavigate={goTo} />}
         </div>
-        <footer className="app-footer"><span>© 2026 AHDORA</span><span>Built around what matters.</span><button onClick={() => notify('Help centre will be connected in a later phase.')}><CircleHelp size={14} /> Help & feedback</button></footer>
+        <footer className="app-footer"><span>© 2026 AHDORA</span><span>Built around what matters.</span><button onClick={() => setFeedbackOpen(true)}><CircleHelp size={14} /> Help & feedback</button></footer>
       </main>
       {mobileNav && <button className="mobile-backdrop" onClick={() => setMobileNav(false)} aria-label="Close navigation" />}
+      {feedbackOpen && <FeedbackForm onClose={() => setFeedbackOpen(false)} onNotify={notify} />}
       {toast && <div className="toast"><Check size={16} />{toast}</div>}
     </div>
   );
@@ -650,7 +811,7 @@ function Welcome({ onContinue, onExplore }: { onContinue: () => void; onExplore:
     <div className="welcome-screen">
       <div className="welcome-nav">
         <div className="welcome-brand">
-          <img src={logo} alt="" />
+          <AhdoraLogo size={40} alt="" />
           <strong>AHDORA</strong>
         </div>
         <div className="welcome-nav-links">
@@ -671,7 +832,7 @@ function Welcome({ onContinue, onExplore }: { onContinue: () => void; onExplore:
             A thoughtful space to bring your faith, learning and daily habits into better balance. One sincere step at a time.
           </p>
           <div className="hero-actions">
-            <button className="primary-button" onClick={onContinue}>
+            <button className="gold-button" onClick={onContinue}>
               Start your journey <ArrowRight size={17} />
             </button>
             <button className="text-button" onClick={onExplore}>
@@ -754,6 +915,9 @@ function Login({
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -791,6 +955,11 @@ function Login({
         return;
       }
 
+      if (password !== confirmPassword) {
+        fail('Dono password ek jaise nahi hain.');
+        return;
+      }
+
       setBusy(true);
 
       try {
@@ -822,7 +991,7 @@ function Login({
 
       <div className="auth-card auth-card-animated" ref={cardRef}>
         <div className="auth-brand">
-          <img src={logo} alt="AHDORA" />
+          <AhdoraLogo size={42} />
           <span>AHDORA</span>
         </div>
 
@@ -844,14 +1013,14 @@ function Login({
           <button
             type="button"
             className={tab === 'login' ? 'selected' : ''}
-            onClick={() => { setTab('login'); setError(''); }}
+            onClick={() => { setTab('login'); setError(''); setConfirmPassword(''); }}
           >
             Log in
           </button>
           <button
             type="button"
             className={tab === 'signup' ? 'selected' : ''}
-            onClick={() => { setTab('signup'); setError(''); }}
+            onClick={() => { setTab('signup'); setError(''); setConfirmPassword(''); }}
           >
             Create account
           </button>
@@ -892,19 +1061,56 @@ function Login({
               <input
                 id="auth-password"
                 className="form-input auth-input"
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder=" "
                 autoComplete={tab === 'login' ? 'current-password' : 'new-password'}
                 required
+                style={{ paddingRight: 42 }}
               />
               <label className="auth-floating-label" htmlFor="auth-password">Password</label>
+              <button
+                type="button"
+                aria-label={showPassword ? 'Password chhupao' : 'Password dikhao'}
+                title={showPassword ? 'Password chhupao' : 'Password dikhao'}
+                disabled={busy || authSuccess}
+                onClick={() => setShowPassword((current) => !current)}
+                style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 0, padding: 4, cursor: 'pointer', color: 'inherit', opacity: 0.75, display: 'grid', placeItems: 'center', zIndex: 1 }}
+              >
+                {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+              </button>
             </div>
+            {tab === 'signup' && (
+              <div className="auth-field">
+                <input
+                  id="auth-confirm-password"
+                  className="form-input auth-input"
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder=" "
+                  autoComplete="new-password"
+                  required
+                  style={{ paddingRight: 42 }}
+                />
+                <label className="auth-floating-label" htmlFor="auth-confirm-password">Re-enter password</label>
+                <button
+                  type="button"
+                  aria-label={showConfirmPassword ? 'Password chhupao' : 'Password dikhao'}
+                  title={showConfirmPassword ? 'Password chhupao' : 'Password dikhao'}
+                  disabled={busy || authSuccess}
+                  onClick={() => setShowConfirmPassword((current) => !current)}
+                  style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 0, padding: 4, cursor: 'pointer', color: 'inherit', opacity: 0.75, display: 'grid', placeItems: 'center', zIndex: 1 }}
+                >
+                  {showConfirmPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                </button>
+              </div>
+            )}
             {tab === 'signup' && <small className="auth-hint">Minimum 12 characters</small>}
           </div>
 
-          {error && <p className="auth-error" role="alert" style={{ color: '#c45b52', fontSize: 13, marginTop: 12 }}>{error}</p>}
+          {error && <p className="auth-error" role="alert" style={{ color: 'var(--red)', fontSize: 13, marginTop: 12 }}>{error}</p>}
 
           <button type="submit" className={`primary-button full-width auth-submit ${authSuccess ? 'auth-submit-success' : ''}`} disabled={busy}>
             {authSuccess ? (
@@ -977,7 +1183,7 @@ function ForgotPassword({ onBack, onSent }: { onBack: () => void; onSent: () => 
       </button>
       <div className="auth-card">
         <div className="auth-brand">
-          <img src={logo} alt="AHDORA" />
+          <AhdoraLogo size={42} />
           <span>AHDORA</span>
         </div>
         <div className="auth-heading">
@@ -999,7 +1205,7 @@ function ForgotPassword({ onBack, onSent }: { onBack: () => void; onSent: () => 
               autoComplete="email"
               required
             />
-            {error && <p style={{ color: '#c45b52', fontSize: 13, marginTop: 12 }}>{error}</p>}
+            {error && <p style={{ color: 'var(--red)', fontSize: 13, marginTop: 12 }}>{error}</p>}
             <button type="submit" className="primary-button full-width" disabled={busy}>
               {busy ? 'Please wait...' : 'Send reset link'}
               <ArrowRight size={16} />
@@ -1031,7 +1237,7 @@ function ResetPassword({ token, onDone, onBack }: { token: string; onDone: () =>
       return;
     }
     if (password !== confirm) {
-      setError('Passwords do not match.');
+      setError('Dono password ek jaise nahi hain.');
       return;
     }
     if (!token) {
@@ -1059,7 +1265,7 @@ function ResetPassword({ token, onDone, onBack }: { token: string; onDone: () =>
       </button>
       <div className="auth-card">
         <div className="auth-brand">
-          <img src={logo} alt="AHDORA" />
+          <AhdoraLogo size={42} />
           <span>AHDORA</span>
         </div>
         <div className="auth-heading">
@@ -1069,26 +1275,22 @@ function ResetPassword({ token, onDone, onBack }: { token: string; onDone: () =>
         </div>
         <form onSubmit={handleSubmit}>
           <label className="field-label">New password</label>
-          <input
-            className="form-input"
-            type="password"
+          <PasswordField
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={setPassword}
             placeholder="Minimum 12 characters"
             autoComplete="new-password"
             required
           />
           <label className="field-label">Confirm new password</label>
-          <input
-            className="form-input"
-            type="password"
+          <PasswordField
             value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
+            onChange={setConfirm}
             placeholder="Repeat the new password"
             autoComplete="new-password"
             required
           />
-          {error && <p style={{ color: '#c45b52', fontSize: 13, marginTop: 12 }}>{error}</p>}
+          {error && <p style={{ color: 'var(--red)', fontSize: 13, marginTop: 12 }}>{error}</p>}
           <button type="submit" className="primary-button full-width" disabled={busy}>
             {busy ? 'Please wait...' : 'Reset password'}
             <ArrowRight size={16} />
@@ -1511,9 +1713,6 @@ function Deen({ onNotify, prayerTimes, prayerStatus, prayerError, onOpenGuidance
           <div className="reflection-mark">“</div>
           <h3>Consistency is not about never missing a day. It is about returning with sincerity.</h3>
           <p>AHDORA reflection · Original reminder, not a Quranic quotation.</p>
-          <button className="text-button" onClick={() => onNotify('Reflection saved in this demo only.')}>
-            <Heart size={15} /> Save reflection
-          </button>
         </section>
       </div>
     </>
@@ -2826,8 +3025,9 @@ function Challenges({
   );
 }
 
-function Guidance({ onNotify, tab, onTabChange, guestMode, profileCity, initialSurah, onInitialSurahOpened, onOpenSurah }: {
+function Guidance({ onNotify, onOpenFeedback, tab, onTabChange, guestMode, profileCity, initialSurah, onInitialSurahOpened, onOpenSurah }: {
   onNotify: (message: string) => void;
+  onOpenFeedback: () => void;
   tab: GuidanceTab;
   onTabChange: (tab: GuidanceTab) => void;
   guestMode: boolean;
@@ -2913,8 +3113,8 @@ function Guidance({ onNotify, tab, onTabChange, guestMode, profileCity, initialS
             <Heart size={20} />
             <h3>Faith can support you. You don't have to handle everything alone.</h3>
             <p>Spiritual reflection can sit alongside practical support and professional care when needed.</p>
-            <button className="text-button" onClick={() => onNotify('Support resources will be added after review.')}>
-              Explore support resources <ArrowRight size={14} />
+            <button className="text-button" onClick={onOpenFeedback}>
+              Madad chahiye? Feedback bhejo <ArrowRight size={14} />
             </button>
           </div>
         </aside>
@@ -2947,7 +3147,7 @@ function Guidance({ onNotify, tab, onTabChange, guestMode, profileCity, initialS
           onInitialSurahOpened={onInitialSurahOpened}
         />
       )}
-      {tab === 'duas' && <CuratedDuas />}
+      {tab === 'duas' && <CuratedDuas onOpenSurah={onOpenSurah} />}
       {tab === 'hijri' && <HijriCalendar onNotify={onNotify} guestMode={guestMode} />}
       {tab === 'mosques' && (
         <MosqueFinder onNotify={onNotify} guestMode={guestMode} profileCity={profileCity} />
@@ -2959,6 +3159,9 @@ function Guidance({ onNotify, tab, onTabChange, guestMode, profileCity, initialS
 function Focus({
   sleepStartTime,
   sleepEndTime,
+  onSleepChange,
+  onSaveFocus,
+  focusSaving,
   focusEnabled,
   setFocusEnabled,
   youtubeAllowed,
@@ -2967,6 +3170,10 @@ function Focus({
 }: {
   sleepStartTime: string;
   sleepEndTime: string;
+  /** Edit the sleep window; saved to MongoDB by onSaveFocus. */
+  onSleepChange: (start: string, end: string) => void;
+  onSaveFocus: () => Promise<void>;
+  focusSaving: boolean;
   focusEnabled: boolean;
   setFocusEnabled: (value: boolean) => void;
   youtubeAllowed: boolean;
@@ -3022,6 +3229,17 @@ function Focus({
             </div>
           </div>
 
+          <div className="onboarding-two-col" style={{ marginTop: 14 }}>
+            <div>
+              <label className="field-label">Neend ka time (start)</label>
+              <input className="form-input" type="time" value={sleepStartTime || '22:00'} onChange={(e) => onSleepChange(e.target.value, sleepEndTime || '04:00')} />
+            </div>
+            <div>
+              <label className="field-label">Uthne ka time (end)</label>
+              <input className="form-input" type="time" value={sleepEndTime || '04:00'} onChange={(e) => onSleepChange(sleepStartTime || '22:00', e.target.value)} />
+            </div>
+          </div>
+
           <div className="focus-settings">
             <div className="focus-setting-head">
               <div>
@@ -3068,9 +3286,10 @@ function Focus({
             </div>
           </div>
 
-          <button className="primary-button" onClick={() => onNotify('Settings saved in this frontend preview only. Android app restrictions are not active yet.')}>
-            Save focus schedule <ArrowRight size={15} />
+          <button className="primary-button" disabled={focusSaving} onClick={() => void onSaveFocus()}>
+            {focusSaving ? 'Save ho raha hai…' : 'Save focus schedule'} <ArrowRight size={15} />
           </button>
+          <p className="onboarding-help">Neend ka time aapke account me save hota hai. App restrictions Android-only hain — web par ye sirf preview hai.</p>
         </section>
 
         <aside className="focus-side">
@@ -3275,12 +3494,22 @@ function Profile({
   guestMode,
   onLogout,
   onAccountDeleted,
+  onboardingIncomplete,
+  onEditProfile,
+  onOpenFeedback,
+  onNavigate,
 }: {
   onNotify: (message: string) => void;
   user: AuthUser | null;
   guestMode: boolean;
   onLogout: () => void;
   onAccountDeleted: () => void;
+  /** True when onboarding was skipped / never finished. */
+  onboardingIncomplete: boolean;
+  /** Reopen the onboarding form, pre-filled, at the given step. */
+  onEditProfile: (step: number) => void;
+  onOpenFeedback: () => void;
+  onNavigate: (page: Page) => void;
 }) {
   const displayName = user?.name || (guestMode ? 'Guest preview' : 'Your account');
   const initials = displayName
@@ -3311,9 +3540,15 @@ function Profile({
               <span />
               {user ? 'Authenticated account · Session active' : 'Guest preview · Not signed in'}
             </span>
-            <button className="outline-button" onClick={() => onNotify('Profile editing will be available in a later phase.')}>
+            {onboardingIncomplete && !guestMode && (
+              <button className="primary-button" onClick={() => onEditProfile(0)}>
+                <UserRound size={15} /> Profile poora karo
+              </button>
+            )}
+            <button className="outline-button" onClick={() => onEditProfile(0)} disabled={guestMode}>
               <UserRound size={15} /> Edit profile
             </button>
+            {guestMode && <p className="onboarding-help">Sign in to edit your profile details.</p>}
             <button className="outline-button" onClick={onLogout}>
               <LogOut size={15} /> {user ? 'Log out' : 'Exit preview'}
             </button>
@@ -3336,13 +3571,13 @@ function Profile({
             icon={Compass}
             title="Prayer calculation"
             detail="Location, method and Asr school"
-            onClick={() => onNotify('Prayer calculation preferences will be connected later.')}
+            onClick={() => onEditProfile(4)}
           />
           <SettingRow
             icon={Moon}
             title="Sleep schedule"
             detail="Your focus window and allowed apps"
-            onClick={() => onNotify('Opening Focus & sleep settings.')}
+            onClick={() => onNavigate('focus')}
           />
           <SettingRow
             icon={Shield}
@@ -3360,7 +3595,7 @@ function Profile({
             icon={CircleHelp}
             title="Help & support"
             detail="Get help or share feedback"
-            onClick={() => onNotify('Help centre is planned for a later phase.')}
+            onClick={onOpenFeedback}
           />
         </section>
       </div>

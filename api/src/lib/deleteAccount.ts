@@ -3,6 +3,7 @@ import { ChallengeInvitation } from '../models/ChallengeInvitation.js';
 import { ChallengeParticipant } from '../models/ChallengeParticipant.js';
 import { ChallengeProgress } from '../models/ChallengeProgress.js';
 import { EmailToken } from '../models/EmailToken.js';
+import { Feedback } from '../models/Feedback.js';
 import { FriendRequest } from '../models/FriendRequest.js';
 import { Friendship } from '../models/Friendship.js';
 import { Notification } from '../models/Notification.js';
@@ -90,6 +91,9 @@ export async function deleteAccount(userId: string): Promise<Record<string, numb
   // Notifications.
   await del('notifications', Notification.deleteMany({ userId }));
   await del('notificationSettings', NotificationSetting.deleteMany({ userId }));
+
+  // Feedback / complaints.
+  await del('feedback', Feedback.deleteMany({ userId }));
 
   // Quran.
   await del('quranBookmarks', QuranBookmark.deleteMany({ userId }));

@@ -2,6 +2,7 @@ import { Challenge } from '../models/Challenge.js';
 import { ChallengeInvitation } from '../models/ChallengeInvitation.js';
 import { ChallengeParticipant } from '../models/ChallengeParticipant.js';
 import { ChallengeProgress } from '../models/ChallengeProgress.js';
+import { Feedback } from '../models/Feedback.js';
 import { FriendRequest } from '../models/FriendRequest.js';
 import { Friendship } from '../models/Friendship.js';
 import { Notification } from '../models/Notification.js';
@@ -56,5 +57,6 @@ export async function exportAccount(userId: string): Promise<Record<string, unkn
     notificationSettings: await NotificationSetting.findOne({ userId }).lean(),
     quranBookmarks: clean(await QuranBookmark.find({ userId }).lean()),
     quranReading: clean(await QuranReading.find({ userId }).lean()),
+    feedback: clean(await Feedback.find({ userId }).sort({ createdAt: -1 }).lean()),
   };
 }

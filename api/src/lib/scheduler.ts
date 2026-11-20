@@ -115,6 +115,25 @@ export type EffectivePrayer = {
   reminder: boolean;
 };
 
+/**
+ * Manual-only timings: when the user set a timeOverride for ALL five
+ * prayers, no Aladhan fetch is needed at all — the user's own times
+ * are the times. Returns null unless every prayer has a valid
+ * timeOverride, so a partial override still falls back to calculated
+ * times for the rest.
+ */
+export function manualOnlyTimings(
+  profile: ProfileLike,
+): Record<PrayerName, string> | null {
+  const out = {} as Record<PrayerName, string>;
+  for (const prayer of PRAYERS) {
+    const override = profile.prayerSettings?.[prayer]?.timeOverride?.trim();
+    if (!override || toMinutes(override) === null) return null;
+    out[prayer] = override;
+  }
+  return out;
+}
+
 /** "05:12" from Aladhan values like "05:12" or "05:12 (IST)". */
 function stripToHHmm(value: unknown): string {
   if (typeof value !== 'string') return '';
@@ -381,15 +400,21 @@ async function tickPrayer(
 ): Promise<void> {
   for (const profile of profiles) {
     try {
-      const city = profile.city?.trim();
-      if (!city) continue;
       const timezone = profile.timezone?.trim() || 'Asia/Kolkata';
       const todayKey = dateKeyInTimezone(timezone, now);
       const nowMinutes = nowMinutesInTimezone(timezone, now);
       if (nowMinutes === null) continue;
       const userId = String(profile.userId);
 
-      const calculated = await timingsForUser(profile, todayKey, fetchTimings);
+      // Manual times win outright: with all five overrides set, the
+      // scheduler never needs Aladhan (or even a city) to fire the
+      // user's own prayer reminders. Otherwise fall back to the
+      // calculated times, which still let per-prayer overrides win
+      // inside effectivePrayerTimes.
+      const manual = manualOnlyTimings(profile);
+      const city = profile.city?.trim();
+      const calculated =
+        manual ?? (city ? await timingsForUser(profile, todayKey, fetchTimings) : null);
       if (!calculated) continue;
       const effective = effectivePrayerTimes(profile, calculated);
       for (const event of prayerEventsDue(effective, nowMinutes)) {

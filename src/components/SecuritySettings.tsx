@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { apiFetch } from '../lib/http.js';
+import PasswordField from './PasswordField.js';
 
 /**
  * Privacy & security panel (Profile → Privacy & security).
@@ -79,7 +80,7 @@ export default function SecuritySettings({
       return;
     }
     if (newPassword !== confirmPassword) {
-      setPasswordMessage('New passwords do not match.');
+      setPasswordMessage('Dono password ek jaise nahi hain.');
       return;
     }
     setPasswordBusy(true);
@@ -179,30 +180,24 @@ export default function SecuritySettings({
       <h4>Change password</h4>
       <form onSubmit={handleChangePassword}>
         <label className="field-label">Current password</label>
-        <input
-          className="form-input"
-          type="password"
+        <PasswordField
           value={currentPassword}
-          onChange={(e) => setCurrentPassword(e.target.value)}
+          onChange={setCurrentPassword}
           autoComplete="current-password"
           required
         />
         <label className="field-label">New password</label>
-        <input
-          className="form-input"
-          type="password"
+        <PasswordField
           value={newPassword}
-          onChange={(e) => setNewPassword(e.target.value)}
+          onChange={setNewPassword}
           placeholder="Minimum 12 characters"
           autoComplete="new-password"
           required
         />
         <label className="field-label">Confirm new password</label>
-        <input
-          className="form-input"
-          type="password"
+        <PasswordField
           value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
+          onChange={setConfirmPassword}
           autoComplete="new-password"
           required
         />
@@ -252,11 +247,9 @@ export default function SecuritySettings({
         Challenges you created stay only when other people still take part in them. This cannot be undone.
       </p>
       <label className="field-label">Your password</label>
-      <input
-        className="form-input"
-        type="password"
+      <PasswordField
         value={deletePassword}
-        onChange={(e) => setDeletePassword(e.target.value)}
+        onChange={setDeletePassword}
         autoComplete="current-password"
         placeholder="Enter your password to confirm"
       />

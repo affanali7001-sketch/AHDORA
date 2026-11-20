@@ -19,7 +19,9 @@ import { challengesRouter } from './routes/challenges.js';
 import { rewardsRouter } from './routes/rewards.js';
 import { friendsRouter } from './routes/friends.js';
 import { notificationsRouter } from './routes/notifications.js';
+import { feedbackRouter } from './routes/feedback.js';
 import { quranRouter } from './routes/quran.js';
+import { duasRouter } from './routes/duas.js';
 import { hijriRouter } from './routes/hijri.js';
 import { mosquesRouter } from './routes/mosques.js';
 
@@ -188,6 +190,19 @@ app.use(
   notificationsRouter,
 );
 
+// Feedback / complaints (per-user; status changes are admin-only).
+app.use(
+  '/api/feedback',
+  requireAuth,
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 60,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  feedbackRouter,
+);
+
 // Quran reading (surah list/text/search) is PUBLIC by design — no
 // account needed to read. Bookmarks, history and target stay behind
 // requireAuth inside the router. (Previously this mount had
@@ -201,6 +216,18 @@ app.use(
     legacyHeaders: false,
   }),
   quranRouter,
+);
+
+// Duas are public verified text — no account needed to read them.
+app.use(
+  '/api/duas',
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 120,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  }),
+  duasRouter,
 );
 
 app.use(

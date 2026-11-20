@@ -92,6 +92,22 @@ export async function markAllNotificationsRead(): Promise<void> {
   await request('/api/notifications/read-all', { method: 'POST' });
 }
 
+/**
+ * Delete one notification (backend track: DELETE /api/notifications/:id).
+ * Only the signed-in user's own notification can be deleted — the
+ * server filters by userId, so another user's id returns 404.
+ */
+export async function deleteNotification(id: string): Promise<void> {
+  await request(`/api/notifications/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+/** Delete all of the signed-in user's notifications (backend track: DELETE /api/notifications). */
+export async function clearAllNotifications(): Promise<void> {
+  await request('/api/notifications', { method: 'DELETE' });
+}
+
 export async function fetchNotificationSettings(): Promise<NotificationSettings> {
   const result = await request<{ settings: NotificationSettings }>(
     '/api/notifications/settings',

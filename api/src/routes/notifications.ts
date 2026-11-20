@@ -26,7 +26,7 @@ type NotificationDoc = {
   createdAt: Date;
 };
 
-function serializeNotification(doc: NotificationDoc) {
+export function serializeNotification(doc: NotificationDoc) {
   return {
     id: String(doc._id),
     type: doc.type,
@@ -111,6 +111,41 @@ notificationsRouter.post('/read-all', async (req, res, next) => {
       { read: true },
     );
     res.json({ message: 'All notifications marked as read' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Delete (dismiss) — one, or clear all. Per-user only: the filter    */
+/* always includes the signed-in user's id, so a user can only ever   */
+/* delete their own notifications.                                    */
+/* ------------------------------------------------------------------ */
+
+notificationsRouter.delete('/', async (req, res, next) => {
+  try {
+    const result = await Notification.deleteMany({ userId: req.authUser!.id });
+    res.json({ deleted: result.deletedCount ?? 0, message: 'All notifications deleted' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+notificationsRouter.delete('/:id', async (req, res, next) => {
+  try {
+    if (!isObjectId(req.params.id)) {
+      res.status(400).json({ error: 'Invalid notification id' });
+      return;
+    }
+    const deleted = await Notification.findOneAndDelete({
+      _id: req.params.id,
+      userId: req.authUser!.id,
+    });
+    if (!deleted) {
+      res.status(404).json({ error: 'Notification not found' });
+      return;
+    }
+    res.status(204).end();
   } catch (error) {
     next(error);
   }

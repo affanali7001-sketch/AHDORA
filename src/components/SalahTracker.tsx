@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight, ShieldCheck } from 'lucide-react';
+import { apiFetch } from '../lib/http.js';
+import {
+  emptyPrayerSettings,
+  fetchPrayerSettings,
+  fetchPrayerTimes,
+  savePrayerSettings,
+  type PrayerSettings,
+  type PrayerTimesResponse,
+} from '../lib/prayerApi.js';
 
 const prayerNames = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'] as const;
 type Prayer = typeof prayerNames[number];
@@ -68,14 +77,25 @@ export default function SalahTracker({ onNotify }: Props) {
   const [saving, setSaving] = useState<Prayer | null>(null);
   const [error, setError] = useState('');
 
+  // Prayer times for the selected date (today only — Aladhan returns
+  // today's times, so showing them for a past date would be wrong).
+  // A failed load never blocks the tracker: statuses still save.
+  const [times, setTimes] = useState<PrayerTimesResponse | null>(null);
+  const [timesNote, setTimesNote] = useState('');
+
+  // Manual per-prayer times: the user's own overrides, saved per user.
+  const [showTimeEditor, setShowTimeEditor] = useState(false);
+  const [draftSettings, setDraftSettings] = useState<PrayerSettings | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [savingTimes, setSavingTimes] = useState(false);
+  const [timesMessage, setTimesMessage] = useState('');
+
   useEffect(() => {
     let active = true;
     setLoading(true);
     setError('');
 
-    fetch(`/api/salah/calendar/${month}`, {
-      credentials: 'include',
-    })
+    apiFetch(`/api/salah/calendar/${month}`)
       .then(async response => {
         if (!response.ok) {
           if (response.status === 401) throw new Error('Login required to view your saved Salah records.');
@@ -110,6 +130,68 @@ export default function SalahTracker({ onNotify }: Props) {
     return () => { active = false; };
   }, [month]);
 
+  // Today's prayer times (with the manual/calculated source per prayer).
+  useEffect(() => {
+    if (selectedDate !== today) {
+      setTimes(null);
+      setTimesNote('');
+      return;
+    }
+    let active = true;
+    setTimesNote('');
+    fetchPrayerTimes(selectedDate)
+      .then(data => {
+        if (active) setTimes(data);
+      })
+      .catch(err => {
+        if (active) {
+          setTimes(null);
+          setTimesNote(err instanceof Error ? err.message : 'Prayer times load nahi ho paye.');
+        }
+      });
+    return () => { active = false; };
+  }, [selectedDate, today]);
+
+  async function openTimeEditor() {
+    if (showTimeEditor) {
+      setShowTimeEditor(false);
+      return;
+    }
+    setShowTimeEditor(true);
+    setTimesMessage('');
+    if (draftSettings) return;
+    setSettingsLoading(true);
+    try {
+      setDraftSettings(await fetchPrayerSettings());
+    } catch (err) {
+      setTimesMessage(err instanceof Error ? err.message : 'Prayer settings load nahi ho paye.');
+    } finally {
+      setSettingsLoading(false);
+    }
+  }
+
+  async function saveTimes() {
+    if (!draftSettings) return;
+    setSavingTimes(true);
+    setTimesMessage('');
+    try {
+      await savePrayerSettings(draftSettings);
+      setTimesMessage('Namaz ke time save ho gaye.');
+      onNotify('Namaz ke time save ho gaye.');
+      if (selectedDate === today) {
+        fetchPrayerTimes(selectedDate)
+          .then(setTimes)
+          .catch(() => undefined);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Prayer times save nahi ho paye.';
+      setTimesMessage(message);
+      onNotify(message);
+    } finally {
+      setSavingTimes(false);
+    }
+  }
+
   const selected = records[selectedDate] ?? emptyRecord;
 
   async function updateStatus(prayer: Prayer, status: Status) {
@@ -122,9 +204,11 @@ export default function SalahTracker({ onNotify }: Props) {
     setError('');
 
     try {
-      const response = await fetch(`/api/salah/day/${selectedDate}`, {
+      // State-changing request: must go through apiFetch so the
+      // X-CSRF-Token header is attached (the server rejects raw
+      // fetch() mutations with "Invalid CSRF token").
+      const response = await apiFetch(`/api/salah/day/${selectedDate}`, {
         method: 'PUT',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prayer, status }),
       });
@@ -287,6 +371,15 @@ export default function SalahTracker({ onNotify }: Props) {
             <div className="salah-prayer-row" key={prayer}>
               <div>
                 <strong>{prayer}</strong>
+                {selectedDate === today && times && (
+                  <small>
+                    {times.perPrayer[prayer].time}
+                    {' · '}
+                    {times.perPrayer[prayer].source === 'manual' ? 'Manual time' : 'Calculated time'}
+                    {' · deadline '}
+                    {times.perPrayer[prayer].deadline}
+                  </small>
+                )}
                 <small>{statusLabel(selected[prayer])}</small>
               </div>
               <select
@@ -302,6 +395,88 @@ export default function SalahTracker({ onNotify }: Props) {
               </select>
             </div>
           ))}
+
+          {selectedDate === today && !times && timesNote && (
+            <p className="salah-loading">{timesNote}</p>
+          )}
+
+          <div className="salah-time-editor">
+            <button className="text-button" type="button" onClick={openTimeEditor} disabled={settingsLoading}>
+              {showTimeEditor ? 'Time editor band karo' : 'Apni namaz ka time khud set karo'}
+            </button>
+            {showTimeEditor && (
+              <div>
+                <p className="salah-private-note">
+                  Har namaz ka time khud set kar sakte ho — jo time yahan save karoge,
+                  wahi tracker me aur reminders me use hoga. Khali chhodo to Aladhan ka
+                  calculated time use hoga. Deadline khali ho to agle namaz ka time
+                  deadline hota hai (Isha ke liye 23:59).
+                </p>
+                {settingsLoading && <p className="salah-loading">Prayer settings load ho rahe hain...</p>}
+                {draftSettings && prayerNames.map(prayer => (
+                  <div className="salah-prayer-row" key={`edit-${prayer}`}>
+                    <div>
+                      <strong>{prayer}</strong>
+                      <label className="field-label">
+                        <input
+                          type="checkbox"
+                          checked={draftSettings[prayer].reminder}
+                          onChange={event => setDraftSettings(previous => previous && ({
+                            ...previous,
+                            [prayer]: { ...previous[prayer], reminder: event.target.checked },
+                          }))}
+                        />
+                        {' '}Reminder
+                      </label>
+                    </div>
+                    <div>
+                      <label className="field-label">Time
+                        <input
+                          className="form-input"
+                          type="time"
+                          value={draftSettings[prayer].timeOverride}
+                          onChange={event => setDraftSettings(previous => previous && ({
+                            ...previous,
+                            [prayer]: { ...previous[prayer], timeOverride: event.target.value },
+                          }))}
+                          aria-label={`${prayer} manual time`}
+                        />
+                      </label>
+                      <label className="field-label">Deadline
+                        <input
+                          className="form-input"
+                          type="time"
+                          value={draftSettings[prayer].endTime}
+                          onChange={event => setDraftSettings(previous => previous && ({
+                            ...previous,
+                            [prayer]: { ...previous[prayer], endTime: event.target.value },
+                          }))}
+                          aria-label={`${prayer} deadline`}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ))}
+                {timesMessage && <p className="salah-loading">{timesMessage}</p>}
+                {draftSettings && (
+                  <div>
+                    <button className="primary-button" type="button" onClick={saveTimes} disabled={savingTimes}>
+                      {savingTimes ? 'Save ho raha hai...' : 'Namaz ke time save karo'}
+                    </button>
+                    {' '}
+                    <button
+                      className="text-button"
+                      type="button"
+                      onClick={() => setDraftSettings(emptyPrayerSettings())}
+                      disabled={savingTimes}
+                    >
+                      Sab calculated time par wapas
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           <p className="salah-private-note">
             Your worship history is private. A status changes when you select and save it — except a prayer

@@ -14,7 +14,7 @@ export default function AuthBackdrop() {
       <svg className="auth-pattern" aria-hidden="true">
         <defs>
           <pattern id="auth-star-pattern" width="84" height="84" patternUnits="userSpaceOnUse">
-            <g fill="none" stroke="#8fdca6" strokeWidth="1">
+            <g fill="none" stroke="#0F766E" strokeWidth="1">
               <rect x="26" y="26" width="32" height="32" />
               <rect x="26" y="26" width="32" height="32" transform="rotate(45 42 42)" />
               <circle cx="42" cy="42" r="3" />

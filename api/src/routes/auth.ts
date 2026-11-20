@@ -108,11 +108,45 @@ authRouter.post('/signup', strictAuthLimiter, async (req, res, next) => {
       refType: 'User',
       refId: String(user._id),
     });
+    // Email verification (item 2): actually send the verification
+    // email. Previously the notice below promised a link that was
+    // never created or sent — signup silently left every email
+    // unverified. Sending is best-effort: a mail failure must never
+    // fail account creation, but the notice must then say so
+    // honestly. The token is deleted when sending fails, so the
+    // resend endpoint (POST /verify-email) issues a fresh one.
+    let verificationEmailSent = false;
+    if (isEmailConfigured) {
+      try {
+        const raw = generateEmailToken();
+        await EmailToken.create({
+          userId: user._id,
+          purpose: 'email_verification',
+          tokenHash: hashEmailToken(raw),
+          expiresAt: emailTokenExpiry('email_verification'),
+        });
+        const link = `${config.FRONTEND_ORIGIN}/?verifyToken=${raw}`;
+        const result = await sendEmail({ to: user.email, ...verificationEmail(user.name, link) });
+        verificationEmailSent = result.sent;
+        if (!result.sent) {
+          await EmailToken.deleteOne({
+            userId: user._id,
+            purpose: 'email_verification',
+            tokenHash: hashEmailToken(raw),
+          });
+        }
+      } catch (error) {
+        console.error('Signup verification email failed:', error instanceof Error ? error.message : 'Unknown error');
+      }
+    }
     res.status(201).json({
       user: publicUser(user),
-      notice: isEmailConfigured
-        ? 'Verify your email from the link we will send you.'
-        : 'Email verification is not set up yet — email sending is not configured on this server. Do not use this staging API for real accounts.',
+      verificationEmailSent,
+      notice: verificationEmailSent
+        ? 'Verify your email from the link we just sent you.'
+        : isEmailConfigured
+          ? 'Your account is created, but the verification email could not be sent. You can resend it from Profile & settings.'
+          : 'Email verification is not set up yet — email sending is not configured on this server. Your account is created but your email is unverified.',
     });
   } catch (error) { next(error); }
 });
@@ -172,16 +206,22 @@ authRouter.get('/verify-email', async (req, res, next) => {
   try {
     const token = typeof req.query.token === 'string' ? req.query.token : '';
     if (!token) { res.status(400).json({ error: 'Verification link is missing its token.' }); return; }
-    const record = await EmailToken.findOne({
-      purpose: 'email_verification',
-      tokenHash: hashEmailToken(token),
-      usedAt: null,
-      expiresAt: { $gt: new Date() },
-    });
+    // Atomic claim: findOneAndUpdate with usedAt: null in the filter
+    // marks the token used in the same operation that finds it, so
+    // two concurrent requests with the same link cannot both verify.
+    const now = new Date();
+    const record = await EmailToken.findOneAndUpdate(
+      {
+        purpose: 'email_verification',
+        tokenHash: hashEmailToken(token),
+        usedAt: null,
+        expiresAt: { $gt: now },
+      },
+      { $set: { usedAt: now } },
+      { new: true },
+    );
     if (!record) { res.status(400).json({ error: 'This verification link is invalid or has expired.' }); return; }
-    record.usedAt = new Date();
-    await record.save();
-    await User.updateOne({ _id: record.userId }, { $set: { emailVerifiedAt: new Date() } });
+    await User.updateOne({ _id: record.userId }, { $set: { emailVerifiedAt: now } });
     res.json({ verified: true });
   } catch (error) { next(error); }
 });
@@ -207,7 +247,15 @@ authRouter.post('/forgot-password', strictAuthLimiter, async (req, res, next) =>
         expiresAt: emailTokenExpiry('password_reset'),
       });
       const link = `${config.FRONTEND_ORIGIN}/?resetToken=${raw}`;
-      await sendEmail({ to: user.email, ...passwordResetEmail(user.name, link) });
+      // The send result must be checked: previously a failed SMTP
+      // send still answered { sent: true }, telling the user a reset
+      // email was on its way when it was not. The token stays valid
+      // for 1 hour, so a retry reuses it (a new request replaces it).
+      const result = await sendEmail({ to: user.email, ...passwordResetEmail(user.name, link) });
+      if (!result.sent) {
+        res.status(502).json({ error: 'Reset email could not be sent. Please try again later.' });
+        return;
+      }
     }
     // Same response whether or not the email exists — no account enumeration.
     res.json({ sent: true, message: 'If an account exists for this email, a reset link has been sent.' });
@@ -219,15 +267,21 @@ authRouter.post('/reset-password', strictAuthLimiter, async (req, res, next) => 
   try {
     const parsed = resetSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: 'Invalid reset details', details: parsed.error.flatten().fieldErrors }); return; }
-    const record = await EmailToken.findOne({
-      purpose: 'password_reset',
-      tokenHash: hashEmailToken(parsed.data.token),
-      usedAt: null,
-      expiresAt: { $gt: new Date() },
-    });
+    // Atomic claim (same race as verification): the token is marked
+    // used in the same operation that finds it, so it is single-use
+    // even under concurrent requests.
+    const now = new Date();
+    const record = await EmailToken.findOneAndUpdate(
+      {
+        purpose: 'password_reset',
+        tokenHash: hashEmailToken(parsed.data.token),
+        usedAt: null,
+        expiresAt: { $gt: now },
+      },
+      { $set: { usedAt: now } },
+      { new: true },
+    );
     if (!record) { res.status(400).json({ error: 'This reset link is invalid or has expired.' }); return; }
-    record.usedAt = new Date();
-    await record.save();
     await User.updateOne({ _id: record.userId }, { $set: { passwordHash: await hashPassword(parsed.data.password) } });
     // A reset invalidates every session, everywhere.
     await revokeAllSessions(String(record.userId));

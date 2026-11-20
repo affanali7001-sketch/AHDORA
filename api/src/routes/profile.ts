@@ -69,7 +69,66 @@ const profileSchema = z.object({
   quranDailyTarget: z.number().int().min(0).max(500).optional(),
 
   onboardingCompleted: z.boolean().optional(),
+  // Skip / return-to-complete (audit items 4 + 9). A user may save
+  // nothing yet and come back later: onboardingSkipped records that
+  // they chose "not now", onboardingStep (0–8) records how far they
+  // got so the form can resume there. Matching fields exist on the
+  // Profile model (onboardingSkipped, onboardingStep), so the flag
+  // persists and GET reports 'skipped' with the resume step.
+  onboardingSkipped: z.boolean().optional(),
+  onboardingStep: z.number().int().min(0).max(8).optional(),
 }).strict();
+
+export { profileSchema };
+
+/** Where the user stands in onboarding, derived from the saved profile. */
+export type OnboardingStatus = 'not-started' | 'in-progress' | 'skipped' | 'completed';
+
+export function onboardingStatus(profile: unknown): {
+  status: OnboardingStatus;
+  step: number;
+  completed: boolean;
+  skipped: boolean;
+} {
+  const p = (profile !== null && typeof profile === 'object' ? profile : {}) as {
+    onboardingCompleted?: unknown;
+    onboardingSkipped?: unknown;
+    onboardingStep?: unknown;
+  };
+  const completed = p.onboardingCompleted === true;
+  const skipped = p.onboardingSkipped === true;
+  const step = typeof p.onboardingStep === 'number' && Number.isInteger(p.onboardingStep)
+    ? Math.min(8, Math.max(0, p.onboardingStep))
+    : 0;
+  if (completed) return { status: 'completed', step: 8, completed: true, skipped: false };
+  if (skipped) return { status: 'skipped', step, completed: false, skipped: true };
+  if (step > 0) return { status: 'in-progress', step, completed: false, skipped: false };
+  return { status: 'not-started', step: 0, completed: false, skipped: false };
+}
+
+/**
+ * State transitions for an onboarding save (pure, tested):
+ * - completing clears any earlier skip and pins the step at 8;
+ * - skipping keeps the step (resume point) and marks incomplete;
+ * - any other save means the user is back in the form, so a previous
+ *   skip no longer applies.
+ */
+export function applyOnboardingTransitions<
+  T extends { onboardingCompleted?: boolean; onboardingSkipped?: boolean; onboardingStep?: number } & Record<string, unknown>,
+>(data: T): T {
+  const update = { ...data };
+  if (update.onboardingCompleted === true) {
+    update.onboardingSkipped = false;
+    update.onboardingStep = 8;
+    return update;
+  }
+  if (update.onboardingSkipped === true) {
+    update.onboardingCompleted = false;
+    return update;
+  }
+  update.onboardingSkipped = false;
+  return update;
+}
 
 profileRouter.get('/', async (req, res, next) => {
   try {
@@ -84,7 +143,9 @@ profileRouter.get('/', async (req, res, next) => {
       .select('-userId')
       .lean();
 
-    res.json({ profile });
+    // Partial progress is returned as saved, plus a summary so the
+    // frontend can offer "complete onboarding" when it was skipped.
+    res.json({ profile, onboarding: onboardingStatus(profile) });
   } catch (error) {
     next(error);
   }
@@ -114,10 +175,16 @@ profileRouter.post('/', async (req, res, next) => {
       return;
     }
 
+    // Partial saves already work (every field is optional, upserted):
+    // each onboarding step can be saved on its own, and GET returns
+    // whatever is saved so far. The transitions below keep the
+    // skipped/completed state consistent (see applyOnboardingTransitions).
+    const update = applyOnboardingTransitions(parsed.data);
+
     const profile = await Profile.findOneAndUpdate(
       { userId: req.authUser.id },
       {
-        $set: parsed.data,
+        $set: update,
         $setOnInsert: { userId: req.authUser.id },
       },
       {
@@ -133,6 +200,7 @@ profileRouter.post('/', async (req, res, next) => {
     res.json({
       message: 'Profile saved successfully',
       profile,
+      onboarding: onboardingStatus(profile),
     });
   } catch (error) {
     next(error);

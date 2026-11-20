@@ -1,10 +1,12 @@
 import { Profile } from '../models/Profile.js';
 import { SalahDay } from '../models/SalahDay.js';
+import { User } from '../models/User.js';
 import { createScheduledNotification } from './notifications.js';
 import { prayerMissed } from './notificationCopy.js';
 import {
   dateKeyInTimezone,
   nowMinutesInTimezone,
+  startOfDayUtc,
   toMinutes,
 } from './timezone.js';
 
@@ -53,9 +55,18 @@ export async function userTimezoneAndProfile(userId: string): Promise<{
   timezone: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   profile: any;
+  /** When the account was created — prayers due before this instant are never auto-missed. */
+  accountCreatedAt: Date | null;
 }> {
-  const profile = await Profile.findOne({ userId }).lean();
-  return { timezone: profile?.timezone?.trim() || 'Asia/Kolkata', profile };
+  const [profile, user] = await Promise.all([
+    Profile.findOne({ userId }).lean(),
+    User.findById(userId).select('createdAt').lean(),
+  ]);
+  return {
+    timezone: profile?.timezone?.trim() || 'Asia/Kolkata',
+    profile,
+    accountCreatedAt: user?.createdAt ?? null,
+  };
 }
 
 /** Deadlines the user set themselves in onboarding (per-prayer endTime). */
@@ -97,6 +108,74 @@ export function prayersPastDeadline(
   return past;
 }
 
+/**
+ * Pure account-creation filter (unit-tested): from the prayers that are
+ * past deadline, drop every prayer whose deadline instant for `dateKey`
+ * is at or before the account's creation instant. A brand-new account
+ * created in the evening must NOT wake up to Fajr/Dhuhr/Asr already
+ * marked missed — those prayers were due before the user even existed
+ * here, so they stay pending. Without an account creation time the
+ * list is unchanged (old-account behaviour).
+ *
+ * A prayer with no known deadline uses the end of its day as its
+ * deadline instant: it is only excluded when the whole day predates
+ * signup, never on the signup day itself.
+ */
+export function prayersPastDeadlineSinceSignup(
+  deadlines: Partial<Record<PrayerName, string>>,
+  nowMinutes: number | null,
+  isPastDate: boolean,
+  dateKey: string,
+  timezone: string,
+  accountCreatedAt: Date | null | undefined,
+): PrayerName[] {
+  const past = prayersPastDeadline(deadlines, nowMinutes, isPastDate);
+  if (!accountCreatedAt || Number.isNaN(accountCreatedAt.getTime())) return past;
+  const createdMs = accountCreatedAt.getTime();
+  const dayStartMs = startOfDayUtc(dateKey, timezone).getTime();
+  const dayEndMs = dayStartMs + 24 * 60 * 60 * 1000;
+  return past.filter((prayer) => {
+    const deadlineMinutes = deadlines[prayer] ? toMinutes(deadlines[prayer] as string) : null;
+    const deadlineMs = deadlineMinutes === null ? dayEndMs : dayStartMs + deadlineMinutes * 60 * 1000;
+    return deadlineMs > createdMs;
+  });
+}
+
+export type StatusCorrectionInput = {
+  status?: string;
+  wasMissed?: boolean;
+  missedAt?: Date | null;
+  autoMissed?: boolean;
+};
+
+/**
+ * Pure status transition (unit-tested): what a manual tracker correction
+ * stores. Miss history is preserved across corrections — a prayer that
+ * was missed and is later corrected to Qaza (or prayed) keeps wasMissed
+ * and the original missedAt, so the UI can still show "Qaza (was
+ * missed)". A manual "missed" is never an auto-miss.
+ */
+export function applyStatusCorrection(
+  prev: StatusCorrectionInput | null | undefined,
+  newStatus: 'prayed' | 'qaza' | 'missed',
+  now: Date,
+): PrayerEntry {
+  const wasMissedBefore = Boolean(prev?.wasMissed || prev?.status === 'missed');
+  return {
+    status: newStatus,
+    updatedAt: now,
+    wasMissed: newStatus === 'missed' ? true : wasMissedBefore,
+    missedAt:
+      newStatus === 'missed'
+        ? (prev?.missedAt ?? now)
+        : (prev?.missedAt ?? null),
+    autoMissed:
+      newStatus === 'missed'
+        ? false
+        : (prev?.autoMissed ?? false),
+  };
+}
+
 function markMissed(
   prayers: Record<PrayerName, PrayerEntry>,
   prayer: PrayerName,
@@ -119,7 +198,10 @@ function markMissed(
  * Recompute missed prayers for one day. `deadlines` is a map of prayer ->
  * "HH:mm" deadline for that day; when omitted, only the past-date rule
  * applies (plus profile endTimes for today, if `profile` is passed).
- * Returns the updated record, or null when nothing was marked.
+ * `accountCreatedAt` excludes prayers whose deadline instant is at or
+ * before account creation — a new account never starts with missed
+ * prayers from before signup. Returns the updated record, or null when
+ * nothing was marked.
  */
 export async function recomputeDay(
   userId: string,
@@ -129,6 +211,7 @@ export async function recomputeDay(
     deadlines?: Partial<Record<PrayerName, string>>;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     profile?: any;
+    accountCreatedAt?: Date | null;
   },
 ): Promise<SalahDayDoc | null> {
   const { timezone } = options;
@@ -139,12 +222,20 @@ export async function recomputeDay(
   const nowMinutes = nowMinutesInTimezone(timezone, now);
   const isPast = dateKey < today;
 
-  // Which prayers are past deadline + grace?
+  // Which prayers are past deadline + grace? Prayers due at or before
+  // account creation are excluded — they stay pending, never missed.
   const effective: Partial<Record<PrayerName, string>> = {
     ...profileDeadlines(options.profile ?? null),
     ...(options.deadlines ?? {}),
   };
-  const pastDeadline = prayersPastDeadline(effective, nowMinutes, isPast);
+  const pastDeadline = prayersPastDeadlineSinceSignup(
+    effective,
+    nowMinutes,
+    isPast,
+    dateKey,
+    timezone,
+    options.accountCreatedAt,
+  );
   if (pastDeadline.length === 0) return null;
 
   // Prayers newly flipped to missed in this call — each gets exactly
@@ -234,9 +325,10 @@ export async function markTodayMissed(
   dateKey: string,
   timezone: string,
   deadlines: Partial<Record<PrayerName, string>>,
+  accountCreatedAt?: Date | null,
 ): Promise<void> {
   try {
-    await recomputeDay(userId, dateKey, { timezone, deadlines });
+    await recomputeDay(userId, dateKey, { timezone, deadlines, accountCreatedAt });
   } catch {
     // Auto-marking must never break the prayer-times response.
   }
