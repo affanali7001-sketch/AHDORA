@@ -5,6 +5,13 @@ import { requireAuth } from '../middleware/auth.js';
 import { joinChallenge } from '../lib/challengeJoin.js';
 import { currentDayFor, userTimezone } from '../lib/challengeProgress.js';
 import { createNotification } from '../lib/notifications.js';
+import {
+  challengeInviteAccepted,
+  challengeInviteDeclined,
+  challengeInviteReceived,
+  friendRequestAccepted,
+  friendRequestReceived,
+} from '../lib/notificationCopy.js';
 import { emitToUser } from '../lib/realtime.js';
 import { dateKeyInTimezone } from '../lib/timezone.js';
 import { Challenge } from '../models/Challenge.js';
@@ -286,8 +293,7 @@ friendsRouter.post('/requests', async (req, res, next) => {
     const mePublic = await loadPublicUser(me);
     await createNotification(toUserId, {
       type: 'friend',
-      title: 'New friend request',
-      body: `${mePublic?.name ?? 'Someone'} sent you a friend request.`,
+      ...friendRequestReceived(mePublic?.name ?? 'Koi'),
       refType: 'FriendRequest',
       refId: String(request._id),
     });
@@ -330,8 +336,7 @@ friendsRouter.post('/requests/:id/accept', async (req, res, next) => {
     const senderId = String(request.fromUserId);
     await createNotification(senderId, {
       type: 'friend',
-      title: 'Friend request accepted',
-      body: `${mePublic?.name ?? 'Someone'} accepted your friend request.`,
+      ...friendRequestAccepted(mePublic?.name ?? 'Kisi ne'),
       refType: 'FriendRequest',
       refId: String(request._id),
     });
@@ -496,8 +501,7 @@ friendsRouter.post('/invites', async (req, res, next) => {
     const mePublic = await loadPublicUser(me);
     await createNotification(toUserId, {
       type: 'challenge',
-      title: 'Challenge invitation',
-      body: `${mePublic?.name ?? 'A friend'} invited you to join "${challenge.title}".`,
+      ...challengeInviteReceived(mePublic?.name ?? 'Kisi ne', challenge.title),
       refType: 'ChallengeInvitation',
       refId: String(invitation._id),
     });
@@ -559,8 +563,7 @@ friendsRouter.post('/invites/:id/accept', async (req, res, next) => {
     const inviterId = String(invite.fromUserId);
     await createNotification(inviterId, {
       type: 'challenge',
-      title: 'Challenge invitation accepted',
-      body: `${mePublic?.name ?? 'Your friend'} accepted your invitation to "${challenge.title}".`,
+      ...challengeInviteAccepted(mePublic?.name ?? 'Kisi ne', challenge.title),
       refType: 'ChallengeInvitation',
       refId: String(invite._id),
     });
@@ -601,8 +604,7 @@ friendsRouter.post('/invites/:id/decline', async (req, res, next) => {
     const inviterId = String(invite.fromUserId);
     await createNotification(inviterId, {
       type: 'challenge',
-      title: 'Challenge invitation declined',
-      body: `${mePublic?.name ?? 'Your friend'} declined your invitation to "${challenge?.title ?? 'a challenge'}".`,
+      ...challengeInviteDeclined(mePublic?.name ?? 'Kisi ne', challenge?.title ?? 'challenge'),
       refType: 'ChallengeInvitation',
       refId: String(invite._id),
     });

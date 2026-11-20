@@ -92,7 +92,7 @@ export default function NotificationSettingsPanel({
         </span>
         <div>
           <strong>Notification preferences</strong>
-          <span>Choose which in-app notifications you receive. Switched-off categories are never created.</span>
+          <span>Kaunsi notifications chahiye, ye chuno. Band ki hui category ki notification kabhi nahi banegi.</span>
         </div>
       </div>
       {error && <p className="form-error">{error}</p>}
@@ -116,8 +116,8 @@ export default function NotificationSettingsPanel({
       <div className="quiet-hours">
         <strong>Quiet hours</strong>
         <span>
-          Notifications created during quiet hours are still saved, but they are not pushed
-          live until you open the app. Times follow your profile timezone.
+          Quiet hours me bani notifications save ho jati hain, lekin app kholne tak live
+          nahi aati. Time tumhare profile timezone ke hisaab se hota hai.
         </span>
         <div className="quiet-hours-inputs">
           <label>

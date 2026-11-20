@@ -25,11 +25,11 @@ export type NotificationSettings = {
 };
 
 export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
-  prayer: 'Prayer',
-  study: 'Study',
-  sleep: 'Sleep',
-  challenge: 'Challenges',
-  friend: 'Friends',
+  prayer: 'Namaz',
+  study: 'Padhai',
+  sleep: 'Neend',
+  challenge: 'Challenge',
+  friend: 'Dost',
   system: 'System',
 };
 

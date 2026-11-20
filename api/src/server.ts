@@ -4,6 +4,7 @@ import { app } from './app.js';
 import { allowedOrigins, config } from './config.js';
 import { connectDatabase } from './lib/db.js';
 import { setIo } from './lib/realtime.js';
+import { startNotificationScheduler } from './lib/scheduler.js';
 import { resolveSessionUser } from './lib/session.js';
 
 /**
@@ -43,6 +44,11 @@ try {
     },
   });
   setIo(io);
+
+  // Time-based Hinglish notifications (prayer, tasks, sleep,
+  // challenges, onboarding): one in-process tick per minute, in-app +
+  // Socket.IO only. No web push. See lib/scheduler.ts.
+  startNotificationScheduler();
 
   io.use(async (socket, next) => {
     try {

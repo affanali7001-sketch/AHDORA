@@ -2,7 +2,13 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.js';
-import { createNotification } from '../lib/notifications.js';
+import { createNotification, createScheduledNotification } from '../lib/notifications.js';
+import {
+  badgeFirstFocus,
+  badgeStudyStreak7,
+  focusComplete,
+  streakMilestone,
+} from '../lib/notificationCopy.js';
 import { refreshChallengeProgress, userTimezone } from '../lib/challengeProgress.js';
 import { awardBadge, awardPoints, POINT_VALUES } from '../lib/points.js';
 import { addDays, dateKeyInTimezone, startOfDayUtc } from '../lib/timezone.js';
@@ -205,10 +211,18 @@ async function onTaskCompleted(userId: string, taskId: string, completedAt: Date
     if (streak >= 7 && (await awardBadge(userId, 'study-streak-7'))) {
       await createNotification(userId, {
         type: 'study',
-        title: 'Badge earned',
-        body: 'You earned the 7-Day Study Streak badge.',
+        ...badgeStudyStreak7(),
         refType: 'Badge',
         refId: 'study-streak-7',
+      });
+    }
+    if (streak === 14 || streak === 30) {
+      const timezone = await userTimezone(userId);
+      await createScheduledNotification(userId, {
+        type: 'study',
+        ...streakMilestone(streak),
+        refType: 'Streak',
+        refId: `study:streak:${streak}:${dateKeyInTimezone(timezone, completedAt)}`,
       });
     }
     const timezone = await userTimezone(userId);
@@ -231,11 +245,23 @@ async function onFocusSessionCompleted(
       'PomodoroSession',
       sessionId,
     );
+    // The session just finished for real — tell the user, with the
+    // actual minutes earned (never a made-up number).
+    const session = await PomodoroSession.findById(sessionId)
+      .select('focusMinutesEarned plannedMinutes mode')
+      .lean();
+    if (session?.mode === 'focus') {
+      await createNotification(userId, {
+        type: 'study',
+        ...focusComplete(session.focusMinutesEarned || session.plannedMinutes || 25),
+        refType: 'PomodoroSession',
+        refId: sessionId,
+      });
+    }
     if (await awardBadge(userId, 'first-focus')) {
       await createNotification(userId, {
         type: 'study',
-        title: 'Badge earned',
-        body: 'You earned the First Focus badge.',
+        ...badgeFirstFocus(),
         refType: 'Badge',
         refId: 'first-focus',
       });
@@ -244,10 +270,18 @@ async function onFocusSessionCompleted(
     if (streak >= 7 && (await awardBadge(userId, 'study-streak-7'))) {
       await createNotification(userId, {
         type: 'study',
-        title: 'Badge earned',
-        body: 'You earned the 7-Day Study Streak badge.',
+        ...badgeStudyStreak7(),
         refType: 'Badge',
         refId: 'study-streak-7',
+      });
+    }
+    if (streak === 14 || streak === 30) {
+      const timezone = await userTimezone(userId);
+      await createScheduledNotification(userId, {
+        type: 'study',
+        ...streakMilestone(streak),
+        refType: 'Streak',
+        refId: `study:streak:${streak}:${dateKeyInTimezone(timezone, completedAt)}`,
       });
     }
     const timezone = await userTimezone(userId);

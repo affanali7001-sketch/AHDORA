@@ -14,6 +14,11 @@ import {
   type BadgeId,
 } from './points.js';
 import { createNotification } from './notifications.js';
+import {
+  badgeChallenger,
+  challengeComplete,
+  challengeDayComplete,
+} from './notificationCopy.js';
 import { emitToUsers } from './realtime.js';
 import {
   addDays,
@@ -286,8 +291,7 @@ export async function completeDay(
   await emitProgressUpdate(participant, challenge, timezone, dateKey);
   await createNotification(String(participant.userId), {
     type: 'challenge',
-    title: 'Challenge day completed',
-    body: `Day ${dayNumber} of ${challenge.durationDays} done in "${challenge.title}". +10 points.`,
+    ...challengeDayComplete(challenge.title, dayNumber, challenge.durationDays),
     refType: 'Challenge',
     refId: String(challenge._id),
   });
@@ -323,16 +327,14 @@ export async function completeDay(
   );
   await createNotification(String(participant.userId), {
     type: 'challenge',
-    title: 'Challenge completed',
-    body: `You finished "${challenge.title}" — ${challenge.durationDays} days. +${bonus} bonus points${badge ? ' and a new badge' : ''}.`,
+    ...challengeComplete(challenge.title, challenge.durationDays, bonus, Boolean(badge)),
     refType: 'Challenge',
     refId: String(challenge._id),
   });
   if (badge) {
     await createNotification(String(participant.userId), {
       type: 'challenge',
-      title: 'Badge earned',
-      body: `You earned the ${badge === 'challenge-365' ? '365-Day Challenger' : '30-Day Challenger'} badge.`,
+      ...badgeChallenger(challenge.durationDays),
       refType: 'Badge',
       refId: badge,
     });

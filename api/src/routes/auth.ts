@@ -20,6 +20,8 @@ import { emailTokenExpiry, generateEmailToken, hashEmailToken } from '../lib/ema
 import { passwordResetEmail, sendEmail, verificationEmail } from '../lib/email.js';
 import { deleteAccount } from '../lib/deleteAccount.js';
 import { exportAccount } from '../lib/exportAccount.js';
+import { createNotification } from '../lib/notifications.js';
+import { welcome } from '../lib/notificationCopy.js';
 
 export const authRouter = Router();
 
@@ -100,6 +102,12 @@ authRouter.post('/signup', strictAuthLimiter, async (req, res, next) => {
     const passwordHash = await hashPassword(password);
     const user = await User.create({ name, email, passwordHash });
     await createSession(String(user._id), req, res);
+    await createNotification(String(user._id), {
+      type: 'system',
+      ...welcome(name),
+      refType: 'User',
+      refId: String(user._id),
+    });
     res.status(201).json({
       user: publicUser(user),
       notice: isEmailConfigured
