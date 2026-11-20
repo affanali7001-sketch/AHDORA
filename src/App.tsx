@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Onboarding from './components/Onboarding';
 import AuthBackdrop from './components/AuthBackdrop';
 import Typewriter from './components/Typewriter';
+import AhdoraMeaning from './components/AhdoraMeaning';
 import { emptyProfile, type UserProfile } from './types/profile';
 import { loadProfile, saveProfile } from './lib/profileApi';
 import { fetchPrayerTimes, type PrayerTimesResponse } from './lib/prayerApi';
@@ -661,7 +662,7 @@ function Welcome({ onContinue, onExplore }: { onContinue: () => void; onExplore:
         </div>
       </div>
 
-      <div className="welcome-hero" id="meaning">
+      <div className="welcome-hero">
         <div className="hero-copy">
           <div className="eyebrow hero-eyebrow"><span /> A CALMER WAY TO GROW</div>
           <h1>Your life.<br /><em>Your intention.</em><br />Your growth.</h1>
@@ -705,6 +706,8 @@ function Welcome({ onContinue, onExplore }: { onContinue: () => void; onExplore:
           </div>
         </div>
       </div>
+
+      <AhdoraMeaning />
 
       <div className="welcome-bottom" id="features">
         <div className="bottom-intro">
