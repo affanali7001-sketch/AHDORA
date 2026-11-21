@@ -54,6 +54,10 @@ async function request<T>(path: string): Promise<T> {
   }
   const data = (await response.json().catch(() => ({}))) as { error?: string } & T;
   if (!response.ok) {
+    // Phase 15: never surface the raw API 401 string in the UI.
+    if (response.status === 401 || data.error === 'Authentication required') {
+      throw new Error('Please log in to find mosques near you.');
+    }
     throw new Error(typeof data.error === 'string' ? data.error : 'Mosque search failed.');
   }
   return data as T;

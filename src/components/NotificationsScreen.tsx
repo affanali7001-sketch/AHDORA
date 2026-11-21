@@ -22,6 +22,8 @@ import {
   type NotificationType,
 } from '../lib/notificationsApi.js';
 import NotificationSettingsPanel from './NotificationSettings';
+import type { AppLanguage } from '../lib/language';
+import { stringsFor } from '../lib/strings';
 
 const TYPE_ICONS: Record<NotificationType, LucideIcon> = {
   prayer: MoonStar,
@@ -63,13 +65,16 @@ export default function NotificationsScreen({
   onNotify,
   guestMode,
   onChanged,
+  language,
 }: {
   onBack: () => void;
   onNotify: (message: string) => void;
   guestMode: boolean;
   /** Called after any mutation so the caller can refresh its own badge/list. */
   onChanged?: () => void;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -115,7 +120,7 @@ export default function NotificationsScreen({
       await markNotificationRead(item.id);
       changed();
     } catch {
-      onNotify('Could not mark as read.');
+      onNotify(s.notifications.markReadFailed);
       await refresh();
     }
   }
@@ -128,7 +133,7 @@ export default function NotificationsScreen({
       await deleteNotification(item.id);
       changed();
     } catch {
-      onNotify('Notification delete nahi ho payi.');
+      onNotify(s.notifications.deleteFailed);
       await refresh();
     }
   }
@@ -141,7 +146,7 @@ export default function NotificationsScreen({
       await refresh();
       changed();
     } catch {
-      onNotify('Could not mark all as read.');
+      onNotify(s.notifications.markAllFailed);
     } finally {
       setBusy(null);
     }
@@ -155,26 +160,26 @@ export default function NotificationsScreen({
       setNotifications([]);
       setUnreadCount(0);
       setConfirmClear(false);
-      onNotify('Saari notifications hata di gayi.');
+      onNotify(s.notifications.cleared);
       changed();
     } catch {
-      onNotify('Clear nahi ho paya. Dobara try karo.');
+      onNotify(s.notifications.clearFailed);
     } finally {
       setBusy(null);
     }
   }
 
   const subtitle =
-    unreadCount > 0 ? `${unreadCount} nayi · sab Hinglish me` : 'Koi nayi nahi · sab Hinglish me';
+    unreadCount > 0 ? s.notifications.subtitleNew(unreadCount) : s.notifications.subtitleNone;
 
   return (
     <section className="notifications-screen">
       <div className="apphead">
-        <button type="button" className="aback" onClick={onBack} aria-label="Wapas jao">
+        <button type="button" className="aback" onClick={onBack} aria-label={s.common.back}>
           <ChevronLeft size={20} />
         </button>
         <div>
-          <h4>Notifications</h4>
+          <h4>{s.notifications.title}</h4>
           <div className="asub">{subtitle}</div>
         </div>
       </div>
@@ -183,29 +188,28 @@ export default function NotificationsScreen({
         <div className="notifications-actions">
           {unreadCount > 0 && (
             <button type="button" disabled={busy !== null} onClick={markAllRead}>
-              {busy === 'read-all' ? 'Marking…' : 'Mark all read'}
+              {busy === 'read-all' ? s.notifications.marking : s.notifications.markAllRead}
             </button>
           )}
           {notifications.length > 0 &&
             (confirmClear ? (
               <button type="button" disabled={busy === 'clear-all'} onClick={clearAll}>
-                {busy === 'clear-all' ? 'Clearing…' : 'Pakka saaf karein?'}
+                {busy === 'clear-all' ? s.notifications.clearing : s.notifications.confirmClear}
               </button>
             ) : (
               <button type="button" disabled={busy !== null} onClick={() => setConfirmClear(true)}>
-                Clear all
+                {s.notifications.clearAll}
               </button>
             ))}
         </div>
 
         {guestMode ? (
-          <p className="onboarding-help">Notifications dekhne ke liye sign in karo.</p>
+          <p className="onboarding-help">{s.notifications.guestText}</p>
         ) : loading ? (
-          <p className="onboarding-help">Notifications load ho rahi hain…</p>
+          <p className="onboarding-help">{s.notifications.loading}</p>
         ) : notifications.length === 0 ? (
           <p className="onboarding-help">
-            Abhi koi notification nahi hai. Namaz, padhai, neend aur challenge ki notifications
-            yahan dikhengi.
+            {s.notifications.empty}
           </p>
         ) : (
           <div>
@@ -223,7 +227,7 @@ export default function NotificationsScreen({
                     type="button"
                     className="nrow-body"
                     onClick={() => markRead(item)}
-                    aria-label={`${item.title} — padha hua mark karo`}
+                    aria-label={s.notifications.markReadAria(item.title)}
                   >
                     <b>{item.title}</b>
                     <span className="mut">{item.body}</span>
@@ -232,8 +236,8 @@ export default function NotificationsScreen({
                   <button
                     type="button"
                     className="nx"
-                    aria-label={`"${item.title}" notification hatao`}
-                    title="Hatao"
+                    aria-label={s.notifications.removeAria(item.title)}
+                    title={s.notifications.removeTitle}
                     onClick={() => dismiss(item)}
                   >
                     <X size={15} />
@@ -246,8 +250,8 @@ export default function NotificationsScreen({
       </div>
 
       <div className="acard">
-        <h5>Kis cheez ki notification chahiye?</h5>
-        <NotificationSettingsPanel onNotify={onNotify} />
+        <h5>{s.notifications.settingsTitle}</h5>
+        <NotificationSettingsPanel onNotify={onNotify} language={language} />
       </div>
     </section>
   );

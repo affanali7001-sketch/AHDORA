@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../middleware/auth.js';
+import { optionalAuth, requireAuth } from '../middleware/auth.js';
 import { Profile } from '../models/Profile.js';
 import { addDays, dateKeyInTimezone } from '../lib/timezone.js';
 
@@ -35,7 +35,15 @@ import { addDays, dateKeyInTimezone } from '../lib/timezone.js';
 
 export const hijriRouter = Router();
 
-hijriRouter.use(requireAuth);
+// Phase 15 (item 7): NO router-level requireAuth. /today and /month
+// are PUBLIC calendar info — like /api/duas and /api/quran reading —
+// so a guest, or a user whose session lives in another browser,
+// still sees the Hijri calendar instead of "Authentication
+// required". Those two routes use optionalAuth (a valid session
+// cookie still applies the user's own timezone and moon-sighting
+// offset). GET/PUT /settings stay behind requireAuth per-route:
+// the offset is per-user data. The /api/hijri mount in app.ts is
+// likewise public; do not re-add requireAuth to either place.
 
 const SOURCE = 'Aladhan (Umm al-Qura calendar)';
 const CONVENTION =
@@ -176,13 +184,9 @@ async function getProfile(req: { authUser?: { id: string } }) {
   return Profile.findOne({ userId: req.authUser.id }).lean();
 }
 
-/** GET /api/hijri/today — today's Hijri + Gregorian date, with adjustment. */
-hijriRouter.get('/today', async (req, res, next) => {
+/** GET /api/hijri/today — today's Hijri + Gregorian date, with adjustment. PUBLIC (optionalAuth): a guest sees the default calendar; a signed-in user sees it with their own timezone and offset. */
+hijriRouter.get('/today', optionalAuth, async (req, res, next) => {
   try {
-    if (!req.authUser) {
-      res.status(401).json({ error: 'Authentication required' });
-      return;
-    }
     const profile = await getProfile(req);
     const timezone = profile?.timezone?.trim() || 'Asia/Kolkata';
     const offset = profile?.hijriDayOffset ?? 0;
@@ -215,13 +219,10 @@ hijriRouter.get('/today', async (req, res, next) => {
  * GET /api/hijri/month?year=2026&month=11 — Gregorian month grid
  * with the Hijri date (adjusted) and holidays for every day.
  * Defaults to the current month in the user's timezone.
+ * PUBLIC (optionalAuth) — same reason as /today.
  */
-hijriRouter.get('/month', async (req, res, next) => {
+hijriRouter.get('/month', optionalAuth, async (req, res, next) => {
   try {
-    if (!req.authUser) {
-      res.status(401).json({ error: 'Authentication required' });
-      return;
-    }
     const profile = await getProfile(req);
     const timezone = profile?.timezone?.trim() || 'Asia/Kolkata';
     const offset = profile?.hijriDayOffset ?? 0;
@@ -277,8 +278,8 @@ hijriRouter.get('/month', async (req, res, next) => {
   }
 });
 
-/** GET /api/hijri/settings — the user's Hijri day adjustment. */
-hijriRouter.get('/settings', async (req, res, next) => {
+/** GET /api/hijri/settings — the user's Hijri day adjustment. AUTHED (per-user data). */
+hijriRouter.get('/settings', requireAuth, async (req, res, next) => {
   try {
     if (!req.authUser) {
       res.status(401).json({ error: 'Authentication required' });
@@ -295,8 +296,8 @@ const settingsSchema = z.object({
   hijriDayOffset: z.number().int().min(-2).max(2),
 });
 
-/** PUT /api/hijri/settings — set the Hijri day adjustment (-2..+2). */
-hijriRouter.put('/settings', async (req, res, next) => {
+/** PUT /api/hijri/settings — set the Hijri day adjustment (-2..+2). AUTHED (per-user data). */
+hijriRouter.put('/settings', requireAuth, async (req, res, next) => {
   try {
     if (!req.authUser) {
       res.status(401).json({ error: 'Authentication required' });

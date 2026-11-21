@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { ChevronLeft, RotateCcw } from 'lucide-react';
 import './Tasbeeh.css';
+import type { AppLanguage } from '../lib/language';
+import { stringsFor } from '../lib/strings';
 import {
   TASBEEH_TARGET,
   loadTasbeeh,
@@ -34,7 +36,8 @@ function vibrateOnRoundComplete() {
  * total. Counts live in localStorage only, keyed by userId + today —
  * per-device by design, never fed into Dashboard/Analytics.
  */
-export default function Tasbeeh({ userId, onBack }: { userId: string; onBack: () => void }) {
+export default function Tasbeeh({ userId, onBack, language }: { userId: string; onBack: () => void; language: AppLanguage }) {
+  const s = stringsFor(language);
   const [active, setActive] = useState<DhikrId>('subhanallah');
   const [state, setState] = useState<TasbeehState>(() => loadTasbeeh(userId));
 
@@ -77,16 +80,16 @@ export default function Tasbeeh({ userId, onBack }: { userId: string; onBack: ()
   return (
     <section className="tasbeeh-screen">
       <div className="apphead">
-        <button type="button" className="aback" onClick={onBack} aria-label="Wapas jao">
+        <button type="button" className="aback" onClick={onBack} aria-label={s.common.back}>
           <ChevronLeft size={20} />
         </button>
         <div>
-          <h4>Tasbeeh</h4>
-          <div className="asub">Tap karo, ginti badhegi</div>
+          <h4>{s.tasbeeh.title}</h4>
+          <div className="asub">{s.tasbeeh.sub}</div>
         </div>
         <div className="aright">
           <button type="button" className="sbtn gh" onClick={resetRound}>
-            <RotateCcw size={13} /> Reset
+            <RotateCcw size={13} /> {s.tasbeeh.reset}
           </button>
         </div>
       </div>
@@ -95,7 +98,7 @@ export default function Tasbeeh({ userId, onBack }: { userId: string; onBack: ()
         <div className="arab">{current.arabic}</div>
         <div className="tasbeeh-name">{current.label}</div>
         <div className="mut">
-          Target: {TASBEEH_TARGET} · Aaj kul: {state.dailyTotal}
+          {s.tasbeeh.targetLine(TASBEEH_TARGET, state.dailyTotal)}
         </div>
       </div>
 
@@ -103,12 +106,12 @@ export default function Tasbeeh({ userId, onBack }: { userId: string; onBack: ()
         type="button"
         className="tasbcircle"
         onClick={tap}
-        aria-label={`${current.label} ki ginti badhao`}
+        aria-label={s.tasbeeh.tapAria(current.label)}
       >
         <span>
           <b>{count}</b>
           <span className="tasbcircle-of">/ {TASBEEH_TARGET}</span>
-          <span className="tasbcircle-hint">TAP KARO</span>
+          <span className="tasbcircle-hint">{s.tasbeeh.tapHint}</span>
         </span>
       </button>
 
@@ -128,9 +131,7 @@ export default function Tasbeeh({ userId, onBack }: { userId: string; onBack: ()
 
       <div className="acard">
         <p className="mut">
-          Ginti {TASBEEH_TARGET} par vibration ke saath ek round poora hoga aur ginti phir 0 se
-          shuru hogi. Reset sirf is round ki ginti zero karta hai — aaj ka kul total waisa hi
-          rehta hai. Aaj ki ginti isi device par save hoti hai.
+          {s.tasbeeh.note(TASBEEH_TARGET)}
         </p>
       </div>
     </section>

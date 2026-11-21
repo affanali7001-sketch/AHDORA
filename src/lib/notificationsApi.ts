@@ -24,15 +24,6 @@ export type NotificationSettings = {
   quietHoursEnd: string;
 };
 
-export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
-  prayer: 'Namaz',
-  study: 'Padhai',
-  sleep: 'Neend',
-  challenge: 'Challenge',
-  friend: 'Dost',
-  system: 'System',
-};
-
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await apiFetch(path, {
     ...options,

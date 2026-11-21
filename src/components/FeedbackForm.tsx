@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { X } from 'lucide-react';
 import { apiFetch } from '../lib/http.js';
+import type { AppLanguage } from '../lib/language';
+import { stringsFor } from '../lib/strings';
 
 /**
  * Feedback & complaint form (Profile → Help & support, footer).
@@ -25,7 +27,7 @@ async function submitFeedback(input: {
   type: FeedbackType;
   subject: string;
   message: string;
-}): Promise<void> {
+}, fallback: string): Promise<void> {
   const response = await apiFetch('/api/feedback', {
     method: 'POST',
     credentials: 'include',
@@ -37,7 +39,7 @@ async function submitFeedback(input: {
     throw new Error(
       typeof data.error === 'string'
         ? data.error
-        : 'Feedback save nahi ho paya. Dobara try karo.',
+        : fallback,
     );
   }
 }
@@ -45,10 +47,13 @@ async function submitFeedback(input: {
 export default function FeedbackForm({
   onClose,
   onNotify,
+  language,
 }: {
   onClose: () => void;
   onNotify: (message: string) => void;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const [type, setType] = useState<FeedbackType>('feedback');
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
@@ -60,25 +65,21 @@ export default function FeedbackForm({
     e.preventDefault();
     if (busy) return;
     if (!subject.trim() || !message.trim()) {
-      setError('Subject aur message dono likhna zaroori hai.');
+      setError(s.feedback.bothRequired);
       return;
     }
     if (subject.trim().length < 3 || message.trim().length < 3) {
-      setError('Subject aur message kam se kam 3 characters ke hone chahiye.');
+      setError(s.feedback.tooShort);
       return;
     }
     setError('');
     setBusy(true);
     try {
-      await submitFeedback({ type, subject: subject.trim(), message: message.trim() });
+      await submitFeedback({ type, subject: subject.trim(), message: message.trim() }, s.feedback.saveFailedRetry);
       setSent(true);
-      onNotify(
-        type === 'complaint'
-          ? 'Shukriya! Aapki shikayat mil gayi, hum jald dekhenge.'
-          : 'Shukriya! Aapka feedback mil gaya.',
-      );
+      onNotify(type === 'complaint' ? s.feedback.complaintThanks : s.feedback.feedbackThanks);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Feedback save nahi ho paya.');
+      setError(err instanceof Error ? err.message : s.feedback.saveFailed);
     } finally {
       setBusy(false);
     }
@@ -89,66 +90,64 @@ export default function FeedbackForm({
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <div>
-            <span className="eyebrow">HELP & SUPPORT</span>
-            <h3>Feedback ya shikayat bhejo</h3>
+            <span className="eyebrow">{s.feedback.eyebrow}</span>
+            <h3>{s.feedback.title}</h3>
           </div>
-          <button className="icon-button" onClick={onClose} aria-label="Close feedback form">
+          <button className="icon-button" onClick={onClose} aria-label={s.feedback.closeAria}>
             <X size={18} />
           </button>
         </div>
         {sent ? (
           <>
             <p className="onboarding-help" style={{ fontSize: 14, lineHeight: 1.6 }}>
-              {type === 'complaint'
-                ? 'Shukriya! Aapki shikayat mil gayi, hum jald dekhenge.'
-                : 'Shukriya! Aapka feedback mil gaya.'}
+              {type === 'complaint' ? s.feedback.complaintThanks : s.feedback.feedbackThanks}
             </p>
             <button className="primary-button full-width" type="button" onClick={onClose}>
-              Theek hai
+              {s.feedback.okay}
             </button>
           </>
         ) : (
           <form onSubmit={handleSubmit}>
-            <label className="field-label">Kis baare me hai?</label>
+            <label className="field-label">{s.feedback.aboutLabel}</label>
             <div className="timer-presets" style={{ marginBottom: 12 }}>
               <button
                 type="button"
                 className={type === 'feedback' ? 'preset-selected' : ''}
                 onClick={() => setType('feedback')}
               >
-                Feedback
+                {s.feedback.feedbackType}
               </button>
               <button
                 type="button"
                 className={type === 'complaint' ? 'preset-selected' : ''}
                 onClick={() => setType('complaint')}
               >
-                Shikayat
+                {s.feedback.complaintType}
               </button>
             </div>
-            <label className="field-label">Subject</label>
+            <label className="field-label">{s.feedback.subject}</label>
             <input
               className="form-input"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              placeholder={type === 'complaint' ? 'e.g. Namaz ka time galat dikh raha hai' : 'e.g. App me ye feature chahiye'}
+              placeholder={type === 'complaint' ? s.feedback.subjectComplaintPlaceholder : s.feedback.subjectFeedbackPlaceholder}
               maxLength={140}
             />
-            <label className="field-label">Message</label>
+            <label className="field-label">{s.feedback.message}</label>
             <textarea
               className="form-input form-textarea"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              placeholder="Detail me likho — kya hua, kab hua, kya expect kar rahe the?"
+              placeholder={s.feedback.messagePlaceholder}
               rows={5}
               maxLength={2000}
             />
             {error && <p style={{ color: 'var(--red)', fontSize: 13, marginTop: 12 }}>{error}</p>}
             <button className="primary-button full-width" type="submit" disabled={busy} style={{ marginTop: 12 }}>
-              {busy ? 'Bhej rahe hain…' : 'Bhejo'}
+              {busy ? s.feedback.sending : s.feedback.send}
             </button>
             <p className="modal-note">
-              Ye sirf aapke account se juda hoga — koi aur user ise nahi dekh sakta.
+              {s.feedback.privateNote}
             </p>
           </form>
         )}

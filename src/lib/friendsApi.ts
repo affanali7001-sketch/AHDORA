@@ -94,6 +94,12 @@ export async function searchUsers(query: string): Promise<PublicUser[]> {
   return result.users ?? [];
 }
 
+export async function fetchDiscoverUsers(limit?: number): Promise<PublicUser[]> {
+  const query = typeof limit === 'number' ? `?limit=${limit}` : '';
+  const result = await request<{ users: PublicUser[] }>(`/api/friends/discover${query}`);
+  return result.users ?? [];
+}
+
 export async function fetchFriends(): Promise<Friend[]> {
   const result = await request<{ friends: Friend[] }>('/api/friends');
   return result.friends ?? [];

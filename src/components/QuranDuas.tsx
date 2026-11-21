@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { BookOpen, ChevronDown, ChevronUp, Search } from 'lucide-react';
 import { fetchDuas, type Dua, type DuaTopic } from '../lib/quranApi';
+import type { AppLanguage } from '../lib/language';
+import { stringsFor } from '../lib/strings';
 
 /**
  * The 4 verified Qur'anic duas (Hissa 1). English lines are taken
@@ -85,9 +87,12 @@ const duas = [
  */
 export default function QuranDuas({
   onOpenSurah,
+  language,
 }: {
   onOpenSurah?: (surahNumber: number) => void;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const [dailyDuas, setDailyDuas] = useState<Dua[]>([]);
   const [duaTopics, setDuaTopics] = useState<{ id: DuaTopic; label: string; hinglish: string }[]>([]);
   const [duaSource, setDuaSource] = useState('');
@@ -107,7 +112,7 @@ export default function QuranDuas({
       setDuaSource(result.source);
       setExpandedDua(result.duas[0]?.id ?? null);
     } catch (err) {
-      setDuaError(err instanceof Error ? err.message : 'Duas could not be loaded.');
+      setDuaError(err instanceof Error ? err.message : s.duas.loadFailed);
     } finally {
       setDuaLoading(false);
     }
@@ -140,10 +145,10 @@ export default function QuranDuas({
   // preview category; anything else (subah / roz-marra / wuzu)
   // falls under "Rozana duas" so no verified dua is ever hidden.
   const categoryGroups = [
-    { id: 'anxiety', title: 'Dua for Anxiety', sub: 'Pareshani aur gham ke liye' },
-    { id: 'overthinking', title: 'Dua for Overthinking', sub: 'Zyada sochna, dil ki tangi aur waswase' },
-    { id: 'sleep', title: 'Dua for Sleep', sub: 'Sone ke waqt ki duaein' },
-    { id: 'rozana', title: 'Rozana duas', sub: 'Subah, roz-marra aur wuzu ki duaein' },
+    { id: 'anxiety', title: s.duas.groupAnxiety, sub: s.duas.groupAnxietySub },
+    { id: 'overthinking', title: s.duas.groupOverthinking, sub: s.duas.groupOverthinkingSub },
+    { id: 'sleep', title: s.duas.groupSleep, sub: s.duas.groupSleepSub },
+    { id: 'rozana', title: s.duas.groupDaily, sub: s.duas.groupDailySub },
   ] as const;
 
   function groupOf(dua: Dua): string {
@@ -164,12 +169,12 @@ export default function QuranDuas({
   return (
     <section className="sc-duas">
       <div className="sc-head">
-        <span className="eyebrow">QUR'AN ONLY · VERIFIED REFERENCES</span>
-        <h3>Qur'anic duas &amp; guidance</h3>
-        <p>Arabic text, Hinglish pronunciation, meaning and exact references.</p>
+        <span className="eyebrow">{s.duas.eyebrow}</span>
+        <h3>{s.duas.title}</h3>
+        <p>{s.duas.intro}</p>
       </div>
 
-      <div className="partlab">HISSA 1 · QURAN SE LI HUI DUAEIN</div>
+      <div className="partlab">{s.duas.part1}</div>
 
       {duas.map((dua) => (
         <article className="acard" key={dua.reference}>
@@ -189,7 +194,7 @@ export default function QuranDuas({
         </article>
       ))}
 
-      <div className="partlab">HISSA 2 · HAALAT KE HISAB SE DUAEIN — CATEGORIES</div>
+      <div className="partlab">{s.duas.part2}</div>
       {duaSource && <p className="quran-source-line">{duaSource}</p>}
 
       <div className="sc-toolbar">
@@ -201,7 +206,7 @@ export default function QuranDuas({
             className={duaTopic === '' ? 'sc-tab selected' : 'sc-tab'}
             onClick={() => pickTopic('')}
           >
-            Sabhi
+            {s.duas.all}
           </button>
           {duaTopics.map((topic) => (
             <button
@@ -221,24 +226,24 @@ export default function QuranDuas({
           <input
             value={duaQuery}
             onChange={(event) => setDuaQuery(event.target.value)}
-            placeholder="Dua khojein — naam, waqt ya source…"
-            aria-label="Search duas"
+            placeholder={s.duas.searchPlaceholder}
+            aria-label={s.duas.searchAria}
           />
         </label>
       </div>
 
       {duaLoading ? (
-        <p className="empty-note">Duas load ho rahi hain…</p>
+        <p className="empty-note">{s.duas.loading}</p>
       ) : duaError ? (
         <div>
           <p className="form-error">{duaError}</p>
           <button className="outline-button" onClick={() => loadDuas(duaTopic)}>
-            Dobara koshish karein · Retry
+            {s.duas.retry}
           </button>
         </div>
       ) : visibleDuas.length === 0 ? (
         <p className="empty-note">
-          {duaQuery.trim() ? 'Is khoj se koi dua nahi mili.' : 'Is topic mein abhi koi dua nahi hai.'}
+          {duaQuery.trim() ? '{s.duas.noSearchMatch}' : '{s.duas.noTopicDuas}'}
         </p>
       ) : (
         groupedDuas.map((group) => (
@@ -264,33 +269,33 @@ export default function QuranDuas({
                 {expandedDua === dua.id && (
                   <div className="dua-content">
                     <div className="dua-reference">
-                      <span>Source · Hawala</span>
+                      <span>{s.duas.sourceLabel}</span>
                       <strong>{dua.source}</strong>
-                      <small>{dua.kind === 'dua' ? 'Dua · Hadith se' : 'Qur’ani amal · Hadith se'}</small>
+                      <small>{dua.kind === 'dua' ? s.duas.duaFromHadith : s.duas.quranPractice}</small>
                     </div>
 
                     {dua.kind === 'dua' ? (
                       <>
-                        <h4>Arabic</h4>
+                        <h4>{s.duas.arabic}</h4>
                         <p className="arab" dir="rtl" lang="ar">{dua.arabic}</p>
 
-                        <h4>Hinglish pronunciation</h4>
+                        <h4>{s.duas.hinglishPronunciation}</h4>
                         <p className="dua-transliteration">{dua.transliteration}</p>
 
-                        <h4>Meaning in Hinglish</h4>
+                        <h4>{s.duas.meaningHinglish}</h4>
                         <p className="dua-meaning">{dua.meaning}</p>
                       </>
                     ) : (
                       <>
-                        <h4>Kya padhein</h4>
+                        <h4>{s.duas.whatToRead}</h4>
                         <p className="dua-meaning">{dua.practice}</p>
                         <div className="dua-reference">
-                          <span>Qur’an reference</span>
+                          <span>{s.duas.quranReference}</span>
                           <strong>
                             Surah {dua.quranSurahName} ·{' '}
                             {dua.quranAyahStart === dua.quranAyahEnd
-                              ? `Ayah ${dua.quranAyahStart}`
-                              : `Ayah ${dua.quranAyahStart}–${dua.quranAyahEnd}`}
+                              ? s.duas.ayahSingle(dua.quranAyahStart)
+                              : s.duas.ayahRange(dua.quranAyahStart, dua.quranAyahEnd)}
                           </strong>
                         </div>
                         {onOpenSurah ? (
@@ -298,11 +303,11 @@ export default function QuranDuas({
                             className="outline-button"
                             onClick={() => onOpenSurah(dua.quranSurah)}
                           >
-                            Qur’an browser mein padhein · Surah {dua.quranSurah}
+                            {s.duas.readInQuran(dua.quranSurah)}
                           </button>
                         ) : (
                           <p className="empty-note">
-                            Poori ayat Qur’an browser mein Surah {dua.quranSurah} mein padhein.
+                            {s.duas.readFullAyah(dua.quranSurah)}
                           </p>
                         )}
                       </>
@@ -311,7 +316,7 @@ export default function QuranDuas({
                     {dua.note && <p className="dua-meaning">{dua.note}</p>}
                     <div className="chiprow">
                       <span className="mchip">{dua.source}</span>
-                      <span className="mchip">{dua.kind === 'dua' ? 'Hadith' : 'Qur’an · Hadith'}</span>
+                      <span className="mchip">{dua.kind === 'dua' ? s.duas.hadithChip : s.duas.quranHadithChip}</span>
                     </div>
                   </div>
                 )}
@@ -323,7 +328,7 @@ export default function QuranDuas({
 
       <div className="acard">
         <p className="mut">
-          Har dua ke neeche uska pakka source dikhta hai — Quran ki dua par Surah:Ayah, Hadith ki dua par kitab aur number. Pareshani wali duaein mashhoor sahih kitabon (Bukhari, Muslim, Abu Dawud, Musnad Ahmad) se li gayi hain — koi dua apni taraf se nahi banayi gayi, aur scholarly review hone tak app koi &ldquo;reviewed&rdquo; dawa nahi karega.
+          {s.duas.footer}
         </p>
       </div>
       <p className="dua-disclaimer">
@@ -332,20 +337,15 @@ export default function QuranDuas({
         require scholarly review before public release.
       </p>
       <p className="dua-disclaimer">
-        Rozana duas ke saath unka exact hadith source diya gaya hai — koi dua apni taraf se
-        nahi banayi gayi, aur kisi dua par &ldquo;reviewed&rdquo; ka daawa nahi kiya gaya. Qur’ani amal
-        wale card mein ayat ka poora text copy nahi kiya gaya; woh verified Qur’an browser
-        mein padhein.
+        {s.duas.disclaimerDaily}
       </p>
       <p className="dua-disclaimer">
-        Neend na aane par ek mashhoor dua ki sanad kamzor maani jati hai, isliye wo yahan
-        jaan-bujh kar nahi rakhi gayi — sirf wahi duaein hain jinka hawala pakka hai.
+        {s.duas.disclaimerWeak}
       </p>
       <p className="dua-disclaimer" style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
         <BookOpen size={15} style={{ flex: 'none', marginTop: '2px' }} />
         <span>
-          Dua aur Quran bilkul alag-alag hisse hain — koi confusion nahi. Quran ki aayaton
-          ka tarjuma Hinglish aur English dono mein hai; baaki duaein sirf Hinglish mein.
+          {s.duas.disclaimerSeparate}
         </span>
       </p>
     </section>

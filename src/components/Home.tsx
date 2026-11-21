@@ -16,9 +16,13 @@ import type { Page } from '../App';
 import { countdownTo, formatTime12h } from '../App';
 import type { PrayerTimesResponse } from '../lib/prayerApi';
 import type { UserProfile } from '../types/profile';
+import type { AppLanguage } from '../lib/language';
+import { stringsFor } from '../lib/strings';
 
 /**
- * Phase 14 — Home screen (preview #1). The post-login landing.
+ * Phase 14 — Home screen (preview #1). The tile-grid home, reached
+ * from the pill nav Home button. The post-login landing is the
+ * Dashboard (preview #4, Phase 15); this grid is the second stop.
  * Dark teal gradient, location row, date card (tap → Dashboard),
  * next-prayer banner, 10-tile feature grid, Ar-Ra'd 13:28 ayah card.
  * All data is live: prayer times from fetchPrayerTimes, location from
@@ -31,28 +35,31 @@ export function NextPrayerBanner({
   prayerStatus,
   prayerError,
   now,
+  language,
 }: {
   prayerTimes: PrayerTimesResponse | null;
   prayerStatus: 'idle' | 'loading' | 'loaded' | 'error' | 'no-city';
   prayerError: string;
   now: Date;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const nextPrayer = prayerTimes?.nextPrayer ?? null;
-  const countdown = nextPrayer ? countdownTo(nextPrayer.time, now) : '';
+  const countdown = nextPrayer ? countdownTo(nextPrayer.time, now, language) : '';
   return (
     <div className="home-nextp">
       <div>
-        <small>AGLI NAMAZ</small>
+        <small>{s.home.nextPrayer}</small>
         {prayerStatus === 'loading' || prayerStatus === 'idle' ? (
-          <b>Prayer times load ho rahe hain…</b>
+          <b>{s.home.nextPrayerLoading}</b>
         ) : prayerStatus === 'no-city' ? (
-          <b>Apna sheher Profile me bharo</b>
+          <b>{s.home.nextPrayerNoCity}</b>
         ) : prayerStatus === 'error' || !prayerTimes ? (
-          <b>{prayerError || 'Prayer times load nahi ho paye.'}</b>
+          <b>{prayerError || s.home.nextPrayerError}</b>
         ) : nextPrayer ? (
           <b>{nextPrayer.name} — {formatTime12h(nextPrayer.time)}</b>
         ) : (
-          <b>Aaj ki saari namazein guzar gayin</b>
+          <b>{s.home.nextPrayerAllDone}</b>
         )}
       </div>
       {nextPrayer && countdown ? <div className="home-nextp-cd">{countdown}</div> : null}
@@ -92,6 +99,7 @@ export default function Home({
   guestMode,
   onNavigate,
   onOpenGuidance,
+  language,
 }: {
   profile: UserProfile;
   prayerTimes: PrayerTimesResponse | null;
@@ -100,7 +108,9 @@ export default function Home({
   guestMode: boolean;
   onNavigate: (page: Page) => void;
   onOpenGuidance: (tab: 'quran' | 'duas' | 'hijri' | 'mosques') => void;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 30000);
@@ -131,35 +141,35 @@ export default function Home({
     icon: ReactNode;
     onClick: () => void;
   }[] = [
-    { label: 'Quran', icon: <BookOpen size={25} strokeWidth={1.8} />, onClick: () => onOpenGuidance('quran') },
-    { label: 'Duas', icon: <Heart size={25} strokeWidth={1.8} />, onClick: () => onOpenGuidance('duas') },
-    { label: 'Study', icon: <GraduationCap size={25} strokeWidth={1.8} />, onClick: () => onNavigate('study') },
-    { label: 'Salah', icon: <Moon size={25} strokeWidth={1.8} />, onClick: () => onNavigate('deen') },
-    { label: 'Tasbeeh', icon: <TasbeehIcon />, onClick: () => onNavigate('tasbeeh') },
-    { label: 'Prayer Time', icon: <Clock3 size={25} strokeWidth={1.8} />, onClick: () => onNavigate('deen') },
-    { label: 'Mosque', icon: <MosqueIcon />, onClick: () => onOpenGuidance('mosques') },
-    { label: 'Challenges', icon: <Trophy size={25} strokeWidth={1.8} />, onClick: () => onNavigate('challenges') },
-    { label: 'Focus', icon: <Target size={25} strokeWidth={1.8} />, onClick: () => onNavigate('focus') },
-    { label: 'Sleep', icon: <BedDouble size={25} strokeWidth={1.8} />, onClick: () => onNavigate('sleep') },
+    { label: s.home.tiles.quran, icon: <BookOpen size={25} strokeWidth={1.8} />, onClick: () => onOpenGuidance('quran') },
+    { label: s.home.tiles.duas, icon: <Heart size={25} strokeWidth={1.8} />, onClick: () => onOpenGuidance('duas') },
+    { label: s.home.tiles.study, icon: <GraduationCap size={25} strokeWidth={1.8} />, onClick: () => onNavigate('study') },
+    { label: s.home.tiles.salah, icon: <Moon size={25} strokeWidth={1.8} />, onClick: () => onNavigate('deen') },
+    { label: s.home.tiles.tasbeeh, icon: <TasbeehIcon />, onClick: () => onNavigate('tasbeeh') },
+    { label: s.home.tiles.prayerTime, icon: <Clock3 size={25} strokeWidth={1.8} />, onClick: () => onNavigate('deen') },
+    { label: s.home.tiles.mosque, icon: <MosqueIcon />, onClick: () => onOpenGuidance('mosques') },
+    { label: s.home.tiles.challenges, icon: <Trophy size={25} strokeWidth={1.8} />, onClick: () => onNavigate('challenges') },
+    { label: s.home.tiles.focus, icon: <Target size={25} strokeWidth={1.8} />, onClick: () => onNavigate('focus') },
+    { label: s.home.tiles.sleep, icon: <BedDouble size={25} strokeWidth={1.8} />, onClick: () => onNavigate('sleep') },
   ];
 
   return (
     <div className="home-screen">
-      {guestMode && <span className="home-guest-badge">GUEST PREVIEW</span>}
+      {guestMode && <span className="home-guest-badge">{s.home.guestBadge}</span>}
       <div className="home-locrow">
         <div className="home-loc">
           <MapPin size={20} strokeWidth={1.8} />
           <span>
-            <b>{city || 'Apna sheher'}</b>
+            <b>{city || s.home.cityFallback}</b>
             <br />
-            {stateCountry || 'Profile me location bharo'}
+            {stateCountry || s.home.locationFallback}
           </span>
         </div>
         <button
           type="button"
           className="home-iconbtn"
           onClick={() => onNavigate('profile')}
-          aria-label="Profile aur settings"
+          aria-label={s.home.profileSettings}
         >
           <Settings size={19} strokeWidth={1.8} />
         </button>
@@ -169,7 +179,7 @@ export default function Home({
         type="button"
         className="home-datecard"
         onClick={() => onNavigate('dashboard')}
-        aria-label="Aaj ka haal dekho"
+        aria-label={s.home.todayAtAGlance}
       >
         <div className="home-datecard-copy">
           <div className="home-d1">{gregorian}</div>
@@ -183,7 +193,7 @@ export default function Home({
             </div>
           </div>
           <span className="home-datecard-link">
-            Aaj ka haal <ChevronRight size={14} />
+            {s.home.todayAtAGlanceLink} <ChevronRight size={14} />
           </span>
         </div>
         <div className="home-mosque-art" aria-hidden="true">
@@ -196,6 +206,7 @@ export default function Home({
         prayerStatus={prayerStatus}
         prayerError={prayerError}
         now={now}
+        language={language}
       />
 
       <div className="home-grid">
@@ -210,7 +221,7 @@ export default function Home({
       <div className="home-ayah">
         <div className="home-ayah-ar">اَلَا بِذِكْرِ اللّٰهِ تَطْمَىِٕنُّ الْقُلُوْبُ</div>
         <p>
-          <b>Aaj ki ayat — Ar-Ra&apos;d 13:28:</b> &ldquo;Sun lo, Allah ke zikr se hi dilon ko
+          <b>{s.home.ayahLabel}</b> &ldquo;Sun lo, Allah ke zikr se hi dilon ko
           sukoon milta hai.&rdquo;
         </p>
         <p>

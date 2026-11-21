@@ -672,6 +672,14 @@
   padding-top: 10px;
 }
 
+/* Phase 15: the old unscoped .dua-content h4 (teal-600) and
+   .dua-reference strong (peach-brown) still applied here — dark
+   teal / dark brown text on the dark dua card. Light peach / ice
+   instead. */
+.sc-duas .dua-content h4 {
+  color: #ffdfc9;
+}
+
 .sc-duas .dua-reference {
   display: flex;
   flex-direction: column;
@@ -690,6 +698,7 @@
 
 .sc-duas .dua-reference strong {
   font-size: 13.5px;
+  color: #eff8f5;
 }
 
 .sc-duas .dua-reference small {
@@ -1435,4 +1444,51 @@
   height: 100%;
   background: var(--teal-500);
   border-radius: 99px;
+}
+
+/* ---------- Phase 15 — phones: calendars fill the width ----------
+   Both grids are already repeat(7, 1fr), so they stretch — what made
+   them feel tiny was the nested padding (page 16px + dark shell 16px
+   + card 15px = 47px eaten on each side) and the small 44px cells.
+   On phones the shell/card padding shrinks and the cells grow to a
+   comfortable tap size; the Gregorian sub-label stays visible. */
+@media (max-width: 760px) {
+  .sc-hijri {
+    padding: 8px 10px 24px;
+  }
+
+  .sc-hijri .acard:not(.sc-today-card) {
+    padding: 12px;
+  }
+
+  .sc-salah .acard-l {
+    padding: 12px;
+  }
+
+  .sc-salah .cal {
+    gap: 5px;
+  }
+
+  .sc-salah .cal .d {
+    font-size: 14px;
+    min-height: 48px;
+  }
+
+  .sc-salah .cal .d .dt {
+    width: 7px;
+    height: 7px;
+  }
+
+  .sc-hijri .hijri-grid {
+    gap: 5px;
+  }
+
+  .sc-hijri .hijri-cell {
+    min-height: 52px;
+    font-size: 13.5px;
+  }
+
+  .sc-hijri .hijri-weekday {
+    font-size: 10px;
+  }
 }

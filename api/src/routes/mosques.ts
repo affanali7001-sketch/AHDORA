@@ -27,7 +27,10 @@ import { Profile } from '../models/Profile.js';
 
 export const mosquesRouter = Router();
 
-mosquesRouter.use(requireAuth);
+// Phase 15 (item 7 audit): NO router-level requireAuth. /search and
+// /nearby take their inputs as query params and use only public
+// OpenStreetMap data — like /api/hijri/today and /api/duas they are
+// public. Only /near-me (profile city) stays authed, per-route below.
 
 const USER_AGENT = 'AHDORA/1.0 (Islamic learning app; educational use)';
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
@@ -288,7 +291,7 @@ mosquesRouter.get('/search', async (req, res) => {
  * Uses the city from onboarding; no coordinates leave the server
  * beyond the Nominatim lookup for that city.
  */
-mosquesRouter.get('/near-me', async (req, res, next) => {
+mosquesRouter.get('/near-me', requireAuth, async (req, res, next) => {
   try {
     if (!req.authUser) {
       res.status(401).json({ error: 'Authentication required' });

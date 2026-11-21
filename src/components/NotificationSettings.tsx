@@ -3,10 +3,11 @@ import { Bell, Check } from 'lucide-react';
 import {
   fetchNotificationSettings,
   saveNotificationSettings,
-  NOTIFICATION_TYPE_LABELS,
   type NotificationSettings,
   type NotificationType,
 } from '../lib/notificationsApi';
+import type { AppLanguage } from '../lib/language';
+import { notificationTypeLabel, stringsFor } from '../lib/strings';
 
 /**
  * Notification preferences (Profile & settings).
@@ -20,9 +21,12 @@ import {
  */
 export default function NotificationSettingsPanel({
   onNotify,
+  language,
 }: {
   onNotify: (message: string) => void;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const [settings, setSettings] = useState<NotificationSettings | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -35,7 +39,7 @@ export default function NotificationSettingsPanel({
         if (active) setSettings(loaded);
       })
       .catch((err) => {
-        if (active) setError(err instanceof Error ? err.message : 'Settings could not be loaded.');
+        if (active) setError(err instanceof Error ? err.message : s.notificationSettings.loadFailed);
       });
     return () => {
       active = false;
@@ -65,9 +69,9 @@ export default function NotificationSettingsPanel({
       });
       setSettings(saved);
       setDirty(false);
-      onNotify('Notification preferences saved.');
+      onNotify(s.notificationSettings.saved);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Settings could not be saved.';
+      const message = err instanceof Error ? err.message : s.notificationSettings.saveFailed;
       setError(message);
       onNotify(message);
     } finally {
@@ -79,7 +83,7 @@ export default function NotificationSettingsPanel({
     return <p className="form-error">{error}</p>;
   }
   if (!settings) {
-    return <p className="onboarding-help">Loading notification preferences…</p>;
+    return <p className="onboarding-help">{s.notificationSettings.loading}</p>;
   }
 
   const quietSet = settings.quietHoursStart !== '' || settings.quietHoursEnd !== '';
@@ -91,20 +95,20 @@ export default function NotificationSettingsPanel({
           <Bell size={17} />
         </span>
         <div>
-          <strong>Notification preferences</strong>
-          <span>Kaunsi notifications chahiye, ye chuno. Band ki hui category ki notification kabhi nahi banegi.</span>
+          <strong>{s.notificationSettings.title}</strong>
+          <span>{s.notificationSettings.intro}</span>
         </div>
       </div>
       {error && <p className="form-error">{error}</p>}
       <div className="notification-categories">
-        {(Object.keys(NOTIFICATION_TYPE_LABELS) as NotificationType[]).map((type) => (
+        {(Object.keys(s.notificationSettings.typeLabels) as NotificationType[]).map((type) => (
           <label className="notification-toggle" key={type}>
-            <span>{NOTIFICATION_TYPE_LABELS[type]}</span>
+            <span>{notificationTypeLabel(type, language)}</span>
             <button
               type="button"
               role="switch"
               aria-checked={settings.categories[type]}
-              aria-label={`${NOTIFICATION_TYPE_LABELS[type]} notifications`}
+              aria-label={`${notificationTypeLabel(type, language)} notifications`}
               className={`toggle-switch ${settings.categories[type] ? 'toggle-on' : ''}`}
               onClick={() => toggleCategory(type)}
             >
@@ -114,14 +118,13 @@ export default function NotificationSettingsPanel({
         ))}
       </div>
       <div className="quiet-hours">
-        <strong>Quiet hours</strong>
+        <strong>{s.notificationSettings.quietTitle}</strong>
         <span>
-          Quiet hours me bani notifications save ho jati hain, lekin app kholne tak live
-          nahi aati. Time tumhare profile timezone ke hisaab se hota hai.
+          {s.notificationSettings.quietText}
         </span>
         <div className="quiet-hours-inputs">
           <label>
-            From
+            {s.notificationSettings.from}
             <input
               className="form-input"
               type="time"
@@ -133,7 +136,7 @@ export default function NotificationSettingsPanel({
             />
           </label>
           <label>
-            To
+            {s.notificationSettings.to}
             <input
               className="form-input"
               type="time"
@@ -153,18 +156,16 @@ export default function NotificationSettingsPanel({
                 setDirty(true);
               }}
             >
-              Clear quiet hours
+              {s.notificationSettings.clearQuiet}
             </button>
           )}
         </div>
       </div>
       <p className="onboarding-help">
-        AHDORA does not send scheduled push reminders while the app is closed — there is no
-        background reminder service yet. Prayer awareness (next prayer and countdown) is shown
-        live while the app is open, from your real prayer times.
+        {s.notificationSettings.pushNote}
       </p>
       <button className="primary-button" type="button" disabled={!dirty || saving} onClick={save}>
-        <Check size={15} /> {saving ? 'Saving…' : 'Save preferences'}
+        <Check size={15} /> {saving ? s.notificationSettings.saving : s.notificationSettings.save}
       </button>
     </div>
   );

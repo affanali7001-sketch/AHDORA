@@ -151,6 +151,40 @@ friendsRouter.get('/search', async (req, res, next) => {
 });
 
 /* ------------------------------------------------------------------ */
+/* Discover people (public fields only)                                */
+/*                                                                     */
+/* Search only finds people whose name (or exact email) you already   */
+/* know, so nobody was ever visible in the app. Discover lists a      */
+/* small set of other users up front — same privacy shape as search:   */
+/* id + name + initial only, never an email or profile details.       */
+/* Auth is required (friendsRouter.use(requireAuth) above) and the     */
+/* shared /api/friends rate limit in app.ts (120 / 15 min) covers     */
+/* this route exactly like /search.                                    */
+/* ------------------------------------------------------------------ */
+
+const DISCOVER_LIMIT = 10;
+
+friendsRouter.get('/discover', async (req, res, next) => {
+  try {
+    const me = req.authUser!.id;
+    const rawLimit =
+      typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : Number.NaN;
+    const limit = Number.isFinite(rawLimit)
+      ? Math.min(Math.max(rawLimit, 1), DISCOVER_LIMIT)
+      : DISCOVER_LIMIT;
+    const users = await User.find({ _id: { $ne: me } })
+      .select('_id name')
+      .limit(limit)
+      .lean();
+    // Only _id + name are ever selected, so no email or private data
+    // can leak through this response.
+    res.json({ users: users.map((u) => publicUser(u as PublicUserDoc)) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/* ------------------------------------------------------------------ */
 /* Friends list                                                        */
 /* ------------------------------------------------------------------ */
 

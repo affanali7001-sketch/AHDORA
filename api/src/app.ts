@@ -230,9 +230,13 @@ app.use(
   duasRouter,
 );
 
+// Hijri today/month are PUBLIC calendar info — no account needed
+// to read them (Phase 15: the router-level requireAuth used to 401
+// guests and users logged in on another device with the raw
+// "Authentication required" string inside the calendar card).
+// Settings stay behind requireAuth inside the router.
 app.use(
   '/api/hijri',
-  requireAuth,
   rateLimit({
     windowMs: 15 * 60 * 1000,
     limit: 60,
@@ -244,7 +248,6 @@ app.use(
 
 app.use(
   '/api/mosques',
-  requireAuth,
   rateLimit({
     windowMs: 15 * 60 * 1000,
     limit: 30,

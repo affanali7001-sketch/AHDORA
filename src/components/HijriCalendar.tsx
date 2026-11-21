@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
+import type { AppLanguage } from '../lib/language';
+import { stringsFor } from '../lib/strings';
 import {
   fetchHijriMonth,
   fetchHijriSettings,
@@ -34,10 +36,13 @@ type UpcomingOccasion = {
 export default function HijriCalendar({
   onNotify,
   guestMode,
+  language,
 }: {
   onNotify: (message: string) => void;
   guestMode: boolean;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const [today, setToday] = useState<HijriToday | null>(null);
   const [month, setMonth] = useState<HijriMonth | null>(null);
   const [offset, setOffset] = useState(0);
@@ -71,7 +76,7 @@ export default function HijriCalendar({
       setError(
         monthResult.reason instanceof Error
           ? monthResult.reason.message
-          : 'Hijri calendar could not be loaded.',
+          : s.hijri.loadFailed,
       );
     }
     if (settingsResult.status === 'fulfilled' && settingsResult.value) {
@@ -113,27 +118,27 @@ export default function HijriCalendar({
           if (hijriMonth === 9 && hijriDay === 1 && !has('ramadan')) {
             found.push({
               key: 'ramadan',
-              label: 'Ramadan shuru',
+              label: s.hijri.ramadan,
               icon: '🌙',
-              hijriLabel: `1 Ramadan ${day.hijri.year} · andaaz`,
+              hijriLabel: s.hijri.ramadanLabel(day.hijri.year),
               gregorianLabel,
             });
           }
           if (hijriMonth === 10 && hijriDay === 1 && !has('fitr')) {
             found.push({
               key: 'fitr',
-              label: 'Eid al-Fitr',
+              label: s.hijri.fitr,
               icon: '🎉',
-              hijriLabel: `1 Shawwal ${day.hijri.year} · andaaz`,
+              hijriLabel: s.hijri.fitrLabel(day.hijri.year),
               gregorianLabel,
             });
           }
           if (hijriMonth === 12 && hijriDay === 10 && !has('adha')) {
             found.push({
               key: 'adha',
-              label: 'Eid al-Adha',
+              label: s.hijri.adha,
               icon: '🕋',
-              hijriLabel: `10 Dhul Hijjah ${day.hijri.year} · andaaz`,
+              hijriLabel: s.hijri.adhaLabel(day.hijri.year),
               gregorianLabel,
             });
           }
@@ -162,7 +167,7 @@ export default function HijriCalendar({
 
   async function changeOffset(next: number) {
     if (guestMode) {
-      onNotify('Sign in to save a Hijri day adjustment.');
+      onNotify(s.hijri.signInAdjustment);
       return;
     }
     const previous = offset;
@@ -173,7 +178,7 @@ export default function HijriCalendar({
     } catch (err) {
       // Roll the dropdown back: the saved value did not change.
       setOffset(previous);
-      onNotify(err instanceof Error ? err.message : 'Adjustment could not be saved.');
+      onNotify(err instanceof Error ? err.message : s.hijri.adjustmentFailed);
     }
   }
 
@@ -214,8 +219,8 @@ export default function HijriCalendar({
     <section className="sc-hijri">
       <div className="quran-browser-head">
         <div>
-          <span className="eyebrow">HIJRI CALENDAR</span>
-          <h3>Islamic dates</h3>
+          <span className="eyebrow">{s.hijri.eyebrow}</span>
+          <h3>{s.hijri.title}</h3>
           {month && <p className="quran-source-line">Source: {month.source}</p>}
         </div>
         <span className="iconbtn"><CalendarDays size={18} /></span>
@@ -225,7 +230,7 @@ export default function HijriCalendar({
 
       {today && (
         <div className="acard sc-today-card">
-          <div className="sc-today-label">AAJ KI HIJRI TAARIKH</div>
+          <div className="sc-today-label">{s.hijri.todayLabel}</div>
           <div className="sc-today-date">
             {today.hijri.day} {today.hijri.month.en}
             <br />
@@ -244,30 +249,30 @@ export default function HijriCalendar({
       <div className="acard">
         <div className="hijri-controls">
           <div className="hijri-nav">
-            <button className="icon-button" aria-label="Previous month" onClick={() => shiftMonth(-1)}>
+            <button className="icon-button" aria-label={s.hijri.prevMonth} onClick={() => shiftMonth(-1)}>
               <ChevronLeft size={18} />
             </button>
             <strong>
               {month?.hijriMonths.join(' / ') ?? ''}{hijriYear ? ` ${hijriYear}` : ''}
             </strong>
-            <button className="icon-button" aria-label="Next month" onClick={() => shiftMonth(1)}>
+            <button className="icon-button" aria-label={s.hijri.nextMonth} onClick={() => shiftMonth(1)}>
               <ChevronRight size={18} />
             </button>
           </div>
           {monthRange && <span className="mut" style={{ marginTop: 0 }}>{monthRange}</span>}
         </div>
         <label className="field-label" style={{ marginTop: '10px' }}>
-          Moon-sighting adjustment
+          {s.hijri.adjustmentLabel}
           <select
             className="form-input"
             value={offset}
             onChange={(event) => changeOffset(Number(event.target.value))}
           >
-            <option value={-2}>−2 days</option>
-            <option value={-1}>−1 day</option>
-            <option value={0}>No adjustment</option>
-            <option value={1}>+1 day</option>
-            <option value={2}>+2 days</option>
+            <option value={-2}>{s.hijri.minusTwo}</option>
+            <option value={-1}>{s.hijri.minusOne}</option>
+            <option value={0}>{s.hijri.noAdjustment}</option>
+            <option value={1}>{s.hijri.plusOne}</option>
+            <option value={2}>{s.hijri.plusTwo}</option>
           </select>
         </label>
 
@@ -276,12 +281,12 @@ export default function HijriCalendar({
         )}
         {month && monthHolidays.length > 0 && (
           <p className="quran-source-line">
-            Is mahine me: {monthHolidays.join(', ')}
+            {s.hijri.thisMonth(monthHolidays.join(', '))}
           </p>
         )}
 
         {loading ? (
-          <p className="empty-note">Loading…</p>
+          <p className="empty-note">{s.hijri.loading}</p>
         ) : month ? (
           <div className="hijri-grid" role="grid" aria-label="Hijri calendar month">
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
@@ -311,13 +316,13 @@ export default function HijriCalendar({
             ))}
           </div>
         ) : (
-          <p className="empty-note">No calendar data for this month.</p>
+          <p className="empty-note">{s.hijri.noData}</p>
         )}
       </div>
 
       {occasions && occasions.length > 0 && (
         <div className="acard">
-          <h5>Aane wale khaas din</h5>
+          <h5>{s.hijri.upcoming}</h5>
           {occasions.map((occasion) => (
             <div className="srow" key={occasion.key}>
               <span className="snum2">{occasion.icon}</span>
@@ -329,8 +334,7 @@ export default function HijriCalendar({
             </div>
           ))}
           <p className="mut">
-            Ye taarikhein hisab (calculation) se hain — asal taarikh chaand dekhne par ek din
-            aage-peeche ho sakti hai. App me ±1 din ka adjustment bhi milega.
+            {s.hijri.occasionsNote}
           </p>
         </div>
       )}

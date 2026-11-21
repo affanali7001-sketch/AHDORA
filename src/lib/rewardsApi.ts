@@ -23,13 +23,6 @@ export type RewardsSummary = {
   recent: PointTransaction[];
 };
 
-export const POINT_REASON_LABELS: Record<PointTransaction['reason'], string> = {
-  focus_session_completed: 'Focus session finished',
-  task_completed: 'Study task completed',
-  challenge_day_completed: 'Challenge day completed',
-  challenge_completed: 'Challenge completed',
-};
-
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await apiFetch(path, {
     ...options,

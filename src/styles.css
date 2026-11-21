@@ -101,7 +101,10 @@ a{color:inherit;text-decoration:none}
 .dash-challenge-text{font-size:12px;color:#DFF2EC;line-height:1.6;margin:0 0 4px}
 .dash-challenge-btn{margin-top:12px;border:0;border-radius:999px;background:var(--peach);color:#7A4416;font-weight:800;font-size:12.5px;padding:9px 16px}
 
-.toast{position:fixed;right:26px;bottom:25px;background:var(--teal-950);border:1px solid var(--teal-600);color:#FFFFFF;border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:9px;font-size:12px;box-shadow:var(--shadow);z-index:100}
+/* Phase 15: the toast sits above the floating pill nav (pill top edge
+   is ~70px from the bottom), never overlapping it, and never runs
+   off-screen on a phone. */
+.toast{position:fixed;right:26px;bottom:calc(92px + env(safe-area-inset-bottom,0px));max-width:calc(100vw - 32px);background:var(--teal-950);border:1px solid var(--teal-600);color:#FFFFFF;border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:9px;font-size:12px;box-shadow:var(--shadow);z-index:100}
 .modal-backdrop{position:fixed;inset:0;background:rgba(8,46,43,.45);backdrop-filter:blur(5px);display:grid;place-items:center;z-index:110;padding:20px}
 .modal-card{width:min(100%,420px);background:var(--panel);border:1px solid var(--line-strong);border-radius:18px;padding:23px;box-shadow:var(--shadow-lg)}
 .modal-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:23px}
@@ -624,6 +627,10 @@ a{color:inherit;text-decoration:none}
 
 /* ---- Guidance (Quran/Duas tabs) + Tasbeeh (preview #10) ---- */
 .guidance-layout{display:grid;grid-template-columns:1.25fr .75fr;gap:15px}
+/* Phase 15: grid children must be allowed to shrink below their
+   content width, or the side column overflows the phone viewport
+   (the "Faith can support you" card cut off at the right edge). */
+.guidance-layout>*{min-width:0}
 .guidance-main{padding:24px}
 .guidance-main h2{font:700 22px 'Plus Jakarta Sans',sans-serif;margin:11px 0 5px;color:var(--ink)}
 .guidance-main>p{font-size:10px;color:var(--muted);margin:0}
@@ -863,6 +870,18 @@ a{color:inherit;text-decoration:none}
 @media(max-width:760px){
   .challenge-cards{grid-template-columns:1fr}
   .analytics-grid{grid-template-columns:1fr}
+  /* Phase 15: the later @media(max-width:1150px) block sets
+     .guidance-layout to 1fr 1fr, which wins over the 1fr in the
+     earlier 760px block at equal specificity — the Guidance
+     two-column layout never stacked on phones ("OUR CONTENT
+     PROMISE" squeezed into a narrow right column, half off-screen).
+     This later 760px rule restores the single column. */
+  .guidance-layout,.study-page-grid{grid-template-columns:1fr}
+  /* Phase 15: toast spans the phone width, centred, still above the pill nav. */
+  .toast{left:16px;right:16px;justify-content:center;text-align:center}
+  /* Phase 15: the Challenges header (back + title + Invite + Banao)
+     wraps instead of overflowing on a 390px phone. */
+  .challenges-screen .apphead{flex-wrap:wrap}
 }
 @media(max-width:520px){
   .challenge-stat-row{grid-template-columns:1fr 1fr}
@@ -874,6 +893,19 @@ a{color:inherit;text-decoration:none}
   *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
   .meaning-type-letter{opacity:1;transform:none;transition:none}
 }
+
+/* ---- Phase 15 — contrast: light text on every dark-teal surface ----
+   Welcome, Focus and Profile are dark teal in BOTH colour schemes,
+   but several text rules used dark teal ink on them (teal-800 /
+   teal-600 / var(--ink) on #0B3531) — invisible text. Every rule
+   below puts a light (ice / peach / pale teal) colour on the dark
+   surface. No gold anywhere. */
+.welcome-screen .text-button{color:#FFDFC9}
+.focus-screen .text-button{color:#FFDFC9}
+.focus-screen .status-done{color:#BFE6DC}
+.focus-screen .history-row{border-bottom-color:rgba(255,255,255,.1)}
+.focus-screen .history-row strong{color:#EFF8F5}
+.focus-screen .history-row small{color:#A9CFC4}
 
 /* ---- Dark mode: preview dark tokens (page surfaces follow the system) ---- */
 @media (prefers-color-scheme: dark){
@@ -935,6 +967,43 @@ a{color:inherit;text-decoration:none}
   .study-tip h3{color:#EDF6F3}
   .demo-notice,.implementation-note,.verify-banner{background:#124540;color:#FFDFC9;border-color:#1E453F}
   .auth-notice{background:#FFF0E4;color:#7A4A28}
+  /* ---- Phase 15 — dark-mode contrast: no light text on light
+     surfaces, no dark text on dark surfaces ---- */
+  .segmented button.on{color:#FFFFFF}
+  .mood-grid button.selected{background:#124540}
+  .mood-grid button>svg{color:#7FD1C0}
+  .lang-option{background:#0E2E2B;border-color:#2A5A52}
+  .lang-option small{color:#9DB8B2}
+  .lang-option.selected{background:#124540}
+  .auth-card .lang-switch{background:#EDF4F1}
+  .auth-card .lang-switch button{color:#5C7370}
+  .auth-card .bilingual-secondary,.auth-card .bilingual-skip small,.onboarding-card .bilingual-secondary,.auth-card .login-lang-row>span{color:#5C7370}
+  .status-done{color:#7FD1C0}
+  .history-row strong{color:#EDF6F3}
+  .history-row small{color:#9DB8B2}
+  .subtle-action,.section-title button{color:#7FD1C0}
+  .challenges-screen .field-label{color:#A9CFC4}
+  .modal-card .field-label{color:#A9CFC4}
+  .verify-banner .text-button{color:#7FD1C0}
+  .guidance-side .text-button{color:#7FD1C0}
+  .sc-salah .cal .d{background:#124540;color:#EDF6F3}
+  .sc-salah .cal .d.today{background:#0E2E2B}
+  .sc-salah .acard-l{background:#0E2E2B;border-color:#1E453F}
+  .sc-salah .acard-l h5{color:#EDF6F3}
+  .sc-salah .acard-l .field-label{color:#A9CFC4}
+  .sc-salah .text-button{color:#7FD1C0}
+  /* Study / Analytics / Challenges teal-600 text accents sit on
+     panels that go dark in dark mode — pale teal instead. */
+  .study-screen .text-button{color:#7FD1C0}
+  .study-screen .add-row,.study-screen .task-actions button,.study-screen .task-action-link,.study-screen .subject-actions button{color:#7FD1C0}
+  .subject-row b{color:#7FD1C0}
+  .privacy-hint{color:#7FD1C0}
+  .privacy-callout{color:#7FD1C0}
+  .source-check{color:#7FD1C0}
+  .trend-up,.metric-trend{color:#7FD1C0}
+  .wbars .wb em{color:#7FD1C0}
+  .setrow b{color:#7FD1C0}
+  .challenge-progress-row svg{color:#7FD1C0}
 }
 
 /* ---- Phase 13 — language selector + bilingual Login / Onboarding ---- */

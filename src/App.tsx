@@ -75,10 +75,17 @@ import {
 import {
   fetchPointsHistory,
   fetchRewardsSummary,
-  POINT_REASON_LABELS,
   type PointTransaction,
   type RewardsSummary,
 } from './lib/rewardsApi';
+import {
+  challengeCategoryLabel,
+  challengeProgressSource,
+  challengeRequirement,
+  minutesOrHours,
+  pointReasonLabel,
+  stringsFor,
+} from './lib/strings';
 import { apiFetch, clearCsrfToken, isCsrfError, refreshCsrfToken } from './lib/http.js';
 import type { CSSProperties, ReactNode, FormEvent } from 'react';
 import {
@@ -110,7 +117,7 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<A
   if (!response.ok) {
     const message = data && typeof data.error === 'string'
       ? data.error
-      : 'Request failed. Please try again.';
+      : stringsFor(readStoredLanguage() ?? 'hi').common.requestFailed;
     throw new Error(message);
   }
 
@@ -143,7 +150,7 @@ export function formatTime12h(hhmm: string): string {
   return `${hour12}:${String(m).padStart(2, '0')} ${period}`;
 }
 
-export function countdownTo(time: string, now: Date): string {
+export function countdownTo(time: string, now: Date, language: AppLanguage = 'hi'): string {
   const [h, m] = time.split(':').map(Number);
   if (!Number.isFinite(h) || !Number.isFinite(m)) return '';
   const target = new Date(now);
@@ -153,15 +160,13 @@ export function countdownTo(time: string, now: Date): string {
   const totalMin = Math.floor(diffMs / 60000);
   const hours = Math.floor(totalMin / 60);
   const minutes = totalMin % 60;
-  return hours > 0 ? `${hours}h ${minutes}m left` : `${minutes}m left`;
+  const s = stringsFor(language);
+  return hours > 0 ? s.common.countdownHm(hours, minutes) : s.common.countdownM(minutes);
 }
 
-const guidanceCards = [
-  { mood: 'Feeling overwhelmed', category: 'Patience & hope', ref: 'Surah Ash-Sharh · 94:5–6', icon: Heart },
-  { mood: 'Looking for direction', category: 'Guidance', ref: 'Explore verified guidance', icon: Compass },
-  { mood: 'Need a dua', category: 'Supplication', ref: 'Explore verified duas', icon: BookMarked },
-  { mood: 'Building consistency', category: 'Steadfastness', ref: 'Explore verified guidance', icon: Target },
-];
+/** Icons for the Guidance mood cards, in the same order as the
+ * dictionary's guidance.cards (mood order is the selection key). */
+const GUIDANCE_ICONS = [Heart, Compass, BookMarked, Target] as const;
 
 function App() {
   const [screen, setScreen] = useState<'checking' | 'welcome' | 'login' | 'forgot' | 'reset' | 'onboarding' | 'app' | 'language'>('checking');
@@ -170,6 +175,14 @@ function App() {
   // through Onboarding is bilingual: the chosen language is shown
   // big, the other language alongside it in smaller text.
   const [language, setLanguage] = useState<AppLanguage>(() => readStoredLanguage() ?? 'hi');
+  // Phase 15 — app-wide bilingual strings: every logged-in screen
+  // reads from this dictionary via its `language` prop. Changing the
+  // language in Profile re-renders the whole app — no reload.
+  const s = stringsFor(language);
+  // The socket effect's closures predate a language change; the ref
+  // keeps its toasts in the current language.
+  const languageRef = useRef(language);
+  languageRef.current = language;
   // Where the language screen sends the user after they pick one.
   const [afterLanguageScreen, setAfterLanguageScreen] = useState<'login' | 'app' | 'onboarding'>('login');
   // Password-reset links land on the reset screen; the session check
@@ -256,8 +269,13 @@ function App() {
    * when no choice is stored yet. Reads localStorage directly so
    * the check is never stale inside an effect closure. A returning
    * user (choice stored) never sees the picker again.
+   * Phase 15: the post-login landing is the Dashboard (preview #4),
+   * not the Home tile grid — the pill nav Home button still goes
+   * to Home. The page is set here (before the language picker, if
+   * any), so confirming the language keeps the Dashboard landing.
    */
   function openPostAuthScreen(next: 'app' | 'onboarding') {
+    if (next === 'app') setPage('dashboard');
     if (readStoredLanguage() !== null) {
       setScreen(next);
       return;
@@ -308,7 +326,7 @@ function App() {
       setOnboardingInitialStep(0);
       setOnboardingResumeStep(0);
       openPostAuthScreen('onboarding');
-      notify(error instanceof Error ? error.message : 'Profile load nahi ho payi.');
+      notify(error instanceof Error ? error.message : s.app.profileLoadFailed);
     }
   }
 
@@ -471,7 +489,7 @@ function App() {
       const onProgressEvent = (payload: { challengeTitle?: string }) => {
         refreshChallenges();
         if (payload?.challengeTitle) {
-          notify(`Shared progress updated in "${payload.challengeTitle}".`);
+          notify(stringsFor(languageRef.current).app.sharedProgressUpdated(payload.challengeTitle));
         }
       };
       socket.on('notification_created', onNotification);
@@ -503,11 +521,22 @@ function App() {
       window.history.replaceState({}, '', window.location.pathname);
       apiRequest<{ verified: boolean }>(`/api/auth/verify-email?token=${encodeURIComponent(verifyToken)}`)
         .then(() => {
-          notify('Email verified. Welcome to AHDORA.');
+          notify(s.app.emailVerified);
           setEmailNotice(null);
           setAuthUser((current) => (current ? { ...current, emailVerified: true } : current));
         })
-        .catch((err) => notify(err instanceof Error ? err.message : 'Verification link did not work.'));
+        .catch((err) => {
+          const message = err instanceof Error ? err.message : s.app.verificationLinkFailed;
+          if (message.includes('invalid or has expired')) {
+            // Persistent, not just a toast: the banner shows this
+            // notice after login, with its resend button (POST
+            // /api/auth/verify-email). Links work for 24 hours.
+            setEmailNotice(s.app.verificationLinkExpired);
+            notify(s.app.verificationLinkExpiredToast);
+          } else {
+            notify(message);
+          }
+        });
     } else if (token) {
       window.history.replaceState({}, '', window.location.pathname);
       setResetToken(token);
@@ -521,6 +550,11 @@ function App() {
     apiRequest<{ user: AuthUser }>('/api/auth/me')
       .then(async ({ user }) => {
         if (!active) return;
+        // Phase 15: a password-reset link wins over session restore.
+        // The token effect already put this user on the reset screen;
+        // a successful /api/auth/me must not yank them off it into
+        // the app/onboarding.
+        if (resetLinkRef.current) return;
         setAuthUser(user);
         setProfileName(user.name);
         try {
@@ -549,11 +583,15 @@ function App() {
       })
       .catch(() => {
         if (!active) return;
+        // Phase 15: a password-reset link wins over session restore.
+        // Leave the reset screen (set by the token effect) alone —
+        // the old behaviour sent reset-link users to welcome, which
+        // is why the link "stopped working" for logged-out users.
+        if (resetLinkRef.current) return;
         // Logged out: first open without a stored language goes to the
         // picker (which then sends the user to Login); everyone else
-        // gets the welcome screen as before. Reset-link users keep
-        // the pre-existing behaviour (welcome).
-        if (resetLinkRef.current || readStoredLanguage() !== null) {
+        // gets the welcome screen as before.
+        if (readStoredLanguage() !== null) {
           setScreen('welcome');
         } else {
           setAfterLanguageScreen('login');
@@ -599,7 +637,7 @@ function App() {
       // If the token still failed after the retry, say plainly what
       // fixes it instead of showing the server's terse CSRF error.
       if (isCsrfError(err)) {
-        throw new Error('Security check fail ho gaya. Page ko refresh karke dobara login karo.');
+        throw new Error(s.app.securityCheckFailed);
       }
       throw err;
     }
@@ -644,7 +682,7 @@ function App() {
 
   async function handleOnboardingComplete() {
     if (!authUser) {
-      notify('Profile save karne ke liye pehle account mein login karo.');
+      notify(s.app.loginFirstToSaveProfile);
       return;
     }
     const profileToSave = { ...newUser, name: authUser.name, email: authUser.email };
@@ -658,10 +696,13 @@ function App() {
       const wasEditing = editingProfile;
       setEditingProfile(false);
       setScreen('app');
+      // Phase 15: a fresh onboarding lands on the Dashboard (preview
+      // #4); editing from Profile returns to Profile.
       if (wasEditing) setPage('profile');
-      notify('Profile MongoDB API par save ho gayi.');
+      else setPage('dashboard');
+      notify(s.app.profileSaved);
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Profile save nahi ho payi.');
+      notify(error instanceof Error ? error.message : s.app.profileSaveFailed);
       throw error;
     }
   }
@@ -669,7 +710,7 @@ function App() {
   /** Skip: save whatever is filled in as a partial profile and enter the app. */
   async function handleOnboardingSkip(step: number) {
     if (!authUser) {
-      notify('Profile save karne ke liye pehle account mein login karo.');
+      notify(s.app.loginFirstToSaveProfile);
       return;
     }
     const profileToSave = { ...newUser, name: authUser.name, email: authUser.email };
@@ -683,10 +724,11 @@ function App() {
       setPrayerTimes(null);
       setEditingProfile(false);
       setScreen('app');
-      setPage('home');
-      notify('Theek hai — jo bhara tha wo save ho gaya. Baad me Profile se poora kar lena.');
+      // Phase 15: skipping onboarding still lands on the Dashboard.
+      setPage('dashboard');
+      notify(s.app.onboardingSavedPartial);
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Skip nahi ho paya. Dobara try karo.');
+      notify(error instanceof Error ? error.message : s.app.skipFailed);
       throw error;
     }
   }
@@ -722,7 +764,7 @@ function App() {
   /** Reopen the onboarding form from Profile, pre-filled, at a given step. */
   function handleEditProfile(step: number) {
     if (!authUser || guestMode) {
-      notify('Profile edit karne ke liye pehle sign in karo.');
+      notify(s.app.signInFirstToEditProfile);
       return;
     }
     setOnboardingInitialStep(step);
@@ -744,7 +786,7 @@ function App() {
    */
   async function handleSaveFocus(): Promise<boolean> {
     if (!authUser || guestMode) {
-      notify('Neend ka time save karne ke liye pehle sign in karo.');
+      notify(s.app.signInFirstToSaveSleep);
       return false;
     }
     if (focusSaving) return false;
@@ -758,10 +800,10 @@ function App() {
         ? await saveProfilePartial(profileToSave, firstIncompleteStep(newUser))
         : await saveProfile(profileToSave);
       setNewUser(saved);
-      notify('Neend ka time save ho gaya. App restrictions Android app me kaam karenge.');
+      notify(s.app.sleepSaved);
       return true;
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Neend ka time save nahi ho paya.');
+      notify(error instanceof Error ? error.message : s.app.sleepSaveFailed);
       return false;
     } finally {
       setFocusSaving(false);
@@ -772,7 +814,7 @@ function App() {
     try {
       if (authUser) await apiRequest<null>('/api/auth/logout', { method: 'POST' });
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Logout nahi ho paya. Dobara try karo.');
+      notify(error instanceof Error ? error.message : s.app.logoutFailed);
       return;
     }
     clearCsrfToken();
@@ -827,7 +869,7 @@ function App() {
     setSalahLoaded(false);
     setScreen('welcome');
     setPage('home');
-    notify('Your account and all its data were deleted.');
+    notify(s.app.accountDeleted);
   }
 
   /**
@@ -848,13 +890,13 @@ function App() {
       if (result.alreadyVerified) {
         setAuthUser((current) => (current ? { ...current, emailVerified: true } : current));
         setEmailNotice(null);
-        notify('Your email is already verified.');
+        notify(s.app.emailAlreadyVerified);
       } else {
-        setEmailNotice('Verification email sent. Check your inbox.');
-        notify('Verification email sent. Check your inbox.');
+        setEmailNotice(s.app.verificationEmailSent);
+        notify(s.app.verificationEmailSent);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not send the verification email.';
+      const message = error instanceof Error ? error.message : s.app.verificationEmailFailed;
       setEmailNotice(message);
       notify(message);
     } finally {
@@ -863,7 +905,7 @@ function App() {
   }
 
   if (screen === 'checking') {
-    return <div className="auth-screen"><div className="auth-card"><div className="auth-brand"><AhdoraLogo size={42} /><span>AHDORA</span></div><p>Checking your secure session...</p></div></div>;
+    return <div className="auth-screen"><div className="auth-card"><div className="auth-brand"><AhdoraLogo size={42} /><span>AHDORA</span></div><p>{s.app.checkingSession}</p></div></div>;
   }
   if (screen === 'language') {
     return <LanguageSelector onConfirm={handleLanguageConfirm} />;
@@ -878,7 +920,7 @@ function App() {
     return <ForgotPassword onBack={() => setScreen('login')} onSent={() => notify('If an account exists for this email, a reset link has been sent.')} />;
   }
   if (screen === 'reset') {
-    return <ResetPassword token={resetToken} onDone={() => { setResetToken(''); setScreen('login'); notify('Password reset. Please log in with your new password.'); }} onBack={() => { setResetToken(''); setScreen('login'); }} />;
+    return <ResetPassword token={resetToken} onDone={() => { setResetToken(''); setScreen('login'); notify('Password reset. Please log in with your new password.'); }} onBack={() => { setResetToken(''); setScreen('login'); }} onResendLink={() => { setResetToken(''); setScreen('forgot'); }} />;
   }
   if (screen === 'onboarding') {
     return <Onboarding user={newUser} onChange={setNewUser} onComplete={handleOnboardingComplete} onSkip={handleOnboardingSkip} initialStep={onboardingInitialStep} mode={editingProfile ? 'edit' : 'initial'} onCancel={handleOnboardingCancel} language={language} />;
@@ -890,49 +932,49 @@ function App() {
         {authUser && !authUser.emailVerified && !guestMode && (
           <div className="verify-banner">
             <Shield size={16} />
-            <span>{emailNotice ?? 'Your email is not verified yet. Some account features need verification.'}</span>
-            <button className="text-button" onClick={handleResendVerification} disabled={resendingVerification}>{resendingVerification ? 'Sending…' : 'Resend verification email'}</button>
+            <span>{emailNotice ?? s.app.emailNotVerified}</span>
+            <button className="text-button" onClick={handleResendVerification} disabled={resendingVerification}>{resendingVerification ? s.app.sending : s.app.resendVerification}</button>
           </div>
         )}
         {authUser && !guestMode && onboardingCompleted === false && (
           <div className="verify-banner">
             <UserRound size={16} />
-            <span>Aapka profile adhoora hai — kuch details abhi baki hain.</span>
-            <button className="text-button" onClick={() => handleEditProfile(resumeStep(newUser))}>Profile poora karo</button>
+            <span>{s.app.profileIncomplete}</span>
+            <button className="text-button" onClick={() => handleEditProfile(resumeStep(newUser))}>{s.app.completeProfile}</button>
           </div>
         )}
         <div className="page-content">
-          {page === 'home' && <HomeScreen profile={newUser} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} guestMode={guestMode} onNavigate={goTo} onOpenGuidance={goToGuidance} />}
-          {page === 'dashboard' && <Dashboard userName={profileName || 'there'} onNavigate={goTo} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} todayTasks={todayTasks} studyStats={studyStats} guestMode={guestMode} activeChallenges={activeChallenges} rewards={rewards} dataLoading={!guestMode && (!studyLoaded || !salahLoaded)} sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} unreadCount={unreadCount} onOpenNotifications={() => goTo('notifications')} />}
-          {page === 'deen' && <Deen onNotify={notify} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} onRefreshSalah={refreshSalahToday} onOpenGuidance={goToGuidance} onBack={() => goTo('home')} profile={newUser} />}
+          {page === 'home' && <HomeScreen profile={newUser} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} guestMode={guestMode} onNavigate={goTo} onOpenGuidance={goToGuidance} language={language} />}
+          {page === 'dashboard' && <Dashboard userName={profileName || 'there'} onNavigate={goTo} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} todayTasks={todayTasks} studyStats={studyStats} guestMode={guestMode} activeChallenges={activeChallenges} rewards={rewards} dataLoading={!guestMode && (!studyLoaded || !salahLoaded)} sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} unreadCount={unreadCount} onOpenNotifications={() => goTo('notifications')} language={language} />}
+          {page === 'deen' && <Deen onNotify={notify} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} onRefreshSalah={refreshSalahToday} onOpenGuidance={goToGuidance} onBack={() => goTo('home')} profile={newUser} language={language} />}
           {page === 'salah-calendar' && (
             <section className="salahcal-screen">
               <div className="apphead">
-                <button type="button" className="aback" onClick={() => goTo('home')} aria-label="Wapas jao"><ChevronLeft size={20} /></button>
-                <div><h4>Salah Calendar</h4><div className="asub">Mahine bhar ki namaz ek nazar me</div></div>
+                <button type="button" className="aback" onClick={() => goTo('home')} aria-label={s.common.back}><ChevronLeft size={20} /></button>
+                <div><h4>{s.salahCalendar.title}</h4><div className="asub">{s.salahCalendar.sub}</div></div>
               </div>
-              <SalahTracker onNotify={notify} />
+              <SalahTracker onNotify={notify} language={language} />
             </section>
           )}
-          {page === 'tasbeeh' && <Tasbeeh userId={authUser?.id ?? ''} onBack={() => goTo('home')} />}
-          {page === 'notifications' && <NotificationsScreen onBack={() => goTo('home')} onNotify={notify} guestMode={guestMode} onChanged={refreshNotifications} />}
-          {page === 'sleep' && <Sleep sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} onSleepChange={(start, end) => setNewUser((current) => ({ ...current, sleepStartTime: start, sleepEndTime: end }))} onSaveFocus={handleSaveFocus} focusSaving={focusSaving} focusEnabled={focusEnabled} setFocusEnabled={setFocusEnabled} youtubeAllowed={youtubeAllowed} setYoutubeAllowed={setYoutubeAllowed} onNotify={notify} onBack={() => goTo('home')} onOpenGuidance={goToGuidance} guestMode={guestMode} />}
-          {page === 'study' && <Study subjects={subjects} tasks={tasks} todayTasks={todayTasks} schedule={todaySchedule} stats={studyStats} activeSession={activePomodoro} history={pomodoroHistory} studyError={studyError} guestMode={guestMode} profile={newUser} onRefresh={refreshStudy} onNotify={notify} onBack={() => goTo('home')} />}
-          {page === 'challenges' && <Challenges onNotify={notify} onRefresh={refreshChallenges} guestMode={guestMode} onBack={() => goTo('home')} />}
-          {page === 'friends' && <Friends onNotify={notify} refreshKey={friendsRefreshKey} guestMode={guestMode} />}
-          {page === 'guidance' && <Guidance onNotify={notify} onOpenFeedback={() => setFeedbackOpen(true)} tab={guidanceTab} onTabChange={setGuidanceTab} guestMode={guestMode} profileCity={newUser.city} initialSurah={guidanceSurah} onInitialSurahOpened={() => setGuidanceSurah(null)} onOpenSurah={(surahNumber) => goToGuidance('quran', surahNumber)} />}
-          {page === 'focus' && <Focus activeSession={activePomodoro} history={pomodoroHistory} stats={studyStats} tasks={tasks} onRefresh={refreshStudy} onNotify={notify} onNavigate={goTo} guestMode={guestMode} />}
-          {page === 'analytics' && <Analytics stats={studyStats} guestMode={guestMode} rewards={rewards} activeChallenges={activeChallenges} challengeHistory={challengeHistory} focusHistory={pomodoroHistory} onNotify={notify} salahToday={salahToday} sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} onBack={() => goTo('home')} />}
+          {page === 'tasbeeh' && <Tasbeeh userId={authUser?.id ?? ''} onBack={() => goTo('home')} language={language} />}
+          {page === 'notifications' && <NotificationsScreen onBack={() => goTo('home')} onNotify={notify} guestMode={guestMode} onChanged={refreshNotifications} language={language} />}
+          {page === 'sleep' && <Sleep sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} onSleepChange={(start, end) => setNewUser((current) => ({ ...current, sleepStartTime: start, sleepEndTime: end }))} onSaveFocus={handleSaveFocus} focusSaving={focusSaving} focusEnabled={focusEnabled} setFocusEnabled={setFocusEnabled} youtubeAllowed={youtubeAllowed} setYoutubeAllowed={setYoutubeAllowed} onNotify={notify} onBack={() => goTo('home')} onOpenGuidance={goToGuidance} guestMode={guestMode} language={language} />}
+          {page === 'study' && <Study subjects={subjects} tasks={tasks} todayTasks={todayTasks} schedule={todaySchedule} stats={studyStats} activeSession={activePomodoro} history={pomodoroHistory} studyError={studyError} guestMode={guestMode} profile={newUser} onRefresh={refreshStudy} onNotify={notify} onBack={() => goTo('home')} language={language} />}
+          {page === 'challenges' && <Challenges onNotify={notify} onRefresh={refreshChallenges} guestMode={guestMode} onBack={() => goTo('home')} onOpenFriends={() => goTo('friends')} language={language} />}
+          {page === 'friends' && <Friends onNotify={notify} refreshKey={friendsRefreshKey} guestMode={guestMode} language={language} />}
+          {page === 'guidance' && <Guidance onNotify={notify} onOpenFeedback={() => setFeedbackOpen(true)} tab={guidanceTab} onTabChange={setGuidanceTab} guestMode={guestMode} profileCity={newUser.city} initialSurah={guidanceSurah} onInitialSurahOpened={() => setGuidanceSurah(null)} onOpenSurah={(surahNumber) => goToGuidance('quran', surahNumber)} language={language} />}
+          {page === 'focus' && <Focus activeSession={activePomodoro} history={pomodoroHistory} stats={studyStats} tasks={tasks} onRefresh={refreshStudy} onNotify={notify} onNavigate={goTo} guestMode={guestMode} language={language} />}
+          {page === 'analytics' && <Analytics stats={studyStats} guestMode={guestMode} rewards={rewards} activeChallenges={activeChallenges} challengeHistory={challengeHistory} focusHistory={pomodoroHistory} onNotify={notify} salahToday={salahToday} sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} onBack={() => goTo('home')} language={language} />}
           {page === 'profile' && <Profile onNotify={notify} user={authUser} guestMode={guestMode} onLogout={handleLogout} onAccountDeleted={handleAccountDeleted} onboardingIncomplete={onboardingCompleted === false} onEditProfile={handleEditProfile} onboardingResumeStep={resumeStep(newUser)} onOpenFeedback={() => setFeedbackOpen(true)} onNavigate={goTo} language={language} onLanguageChange={handleLanguageChange} rewards={rewards} studyStats={studyStats} profile={newUser} />}
         </div>
       </main>
       <nav className="pillnav-bar" aria-label="Main sections">
-        <button type="button" className={`pillnav-item ${(page === 'home' || page === 'dashboard') ? 'on' : ''}`} onClick={() => goTo('home')} aria-label="Home"><Home size={21} strokeWidth={1.8} /></button>
-        <button type="button" className={`pillnav-item ${page === 'guidance' ? 'on' : ''}`} onClick={() => goToGuidance('quran')} aria-label="Quran"><BookOpen size={21} strokeWidth={1.8} /></button>
-        <button type="button" className={`pillnav-item ${page === 'focus' ? 'on' : ''}`} onClick={() => goTo('focus')} aria-label="Focus"><Target size={21} strokeWidth={1.8} /></button>
-        <button type="button" className={`pillnav-item ${page === 'profile' ? 'on' : ''}`} onClick={() => goTo('profile')} aria-label="Profile"><UserRound size={21} strokeWidth={1.8} /></button>
+        <button type="button" className={`pillnav-item ${(page === 'home' || page === 'dashboard') ? 'on' : ''}`} onClick={() => goTo('home')} aria-label={s.nav.home}><Home size={21} strokeWidth={1.8} /></button>
+        <button type="button" className={`pillnav-item ${page === 'guidance' ? 'on' : ''}`} onClick={() => goToGuidance('quran')} aria-label={s.nav.quran}><BookOpen size={21} strokeWidth={1.8} /></button>
+        <button type="button" className={`pillnav-item ${page === 'focus' ? 'on' : ''}`} onClick={() => goTo('focus')} aria-label={s.nav.focus}><Target size={21} strokeWidth={1.8} /></button>
+        <button type="button" className={`pillnav-item ${page === 'profile' ? 'on' : ''}`} onClick={() => goTo('profile')} aria-label={s.nav.profile}><UserRound size={21} strokeWidth={1.8} /></button>
       </nav>
-      {feedbackOpen && <FeedbackForm onClose={() => setFeedbackOpen(false)} onNotify={notify} />}
+      {feedbackOpen && <FeedbackForm onClose={() => setFeedbackOpen(false)} onNotify={notify} language={language} />}
       {toast && <div className="toast"><Check size={16} />{toast}</div>}
     </div>
   );
@@ -1383,11 +1425,12 @@ function ForgotPassword({ onBack, onSent }: { onBack: () => void; onSent: () => 
   );
 }
 
-function ResetPassword({ token, onDone, onBack }: { token: string; onDone: () => void; onBack: () => void }) {
+function ResetPassword({ token, onDone, onBack, onResendLink }: { token: string; onDone: () => void; onBack: () => void; onResendLink: () => void }) {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [linkExpired, setLinkExpired] = useState(false);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -1413,7 +1456,13 @@ function ResetPassword({ token, onDone, onBack }: { token: string; onDone: () =>
       });
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Password reset nahi ho paya.');
+      const message = err instanceof Error ? err.message : 'Password reset nahi ho paya.';
+      if (message.includes('invalid or has expired')) {
+        setLinkExpired(true);
+        setError('This reset link is invalid or has expired. Links work for 1 hour and can be used only once.');
+      } else {
+        setError(message);
+      }
     } finally {
       setBusy(false);
     }
@@ -1452,7 +1501,13 @@ function ResetPassword({ token, onDone, onBack }: { token: string; onDone: () =>
             required
           />
           {error && <p style={{ color: 'var(--red)', fontSize: 13, marginTop: 12 }}>{error}</p>}
-          <button type="submit" className="primary-button full-width" disabled={busy}>
+          {linkExpired && (
+            <button type="button" className="primary-button full-width" style={{ marginTop: 12 }} onClick={onResendLink}>
+              Send a fresh link
+              <ArrowRight size={16} />
+            </button>
+          )}
+          <button type="submit" className="primary-button full-width" disabled={busy || linkExpired}>
             {busy ? 'Please wait...' : 'Reset password'}
             <ArrowRight size={16} />
           </button>
@@ -1521,6 +1576,7 @@ function PrayerTimesPanel({
   now,
   onQaza,
   qazaBusy,
+  language,
 }: {
   prayerTimes: PrayerTimesResponse | null;
   prayerStatus: 'idle' | 'loading' | 'loaded' | 'error' | 'no-city';
@@ -1529,30 +1585,32 @@ function PrayerTimesPanel({
   now: Date;
   onQaza: (prayer: string) => void;
   qazaBusy: string | null;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   if (prayerStatus === 'loading' || prayerStatus === 'idle') {
     return (
       <section className="acard">
-        <p className="mut" style={{ margin: 0 }}>Loading prayer times…</p>
+        <p className="mut" style={{ margin: 0 }}>{s.deen.panelLoading}</p>
       </section>
     );
   }
   if (prayerStatus === 'no-city') {
     return (
       <section className="acard">
-        <p className="mut" style={{ margin: 0 }}>Add your city in Profile to see prayer times.</p>
+        <p className="mut" style={{ margin: 0 }}>{s.deen.panelNoCity}</p>
       </section>
     );
   }
   if (prayerStatus === 'error' || !prayerTimes) {
     return (
       <section className="acard">
-        <p className="mut" style={{ margin: 0 }}>{prayerError || 'Prayer times could not be loaded. Check your connection / city.'}</p>
+        <p className="mut" style={{ margin: 0 }}>{prayerError || s.deen.panelError}</p>
       </section>
     );
   }
   const nextName = prayerTimes.nextPrayer?.name ?? null;
-  const nextCountdown = prayerTimes.nextPrayer ? countdownTo(prayerTimes.nextPrayer.time, now) : '';
+  const nextCountdown = prayerTimes.nextPrayer ? countdownTo(prayerTimes.nextPrayer.time, now, language) : '';
   const missedNames = prayerNames.filter((name) => salahToday[name]?.status === 'missed');
 
   type Row = {
@@ -1566,19 +1624,19 @@ function PrayerTimesPanel({
   };
   const rows: Row[] = [];
   const order: { name: string; icon: IconType; sub: string }[] = [
-    { name: 'Fajr', icon: Moon, sub: 'Tulu-e-aftab se pehle' },
-    { name: 'Sunrise', icon: Sun, sub: 'Tulu-e-aftab' },
-    { name: 'Dhuhr', icon: Sun, sub: 'Dopeher ki namaz' },
-    { name: 'Asr', icon: Clock3, sub: 'Darmiyani namaz' },
-    { name: 'Maghrib', icon: Moon, sub: 'Suraj doobte hi' },
-    { name: 'Isha', icon: Moon, sub: 'Raat ki namaz' },
+    { name: 'Fajr', icon: Moon, sub: s.deen.subFajr },
+    { name: 'Sunrise', icon: Sun, sub: s.deen.subSunrise },
+    { name: 'Dhuhr', icon: Sun, sub: s.deen.subDhuhr },
+    { name: 'Asr', icon: Clock3, sub: s.deen.subAsr },
+    { name: 'Maghrib', icon: Moon, sub: s.deen.subMaghrib },
+    { name: 'Isha', icon: Moon, sub: s.deen.subIsha },
   ];
   for (const entry of order) {
     if (entry.name === 'Sunrise') {
       rows.push({
         name: 'Sunrise',
         time: prayerTimes.timings.Sunrise,
-        sub: 'Tulu-e-aftab',
+        sub: s.deen.subSunrise,
         pill: '—',
         pillClass: 'wait',
         highlight: false,
@@ -1589,15 +1647,15 @@ function PrayerTimesPanel({
     const status = salahToday[entry.name]?.status ?? 'pending';
     const isNext = nextName === entry.name && status !== 'prayed' && status !== 'missed' && status !== 'qaza';
     if (status === 'prayed') {
-      rows.push({ name: entry.name, time: prayerTimes.timings[entry.name as keyof typeof prayerTimes.timings], sub: 'Waqt par padhi', pill: 'Padhi ✓', pillClass: 'ok', highlight: false, icon: entry.icon });
+      rows.push({ name: entry.name, time: prayerTimes.timings[entry.name as keyof typeof prayerTimes.timings], sub: s.deen.statusPrayed, pill: s.deen.pillPrayed, pillClass: 'ok', highlight: false, icon: entry.icon });
     } else if (status === 'missed') {
-      rows.push({ name: entry.name, time: prayerTimes.timings[entry.name as keyof typeof prayerTimes.timings], sub: 'Waqt khatam', pill: 'Miss', pillClass: 'miss', highlight: false, icon: entry.icon });
+      rows.push({ name: entry.name, time: prayerTimes.timings[entry.name as keyof typeof prayerTimes.timings], sub: s.deen.statusMissed, pill: s.deen.pillMissed, pillClass: 'miss', highlight: false, icon: entry.icon });
     } else if (status === 'qaza') {
-      rows.push({ name: entry.name, time: prayerTimes.timings[entry.name as keyof typeof prayerTimes.timings], sub: 'Qaza padhi', pill: 'Qaza', pillClass: 'qaza', highlight: false, icon: entry.icon });
+      rows.push({ name: entry.name, time: prayerTimes.timings[entry.name as keyof typeof prayerTimes.timings], sub: s.deen.statusQaza, pill: s.deen.pillQaza, pillClass: 'qaza', highlight: false, icon: entry.icon });
     } else if (isNext) {
-      rows.push({ name: entry.name, time: prayerTimes.timings[entry.name as keyof typeof prayerTimes.timings], sub: nextCountdown ? `Agli namaz · ${nextCountdown} baaki` : 'Agli namaz', pill: 'Agli', pillClass: 'qaza', highlight: true, icon: entry.icon });
+      rows.push({ name: entry.name, time: prayerTimes.timings[entry.name as keyof typeof prayerTimes.timings], sub: nextCountdown ? s.deen.statusNextWithCountdown(nextCountdown) : s.deen.statusNext, pill: s.deen.pillNext, pillClass: 'qaza', highlight: true, icon: entry.icon });
     } else {
-      rows.push({ name: entry.name, time: prayerTimes.timings[entry.name as keyof typeof prayerTimes.timings], sub: 'Abhi waqt nahi aaya', pill: 'Baaki', pillClass: 'wait', highlight: false, icon: entry.icon });
+      rows.push({ name: entry.name, time: prayerTimes.timings[entry.name as keyof typeof prayerTimes.timings], sub: s.deen.statusPending, pill: s.deen.pillPending, pillClass: 'wait', highlight: false, icon: entry.icon });
     }
   }
 
@@ -1619,10 +1677,9 @@ function PrayerTimesPanel({
 
       {missedNames.map((name) => (
         <section className="acard deen-qaza-card" key={name}>
-          <h5>{name} ki qaza baaki hai</h5>
+          <h5>{s.deen.qazaTitle(name)}</h5>
           <p>
-            Aaj {name} miss ho gayi thi. Qaza padh lo to yahan mark kar do — asal miss wala
-            record history me waisa hi rahega.
+            {s.deen.qazaBody(name)}
           </p>
           <button
             type="button"
@@ -1630,16 +1687,15 @@ function PrayerTimesPanel({
             disabled={qazaBusy !== null}
             onClick={() => onQaza(name)}
           >
-            {qazaBusy === name ? 'Save ho raha hai…' : 'Qaza padh li ✓'}
+            {qazaBusy === name ? s.deen.qazaSaving : s.deen.qazaDone}
           </button>
         </section>
       ))}
 
       <section className="acard">
         <p className="mut" style={{ margin: 0 }}>
-          Time tumhare city ke hisab se aata hai. Kisi namaz ka apna time set kiya ho
-          (Onboarding Step 6) to wahi dikhta hai. Source: Aladhan · {prayerTimes.method} · {prayerTimes.city}
-          {prayerTimes.perPrayer && Object.values(prayerTimes.perPrayer).some((entry) => entry.source === 'manual') ? ' · kuch time manual set hain' : ''}.
+          {s.deen.sourceNote(prayerTimes.method, prayerTimes.city)}
+          {prayerTimes.perPrayer && Object.values(prayerTimes.perPrayer).some((entry) => entry.source === 'manual') ? s.deen.sourceNoteManual : ''}.
         </p>
       </section>
     </>
@@ -1663,6 +1719,7 @@ function Dashboard({
   sleepEndTime,
   unreadCount,
   onOpenNotifications,
+  language,
 }: {
   userName: string;
   onNavigate: (page: Page) => void;
@@ -1683,7 +1740,9 @@ function Dashboard({
   sleepEndTime: string;
   unreadCount: number;
   onOpenNotifications: () => void;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 30000);
@@ -1714,62 +1773,62 @@ function Dashboard({
     <div className="dash-screen">
       <header className="dash-head">
         <div>
-          <h4>Assalamu Alaikum, {userName}</h4>
+          <h4>{s.dashboard.greeting(userName)}</h4>
           <div className="dash-sub">{todayLabel}</div>
         </div>
-        <button type="button" className="dash-bell" onClick={onOpenNotifications} aria-label="Notifications">
+        <button type="button" className="dash-bell" onClick={onOpenNotifications} aria-label={s.notifications.title}>
           <Bell size={19} strokeWidth={1.8} />
           {unreadCount > 0 && <span className="dash-bell-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}
         </button>
       </header>
 
       <div className="dash-kpis">
-        <div className="dash-kpi"><b>{rewards?.total ?? 0}</b><span>POINTS</span></div>
-        <div className="dash-kpi"><b>{streak} din</b><span>STREAK</span></div>
-        <div className="dash-kpi"><b>{rewards?.badges.length ?? 0}</b><span>BADGES</span></div>
+        <div className="dash-kpi"><b>{rewards?.total ?? 0}</b><span>{s.dashboard.points}</span></div>
+        <div className="dash-kpi"><b>{s.common.days(streak)}</b><span>{s.dashboard.streak}</span></div>
+        <div className="dash-kpi"><b>{rewards?.badges.length ?? 0}</b><span>{s.dashboard.badges}</span></div>
       </div>
 
       <section className="dash-card">
-        <h5>Aaj ki progress</h5>
+        <h5>{s.dashboard.progressTitle}</h5>
         {dataLoading ? (
-          <p className="dash-empty">Aaj ka data load ho raha hai…</p>
+          <p className="dash-empty">{s.dashboard.loading}</p>
         ) : (
           <>
             {!hasActivity && !guestMode && (
-              <p className="dash-empty">Aaj abhi kuch nahi kiya — pehli namaz ya ek task se shuru karo. Yahan sirf asal progress dikhegi.</p>
+              <p className="dash-empty">{s.dashboard.empty}</p>
             )}
             {guestMode && (
-              <p className="dash-empty">Guest preview — apni progress dekhne ke liye sign in karo.</p>
+              <p className="dash-empty">{s.dashboard.guestEmpty}</p>
             )}
-            <div className="dash-statrow"><span>Namaz</span><span>{prayedCount} / 5 padhi</span></div>
+            <div className="dash-statrow"><span>{s.dashboard.prayer}</span><span>{s.dashboard.prayedOf(prayedCount)}</span></div>
             <div className="dash-prog"><i style={{ width: `${(prayedCount / 5) * 100}%` }} /></div>
-            <div className="dash-statrow"><span>Padhai</span><span>{totalTasksToday === 0 ? 'Aaj koi task nahi' : `${tasksCompletedToday} / ${totalTasksToday} task poore`}</span></div>
+            <div className="dash-statrow"><span>{s.dashboard.study}</span><span>{totalTasksToday === 0 ? s.dashboard.noTasksToday : s.dashboard.tasksDoneOf(tasksCompletedToday, totalTasksToday)}</span></div>
             <div className="dash-prog"><i style={{ width: totalTasksToday === 0 ? '0%' : `${Math.min(100, (tasksCompletedToday / totalTasksToday) * 100)}%` }} /></div>
-            <div className="dash-statrow"><span>Focus</span><span>{todayFocusMinutes} minute</span></div>
+            <div className="dash-statrow"><span>{s.dashboard.focus}</span><span>{s.dashboard.focusMinutes(todayFocusMinutes)}</span></div>
             <div className="dash-prog"><i style={{ width: `${focusBarPct}%` }} /></div>
-            <div className="dash-statrow"><span>Neend ka schedule</span><span>{guestMode ? 'Sign in karke schedule banao' : `${formatTime12h(sleepStartTime)} – ${formatTime12h(sleepEndTime)}${sleepLabel ? ` · ${sleepLabel}` : ''}`}</span></div>
+            <div className="dash-statrow"><span>{s.dashboard.sleepSchedule}</span><span>{guestMode ? s.dashboard.sleepSignIn : `${formatTime12h(sleepStartTime)} – ${formatTime12h(sleepEndTime)}${sleepLabel ? ` · ${sleepLabel}` : ''}`}</span></div>
             <div className="dash-prog dash-prog-peach"><i style={{ width: guestMode ? '0%' : '100%' }} /></div>
-            {!guestMode && <p className="dash-note">Neend ka time schedule hai — asal neend nahi.</p>}
+            {!guestMode && <p className="dash-note">{s.dashboard.sleepNote}</p>}
           </>
         )}
       </section>
 
-      <NextPrayerBanner prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} now={now} />
+      <NextPrayerBanner prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} now={now} language={language} />
 
       <section className="dash-card">
         {challenge ? (
           <>
-            <h5>Challenge — Day {challenge.currentDay}</h5>
-            <p className="dash-challenge-text">{challenge.challenge.title} · {challenge.completedDays} / {challenge.totalDays} din poore · {challenge.pointsEarned} points mile</p>
+            <h5>{s.dashboard.challengeDay(challenge.currentDay)}</h5>
+            <p className="dash-challenge-text">{s.dashboard.challengeLine(challenge.challenge.title, challenge.completedDays, challenge.totalDays, challenge.pointsEarned)}</p>
             <div className="dash-prog dash-prog-peach"><i style={{ width: `${challengePct}%` }} /></div>
-            <div className="dash-statrow"><span>{challenge.completedDays} / {challenge.totalDays} din</span><span>{challenge.streak > 0 ? `Streak ${challenge.streak} din 🔥` : 'Streak abhi nahi'}</span></div>
-            <button type="button" className="dash-challenge-btn" onClick={() => onNavigate('challenges')}>Aaj ka din dekho</button>
+            <div className="dash-statrow"><span>{s.dashboard.challengeDays(challenge.completedDays, challenge.totalDays)}</span><span>{challenge.streak > 0 ? s.dashboard.challengeStreak(challenge.streak) : s.dashboard.challengeNoStreak}</span></div>
+            <button type="button" className="dash-challenge-btn" onClick={() => onNavigate('challenges')}>{s.dashboard.challengeSeeToday}</button>
           </>
         ) : (
           <>
-            <h5>Challenge</h5>
-            <p className="dash-empty">Koi challenge active nahi hai. Ek challenge join karo aur roz thoda-thoda aage badho.</p>
-            <button type="button" className="dash-challenge-btn" onClick={() => onNavigate('challenges')}>Challenge join karo</button>
+            <h5>{s.dashboard.challengeTitle}</h5>
+            <p className="dash-empty">{s.dashboard.challengeEmpty}</p>
+            <button type="button" className="dash-challenge-btn" onClick={() => onNavigate('challenges')}>{s.dashboard.challengeJoin}</button>
           </>
         )}
       </section>
@@ -1783,7 +1842,7 @@ function Dashboard({
  * 'salah-calendar' route now, the reflection quote card is gone (not
  * in the preview), and the static "dua for today" card is gone — its
  * content is covered by Guidance / Duas. */
-function Deen({ onNotify, prayerTimes, prayerStatus, prayerError, salahToday, onRefreshSalah, onOpenGuidance, onBack, profile }: {
+function Deen({ onNotify, prayerTimes, prayerStatus, prayerError, salahToday, onRefreshSalah, onOpenGuidance, onBack, profile, language }: {
   onNotify: (message: string) => void;
   prayerTimes: PrayerTimesResponse | null;
   prayerStatus: 'idle' | 'loading' | 'loaded' | 'error' | 'no-city';
@@ -1793,7 +1852,9 @@ function Deen({ onNotify, prayerTimes, prayerStatus, prayerError, salahToday, on
   onOpenGuidance: (tab: GuidanceTab, surahNumber?: number) => void;
   onBack: () => void;
   profile: UserProfile;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 30000);
@@ -1814,56 +1875,56 @@ function Deen({ onNotify, prayerTimes, prayerStatus, prayerError, salahToday, on
         body: JSON.stringify({ prayer, status: 'qaza' }),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Qaza save nahi ho payi.');
+      if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : s.deen.qazaSaveFailed);
       await onRefreshSalah();
-      onNotify(`${prayer} ki qaza mark ho gayi.`);
+      onNotify(s.deen.qazaMarked(prayer));
     } catch (error) {
-      onNotify(error instanceof Error ? error.message : 'Qaza save nahi ho payi.');
+      onNotify(error instanceof Error ? error.message : s.deen.qazaSaveFailed);
     } finally {
       setQazaBusy(null);
     }
   }
 
   const city = prayerTimes?.city || profile.city || '';
-  const methodLine = profile.asrMethod ? `${profile.asrMethod} tareeqa` : (prayerTimes?.method ?? '');
-  const sub = [city, methodLine].filter(Boolean).join(' · ') || 'Namaz ke time';
+  const methodLine = profile.asrMethod ? s.deen.methodLine(profile.asrMethod) : (prayerTimes?.method ?? '');
+  const sub = [city, methodLine].filter(Boolean).join(' · ') || s.deen.subFallback;
 
   return (
     <section className="deen-screen">
       <div className="apphead">
-        <button type="button" className="aback" onClick={onBack} aria-label="Wapas jao">
+        <button type="button" className="aback" onClick={onBack} aria-label={s.common.back}>
           <ChevronLeft size={20} />
         </button>
         <div>
-          <h4>Namaz ke Time</h4>
+          <h4>{s.deen.title}</h4>
           <div className="asub">{sub}</div>
         </div>
         <div className="aright">
           <button type="button" className="sbtn gh" onClick={() => onOpenGuidance('hijri')}>
-            <CalendarDays size={13} /> Islamic calendar
+            <CalendarDays size={13} /> {s.deen.islamicCalendar}
           </button>
         </div>
       </div>
 
-      <NextPrayerBanner prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} now={now} />
+      <NextPrayerBanner prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} now={now} language={language} />
 
-      <PrayerTimesPanel prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} now={now} onQaza={handleQaza} qazaBusy={qazaBusy} />
+      <PrayerTimesPanel prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} now={now} onQaza={handleQaza} qazaBusy={qazaBusy} language={language} />
 
       <section className="acard">
-        <h5>Apni daily practice</h5>
+        <h5>{s.deen.dailyPractice}</h5>
         <div className="prow prow-link" role="button" tabIndex={0} onClick={() => onOpenGuidance('duas')} onKeyDown={(e) => { if (e.key === 'Enter') onOpenGuidance('duas'); }}>
           <span className="pic"><BookMarked size={19} strokeWidth={1.8} /></span>
-          <div>Duas<small>Verified supplications</small></div>
+          <div>{s.deen.duasRow}<small>{s.deen.duasRowSub}</small></div>
           <ChevronRight size={17} className="prow-chev" />
         </div>
         <div className="prow prow-link" role="button" tabIndex={0} onClick={() => onOpenGuidance('hijri')} onKeyDown={(e) => { if (e.key === 'Enter') onOpenGuidance('hijri'); }}>
           <span className="pic"><CalendarDays size={19} strokeWidth={1.8} /></span>
-          <div>Islamic calendar<small>Dates &amp; occasions</small></div>
+          <div>{s.deen.hijriRow}<small>{s.deen.hijriRowSub}</small></div>
           <ChevronRight size={17} className="prow-chev" />
         </div>
         <div className="prow prow-link" role="button" tabIndex={0} onClick={() => onOpenGuidance('mosques')} onKeyDown={(e) => { if (e.key === 'Enter') onOpenGuidance('mosques'); }}>
           <span className="pic"><Compass size={19} strokeWidth={1.8} /></span>
-          <div>Find a masjid<small>Nearby places</small></div>
+          <div>{s.deen.mosquesRow}<small>{s.deen.mosquesRowSub}</small></div>
           <ChevronRight size={17} className="prow-chev" />
         </div>
       </section>
@@ -1905,6 +1966,7 @@ function Study({
   onRefresh,
   onNotify,
   onBack,
+  language,
 }: {
   subjects: StudySubject[];
   tasks: StudyTask[];
@@ -1919,7 +1981,9 @@ function Study({
   onRefresh: () => Promise<void>;
   onNotify: (message: string) => void;
   onBack: () => void;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const subjectById = new Map(subjects.map((s) => [s.id, s]));
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [timerMode, setTimerMode] = useState<'focus' | 'break'>('focus');
@@ -1971,10 +2035,10 @@ function Study({
     completingRef.current = true;
     completePomodoro(activeSession.id)
       .then(async () => {
-        onNotify(activeSession.mode === 'focus' ? 'Focus session complete. Well done.' : 'Break complete.');
+        onNotify(activeSession.mode === 'focus' ? s.study.focusComplete : s.study.breakComplete);
         await onRefresh();
       })
-      .catch((error) => onNotify(error instanceof Error ? error.message : 'Session could not be completed.'))
+      .catch((error) => onNotify(error instanceof Error ? error.message : s.study.sessionCompleteError))
       .finally(() => { completingRef.current = false; });
   }, [activeSession, remainingMs, onNotify, onRefresh]);
 
@@ -1982,15 +2046,15 @@ function Study({
     return (
       <>
         <PageHeading
-          eyebrow="ILM · LEARNING SYSTEM"
-          title="Make your focus count."
-          text="Plan your study sessions, protect your attention and keep your learning visible."
+          eyebrow={s.study.guestEyebrow}
+          title={s.study.guestTitle}
+          text={s.study.guestText}
         />
         <section className="panel" style={{ padding: 28 }}>
-          <span className="eyebrow">SIGN IN TO TRACK</span>
-          <h3>Your study planner lives in your account</h3>
+          <span className="eyebrow">{s.study.guestPanelEyebrow}</span>
+          <h3>{s.study.guestPanelTitle}</h3>
           <p className="onboarding-help">
-            Sign in to save subjects, tasks and focus sessions. Nothing is tracked in guest preview.
+            {s.study.guestPanelText}
           </p>
         </section>
       </>
@@ -1999,15 +2063,15 @@ function Study({
 
   const scheduleLines: string[] = [];
   if (schedule?.collegeStartTime && schedule?.collegeEndTime) {
-    scheduleLines.push(`College: ${formatTime12h(schedule.collegeStartTime)} – ${formatTime12h(schedule.collegeEndTime)}`);
+    scheduleLines.push(s.study.collegeLine(formatTime12h(schedule.collegeStartTime), formatTime12h(schedule.collegeEndTime)));
   }
   if (schedule?.studyStartTime && schedule?.studyEndTime) {
-    scheduleLines.push(`Study window: ${formatTime12h(schedule.studyStartTime)} – ${formatTime12h(schedule.studyEndTime)}`);
+    scheduleLines.push(s.study.studyWindowLine(formatTime12h(schedule.studyStartTime), formatTime12h(schedule.studyEndTime)));
   }
-  if (schedule?.dailyStudyTarget) scheduleLines.push(`Daily target: ${schedule.dailyStudyTarget}`);
-  if (schedule?.dailyStudyHours) scheduleLines.push(`Daily study hours: ${schedule.dailyStudyHours}`);
-  if (schedule?.studyBreakMinutes) scheduleLines.push(`Break: ${schedule.studyBreakMinutes} min`);
-  if (schedule?.preferredStudyDays?.length) scheduleLines.push(`Study days: ${schedule.preferredStudyDays.join(', ')}`);
+  if (schedule?.dailyStudyTarget) scheduleLines.push(s.study.dailyTargetLine(schedule.dailyStudyTarget));
+  if (schedule?.dailyStudyHours) scheduleLines.push(s.study.dailyHoursLine(schedule.dailyStudyHours));
+  if (schedule?.studyBreakMinutes) scheduleLines.push(s.study.breakLine(schedule.studyBreakMinutes));
+  if (schedule?.preferredStudyDays?.length) scheduleLines.push(s.study.studyDaysLine(schedule.preferredStudyDays.join(', ')));
 
   const upcomingTasks = tasks
     .filter((t) => t.status !== 'Completed' && t.dueDate && t.dueDate > todayKey())
@@ -2052,12 +2116,12 @@ function Study({
 
   async function saveTask() {
     if (!taskTitle.trim()) {
-      onNotify('Task ka naam likhna zaroori hai.');
+      onNotify(s.study.taskNameRequired);
       return;
     }
     const duration = taskDuration.trim() ? Number.parseInt(taskDuration, 10) : null;
     if (duration !== null && (!Number.isFinite(duration) || duration < 1 || duration > 480)) {
-      onNotify('Duration 1 se 480 minutes ke beech rakho.');
+      onNotify(s.study.durationRange);
       return;
     }
     const input = {
@@ -2074,15 +2138,15 @@ function Study({
     try {
       if (taskModal?.task) {
         await updateTask(taskModal.task.id, input);
-        onNotify('Task updated.');
+        onNotify(s.study.taskUpdated);
       } else {
         await createTask(input);
-        onNotify('Task saved.');
+        onNotify(s.study.taskSaved);
       }
       setTaskModal(null);
       await onRefresh();
     } catch (error) {
-      onNotify(error instanceof Error ? error.message : 'Task save nahi ho payi.');
+      onNotify(error instanceof Error ? error.message : s.study.taskSaveFailed);
     } finally {
       setBusy(false);
       setPendingAction(null);
@@ -2095,9 +2159,9 @@ function Study({
     try {
       await setTaskStatus(task.id, status);
       await onRefresh();
-      onNotify(status === 'Completed' ? 'Task completed.' : `Task marked ${status}.`);
+      onNotify(status === 'Completed' ? s.study.taskCompleted : s.study.taskMarked(s.study.taskStatus[status]));
     } catch (error) {
-      onNotify(error instanceof Error ? error.message : 'Task update nahi ho paya.');
+      onNotify(error instanceof Error ? error.message : s.study.taskUpdateFailed);
     } finally {
       setStatusPending(null);
     }
@@ -2108,15 +2172,15 @@ function Study({
       await deleteTask(task.id);
       setConfirmDeleteTaskId(null);
       await onRefresh();
-      onNotify('Task deleted.');
+      onNotify(s.study.taskDeleted);
     } catch (error) {
-      onNotify(error instanceof Error ? error.message : 'Task delete nahi ho paya.');
+      onNotify(error instanceof Error ? error.message : s.study.taskDeleteFailed);
     }
   }
 
   async function saveSubject() {
     if (!subjectForm.name.trim()) {
-      onNotify('Subject ka naam likhna zaroori hai.');
+      onNotify(s.study.subjectNameRequired);
       return;
     }
     setBusy(true);
@@ -2124,15 +2188,15 @@ function Study({
     try {
       if (subjectForm.id) {
         await updateSubject(subjectForm.id, { name: subjectForm.name.trim(), label: subjectForm.label.trim(), colour: subjectForm.colour });
-        onNotify('Subject updated.');
+        onNotify(s.study.subjectUpdated);
       } else {
         await createSubject({ name: subjectForm.name.trim(), label: subjectForm.label.trim(), colour: subjectForm.colour });
-        onNotify('Subject added.');
+        onNotify(s.study.subjectAdded);
       }
       setSubjectForm({ id: null, name: '', label: '', colour: 'mint' });
       await onRefresh();
     } catch (error) {
-      onNotify(error instanceof Error ? error.message : 'Subject save nahi ho paya.');
+      onNotify(error instanceof Error ? error.message : s.study.subjectSaveFailed);
     } finally {
       setBusy(false);
       setPendingAction(null);
@@ -2144,9 +2208,9 @@ function Study({
       await deleteSubject(subject.id);
       setConfirmDeleteSubjectId(null);
       await onRefresh();
-      onNotify('Subject deleted. Its tasks are now unassigned.');
+      onNotify(s.study.subjectDeleted);
     } catch (error) {
-      onNotify(error instanceof Error ? error.message : 'Subject delete nahi ho paya.');
+      onNotify(error instanceof Error ? error.message : s.study.subjectDeleteFailed);
     }
   }
 
@@ -2164,9 +2228,9 @@ function Study({
       });
       setConfirmReset(false);
       await onRefresh();
-      onNotify(timerMode === 'focus' ? 'Focus session started.' : 'Break started.');
+      onNotify(timerMode === 'focus' ? s.study.focusStarted : s.study.breakStarted);
     } catch (error) {
-      onNotify(error instanceof Error ? error.message : 'Timer could not be started.');
+      onNotify(error instanceof Error ? error.message : s.study.timerStartFailed);
     } finally {
       setBusy(false);
       setPendingAction(null);
@@ -2180,9 +2244,9 @@ function Study({
     try {
       await pausePomodoro(activeSession.id);
       await onRefresh();
-      onNotify('Session paused.');
+      onNotify(s.study.sessionPaused);
     } catch (error) {
-      onNotify(error instanceof Error ? error.message : 'Session pause nahi ho paya.');
+      onNotify(error instanceof Error ? error.message : s.study.sessionPauseFailed);
     } finally {
       setBusy(false);
       setPendingAction(null);
@@ -2196,9 +2260,9 @@ function Study({
     try {
       await resumePomodoro(activeSession.id);
       await onRefresh();
-      onNotify('Session resumed.');
+      onNotify(s.study.sessionResumed);
     } catch (error) {
-      onNotify(error instanceof Error ? error.message : 'Session resume nahi ho paya.');
+      onNotify(error instanceof Error ? error.message : s.study.sessionResumeFailed);
     } finally {
       setBusy(false);
       setPendingAction(null);
@@ -2214,9 +2278,9 @@ function Study({
     try {
       await completePomodoro(activeSession.id);
       await onRefresh();
-      onNotify('Session finished.');
+      onNotify(s.study.sessionFinished);
     } catch (error) {
-      onNotify(error instanceof Error ? error.message : 'Session complete nahi ho paya.');
+      onNotify(error instanceof Error ? error.message : s.study.sessionCompleteFailed);
     } finally {
       setBusy(false);
       setPendingAction(null);
@@ -2231,9 +2295,9 @@ function Study({
       await abandonPomodoro(activeSession.id);
       setConfirmReset(false);
       await onRefresh();
-      onNotify('Session reset. It stays in history as abandoned (0 min).');
+      onNotify(s.study.sessionReset);
     } catch (error) {
-      onNotify(error instanceof Error ? error.message : 'Session reset nahi ho paya.');
+      onNotify(error instanceof Error ? error.message : s.study.sessionResetFailed);
     } finally {
       setBusy(false);
       setPendingAction(null);
@@ -2249,7 +2313,7 @@ function Study({
   const studySub = [
     todayDate.toLocaleDateString('en-IN', { weekday: 'long' }),
     todayDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
-    schedule?.dailyStudyTarget ? `Target ${schedule.dailyStudyTarget}` : (schedule?.dailyStudyHours ? `Target ${schedule.dailyStudyHours} ghante` : ''),
+    schedule?.dailyStudyTarget ? s.study.targetLine(schedule.dailyStudyTarget) : (schedule?.dailyStudyHours ? s.study.targetHoursLine(schedule.dailyStudyHours) : ''),
   ].filter(Boolean).join(' · ');
   // Aaj ka target bar: today's real focus minutes against the saved
   // daily study hours (parsed from the profile). No saved target →
@@ -2262,15 +2326,15 @@ function Study({
   return (
     <section className="study-screen">
       <div className="apphead">
-        <button type="button" className="aback" onClick={onBack} aria-label="Wapas jao">
+        <button type="button" className="aback" onClick={onBack} aria-label={s.common.back}>
           <ChevronLeft size={20} />
         </button>
         <div>
-          <h4>Study Planner</h4>
+          <h4>{s.study.title}</h4>
           <div className="asub">{studySub}</div>
         </div>
         <div className="aright">
-          <button type="button" className="sbtn" onClick={() => openTaskModal()}>+ Task</button>
+          <button type="button" className="sbtn" onClick={() => openTaskModal()}>{s.study.addTask}</button>
         </div>
       </div>
 
@@ -2284,10 +2348,10 @@ function Study({
         <section className="panel schedule-card">
           <div className="panel-top">
             <div>
-              <span className="eyebrow">YOUR SCHEDULE</span>
-              <h3>Aaj ke tasks</h3>
+              <span className="eyebrow">{s.study.scheduleEyebrow}</span>
+              <h3>{s.study.scheduleTitle}</h3>
             </div>
-            <div className="date-chip small-date"><CalendarDays size={14} /> Today</div>
+            <div className="date-chip small-date"><CalendarDays size={14} /> {s.study.todayChip}</div>
           </div>
 
           {scheduleLines.length > 0 ? (
@@ -2295,19 +2359,19 @@ function Study({
               {scheduleLines.map((line) => <span key={line}>{line}</span>)}
             </div>
           ) : (
-            <p className="onboarding-help">No college or study schedule saved yet. Add it during onboarding or in Profile to see it here.</p>
+            <p className="onboarding-help">{s.study.noSchedule}</p>
           )}
 
           {targetMinutes !== null && targetPct !== null && (
             <>
-              <div className="statrow">Aaj ka target <span>{`${(todayFocusMinutes / 60).toFixed(1)} / ${targetHours} ghante ho gaya`}</span></div>
+              <div className="statrow">{s.study.todayTarget} <span>{s.study.todayTargetDone((todayFocusMinutes / 60).toFixed(1), String(targetHours))}</span></div>
               <div className="prog"><i style={{ width: `${targetPct}%` }} /></div>
             </>
           )}
 
           <div className="task-list full-task-list">
             {todayTasks.length === 0 && (
-              <p className="onboarding-help">No tasks for today yet. Add your first task to start tracking.</p>
+              <p className="onboarding-help">{s.study.noTasksToday}</p>
             )}
             {todayTasks.map((task) => {
               const subject = task.subjectId ? subjectById.get(task.subjectId) : undefined;
@@ -2321,7 +2385,7 @@ function Study({
                     className={`tick ${task.status === 'Completed' ? 'done' : ''}`}
                     disabled={rowPending}
                     onClick={() => changeStatus(task, task.status === 'Completed' ? 'Pending' : 'Completed')}
-                    aria-label={task.status === 'Completed' ? `${task.title} dobara kholo` : `${task.title} poora mark karo`}
+                    aria-label={task.status === 'Completed' ? s.study.reopenAria(task.title) : s.study.completeAria(task.title)}
                   >
                     {task.status === 'Completed' ? '✓' : ''}
                   </button>
@@ -2329,29 +2393,29 @@ function Study({
                   <div>
                     <strong>{task.title}</strong>
                     <small>
-                      {task.startTime ? formatTime12h(task.startTime) : 'Not scheduled'}
-                      {task.dueDate ? ` · Due ${task.dueDate}` : ''}
-                      {subject ? ` · ${subject.name}` : ' · No subject'}
+                      {task.startTime ? formatTime12h(task.startTime) : s.study.notScheduled}
+                      {task.dueDate ? ` · ${s.study.dueOn(task.dueDate)}` : ''}
+                      {subject ? ` · ${subject.name}` : ` · ${s.study.noSubject}`}
                       {task.durationMinutes ? ` · ${task.durationMinutes}m` : ''}
                     </small>
                     {task.description && <small>{task.description}</small>}
                   </div>
                   <span className={`status-tag ${task.status === 'Completed' ? 'status-done' : task.status === 'In Progress' ? 'status-live' : ''}`}>
-                    {task.status}
+                    {s.study.taskStatus[task.status]}
                   </span>
                   <div className="task-actions">
                     {task.status !== 'Completed' && (
                       <>
-                        {task.status !== 'In Progress' && <button disabled={rowPending} onClick={() => changeStatus(task, 'In Progress')}>{rowPending && statusPending?.status === 'In Progress' ? 'Saving…' : 'Start'}</button>}
-                        <button disabled={rowPending} onClick={() => changeStatus(task, 'Completed')}>{rowPending && statusPending?.status === 'Completed' ? 'Saving…' : 'Complete'}</button>
+                        {task.status !== 'In Progress' && <button disabled={rowPending} onClick={() => changeStatus(task, 'In Progress')}>{rowPending && statusPending?.status === 'In Progress' ? s.study.saving : s.study.start}</button>}
+                        <button disabled={rowPending} onClick={() => changeStatus(task, 'Completed')}>{rowPending && statusPending?.status === 'Completed' ? s.study.saving : s.study.complete}</button>
                       </>
                     )}
-                    {task.status === 'Completed' && <button disabled={rowPending} onClick={() => changeStatus(task, 'Pending')}>{rowPending && statusPending?.status === 'Pending' ? 'Saving…' : 'Reopen'}</button>}
-                    <button onClick={() => openTaskModal(task)}>Edit</button>
+                    {task.status === 'Completed' && <button disabled={rowPending} onClick={() => changeStatus(task, 'Pending')}>{rowPending && statusPending?.status === 'Pending' ? s.study.saving : s.study.reopen}</button>}
+                    <button onClick={() => openTaskModal(task)}>{s.study.edit}</button>
                     {confirmDeleteTaskId === task.id ? (
-                      <button onClick={() => removeTask(task)}>Confirm?</button>
+                      <button onClick={() => removeTask(task)}>{s.study.confirmDelete}</button>
                     ) : (
-                      <button onClick={() => setConfirmDeleteTaskId(task.id)}>Delete</button>
+                      <button onClick={() => setConfirmDeleteTaskId(task.id)}>{s.study.delete}</button>
                     )}
                   </div>
                 </div>
@@ -2361,16 +2425,16 @@ function Study({
 
           {upcomingTasks.length > 0 && (
             <>
-              <h4 className="upcoming-heading">Upcoming</h4>
+              <h4 className="upcoming-heading">{s.study.upcoming}</h4>
               <div className="task-list">
                 {upcomingTasks.map((task) => {
                   const subject = task.subjectId ? subjectById.get(task.subjectId) : undefined;
                   return (
                     <div className="task-row" key={task.id}>
                       <span className={`task-dot ${subject?.colour ?? 'mint'}`} />
-                      <div><strong>{task.title}</strong><small>Due {task.dueDate}{subject ? ` · ${subject.name}` : ' · No subject'}</small></div>
-                      <span className="status-tag">{task.status}</span>
-                      <button className="task-action-link" onClick={() => openTaskModal(task)}>Edit</button>
+                      <div><strong>{task.title}</strong><small>{s.study.dueOn(task.dueDate!)}{subject ? ` · ${subject.name}` : ` · ${s.study.noSubject}`}</small></div>
+                      <span className="status-tag">{s.study.taskStatus[task.status]}</span>
+                      <button className="task-action-link" onClick={() => openTaskModal(task)}>{s.study.edit}</button>
                     </div>
                   );
                 })}
@@ -2378,18 +2442,18 @@ function Study({
             </>
           )}
 
-          <button className="add-row" onClick={() => openTaskModal()}><Plus size={15} /> Add another session</button>
-          <p className="modal-note">Streak rule: a day counts when a focus session finishes or a task is completed.</p>
+          <button className="add-row" onClick={() => openTaskModal()}><Plus size={15} /> {s.study.addAnother}</button>
+          <p className="modal-note">{s.study.streakRule}</p>
         </section>
 
         <section className="panel subjects-card">
           <div className="panel-top">
             <div>
-              <span className="eyebrow">YOUR SUBJECTS</span>
-              <h3>Your subjects</h3>
+              <span className="eyebrow">{s.study.subjectsEyebrow}</span>
+              <h3>{s.study.subjectsTitle}</h3>
             </div>
             <button className="subtle-action" onClick={() => setShowSubjects(!showSubjects)}>
-              {showSubjects ? 'Done' : 'Manage subjects'} <ArrowUpRight size={13} />
+              {showSubjects ? s.study.done : s.study.manageSubjects} <ArrowUpRight size={13} />
             </button>
           </div>
           <div className="chiprow study-subject-chips">
@@ -2408,16 +2472,16 @@ function Study({
               className="mchip mchip-add"
               onClick={() => { setSubjectForm({ id: null, name: '', label: '', colour: 'mint' }); setShowSubjects(true); }}
             >
-              + Naya subject
+              {s.study.newSubject}
             </button>
           </div>
           {showSubjects && (
             <div className="subject-form">
-              <label className="field-label">Subject name</label>
-              <input className="form-input" value={subjectForm.name} onChange={(e) => setSubjectForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Applied Mathematics" />
-              <label className="field-label">Label / code (optional)</label>
-              <input className="form-input" value={subjectForm.label} onChange={(e) => setSubjectForm((f) => ({ ...f, label: e.target.value }))} placeholder="e.g. 312301" />
-              <label className="field-label">Colour</label>
+              <label className="field-label">{s.study.subjectName}</label>
+              <input className="form-input" value={subjectForm.name} onChange={(e) => setSubjectForm((f) => ({ ...f, name: e.target.value }))} placeholder={s.study.subjectNamePlaceholder} />
+              <label className="field-label">{s.study.subjectLabel}</label>
+              <input className="form-input" value={subjectForm.label} onChange={(e) => setSubjectForm((f) => ({ ...f, label: e.target.value }))} placeholder={s.study.subjectLabelPlaceholder} />
+              <label className="field-label">{s.study.colour}</label>
               <div className="colour-picker">
                 {subjectColours.map((c) => (
                   <button
@@ -2430,32 +2494,32 @@ function Study({
                 ))}
               </div>
               <button className="primary-button" disabled={busy} onClick={saveSubject}>
-                {pendingAction === 'save-subject' ? 'Saving…' : subjectForm.id ? 'Save subject' : 'Add subject'}
+                {pendingAction === 'save-subject' ? s.study.saving : subjectForm.id ? s.study.saveSubject : s.study.addSubject}
               </button>
               {subjectForm.id && (
                 <button className="text-button" onClick={() => setSubjectForm({ id: null, name: '', label: '', colour: 'mint' })}>
-                  Cancel edit
+                  {s.study.cancelEdit}
                 </button>
               )}
-              <p className="modal-note">Deleting a subject keeps its tasks — they become “No subject”.</p>
+              <p className="modal-note">{s.study.deleteSubjectNote}</p>
             </div>
           )}
           <div className="subject-list">
             {subjects.length === 0 && (
-              <p className="onboarding-help">No subjects yet. Add your first subject to organise tasks and focus time.</p>
+              <p className="onboarding-help">{s.study.noSubjects}</p>
             )}
             {subjects.map((subject) => {
               const row = subjectStats(subject);
               return (
                 <div key={subject.id}>
-                  <SubjectRow name={subject.name} label={subject.label} tasksDone={row.tasksDone} tasksTotal={row.tasksTotal} focusMinutes={row.focusMinutesWeek} colour={subject.colour} />
+                  <SubjectRow name={subject.name} label={subject.label} tasksDone={row.tasksDone} tasksTotal={row.tasksTotal} focusMinutes={row.focusMinutesWeek} colour={subject.colour} language={language} />
                   {showSubjects && (
                     <div className="subject-actions">
-                      <button onClick={() => setSubjectForm({ id: subject.id, name: subject.name, label: subject.label, colour: subject.colour })}>Edit</button>
+                      <button onClick={() => setSubjectForm({ id: subject.id, name: subject.name, label: subject.label, colour: subject.colour })}>{s.study.edit}</button>
                       {confirmDeleteSubjectId === subject.id ? (
-                        <button onClick={() => removeSubject(subject)}>Confirm delete?</button>
+                        <button onClick={() => removeSubject(subject)}>{s.study.confirmDeleteSubject}</button>
                       ) : (
-                        <button onClick={() => setConfirmDeleteSubjectId(subject.id)}>Delete</button>
+                        <button onClick={() => setConfirmDeleteSubjectId(subject.id)}>{s.study.delete}</button>
                       )}
                     </div>
                   )}
@@ -2466,31 +2530,31 @@ function Study({
         </section>
 
         <section className="panel timer-card">
-          <span className="eyebrow">POMODORO · FOCUS TIMER</span>
+          <span className="eyebrow">{s.study.timerEyebrow}</span>
           <div className="timer-circle">
             <div>
               <strong>{activeSession ? formatCountdown(remainingMs ?? 0) : `${String(selectedMinutes).padStart(2, '0')}:00`}</strong>
               <span>
                 {activeSession
                   ? activeSession.status === 'paused'
-                    ? 'Paused'
-                    : activeSession.mode === 'focus' ? 'Focus session' : 'Break'
-                  : 'Ready when you are'}
+                    ? s.study.paused
+                    : activeSession.mode === 'focus' ? s.study.focusSession : s.study.breakLabel
+                  : s.study.ready}
               </span>
             </div>
           </div>
           {activeSession && (
             <p className="muted-footnote">
-              {activeSession.mode === 'focus' ? `${activeSession.plannedMinutes}-minute focus` : `${activeSession.plannedMinutes}-minute break`}
+              {activeSession.mode === 'focus' ? s.study.focusMinutesLabel(activeSession.plannedMinutes) : s.study.breakMinutesLabel(activeSession.plannedMinutes)}
               {activeSession.taskId ? ` · ${tasks.find((t) => t.id === activeSession.taskId)?.title ?? ''}` : ''}
-              {' · '}Saved on the server — a refresh won&apos;t stop the timer.
+              {' · '}{s.study.timerSavedNote}
             </p>
           )}
           {!activeSession && (
             <>
               <div className="timer-presets">
-                <button className={timerMode === 'focus' ? 'preset-selected' : ''} onClick={() => { setTimerMode('focus'); setSelectedMinutes(25); }}>Focus</button>
-                <button className={timerMode === 'break' ? 'preset-selected' : ''} onClick={() => { setTimerMode('break'); setSelectedMinutes(breakDefault); }}>Break</button>
+                <button className={timerMode === 'focus' ? 'preset-selected' : ''} onClick={() => { setTimerMode('focus'); setSelectedMinutes(25); }}>{s.study.focusTab}</button>
+                <button className={timerMode === 'break' ? 'preset-selected' : ''} onClick={() => { setTimerMode('break'); setSelectedMinutes(breakDefault); }}>{s.study.breakTab}</button>
               </div>
               <div className="timer-presets">
                 {(timerMode === 'focus' ? [25, 45, 60] : breakPresets).map((v) => (
@@ -2505,9 +2569,9 @@ function Study({
               </div>
               {timerMode === 'focus' && (
                 <>
-                  <label className="field-label">Focus on a task (optional)</label>
+                  <label className="field-label">{s.study.focusOnTask}</label>
                   <select className="form-input" value={focusTaskId} onChange={(e) => setFocusTaskId(e.target.value)}>
-                    <option value="">No specific task</option>
+                    <option value="">{s.study.noSpecificTask}</option>
                     {tasks.filter((t) => t.status !== 'Completed').map((t) => (
                       <option key={t.id} value={t.id}>{t.title}</option>
                     ))}
@@ -2515,10 +2579,10 @@ function Study({
                 </>
               )}
               {timerMode === 'break' && (
-                <small className="muted-footnote">Break default ({breakDefault} min) comes from your onboarding study settings.</small>
+                <small className="muted-footnote">{s.study.breakDefaultNote(breakDefault)}</small>
               )}
               <button className="primary-button full-width" disabled={busy} onClick={handleStartTimer}>
-                {pendingAction === 'start' ? 'Starting…' : `Start ${timerMode === 'focus' ? 'focus' : 'break'} session`} <ArrowRight size={15} />
+                {pendingAction === 'start' ? s.study.starting : timerMode === 'focus' ? s.study.startFocus : s.study.startBreak} <ArrowRight size={15} />
               </button>
             </>
           )}
@@ -2526,40 +2590,40 @@ function Study({
             <div className="timer-actions">
               {activeSession.status === 'active' ? (
                 <button className="primary-button full-width" disabled={busy} onClick={handlePauseTimer}>
-                  <Timer size={15} /> {pendingAction === 'pause' ? 'Pausing…' : 'Pause session'}
+                  <Timer size={15} /> {pendingAction === 'pause' ? s.study.pausing : s.study.pauseSession}
                 </button>
               ) : (
                 <button className="primary-button full-width" disabled={busy} onClick={handleResumeTimer}>
-                  {pendingAction === 'resume' ? 'Resuming…' : 'Resume session'} <ArrowRight size={15} />
+                  {pendingAction === 'resume' ? s.study.resuming : s.study.resumeSession} <ArrowRight size={15} />
                 </button>
               )}
               <button className="outline-button full-width" disabled={busy} onClick={handleCompleteTimer}>
-                {pendingAction === 'complete' ? 'Finishing…' : 'Finish now'}
+                {pendingAction === 'complete' ? s.study.finishing : s.study.finishNow}
               </button>
               {confirmReset ? (
                 <button className="outline-button full-width" disabled={busy} onClick={handleAbandonTimer}>
-                  {pendingAction === 'abandon' ? 'Resetting…' : 'Confirm reset — session stays in history as abandoned (0 min)'}
+                  {pendingAction === 'abandon' ? s.study.resetting : s.study.confirmReset}
                 </button>
               ) : (
                 <button className="text-button" disabled={busy} onClick={() => setConfirmReset(true)}>
-                  Reset timer
+                  {s.study.resetTimer}
                 </button>
               )}
             </div>
           )}
-          <small className="muted-footnote">The server stores the start time, so refreshing, logging out, or switching devices keeps the timer running.</small>
+          <small className="muted-footnote">{s.study.timerServerNote}</small>
         </section>
 
         <section className="panel history-card">
-          <SectionTitle title="Focus history" />
+          <SectionTitle title={s.study.historyTitle} />
           {history.length === 0 ? (
-            <p className="onboarding-help">No focus sessions yet. Finished and abandoned sessions will appear here with their real minutes.</p>
+            <p className="onboarding-help">{s.study.noHistory}</p>
           ) : (
             <div className="history-list">
               {history.slice(0, 10).map((session) => (
                 <div className="history-row" key={session.id}>
                   <div>
-                    <strong>{session.mode === 'focus' ? 'Focus' : 'Break'} · {session.plannedMinutes} min</strong>
+                    <strong>{session.mode === 'focus' ? s.study.historyFocus(session.plannedMinutes) : s.study.historyBreak(session.plannedMinutes)}</strong>
                     <small>
                       {session.completedAt
                         ? new Date(session.completedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -2568,7 +2632,7 @@ function Study({
                     </small>
                   </div>
                   <span className={`status-tag ${session.status === 'completed' ? 'status-done' : ''}`}>
-                    {session.status === 'completed' ? `${session.focusMinutesEarned}m earned` : 'Abandoned · 0m'}
+                    {session.status === 'completed' ? s.study.earned(session.focusMinutesEarned) : s.study.abandoned}
                   </span>
                 </div>
               ))}
@@ -2579,9 +2643,9 @@ function Study({
         <section className="panel study-tip">
           <div className="tip-icon"><Sparkles size={19} /></div>
           <div>
-            <span className="eyebrow">A SMALL REMINDER</span>
-            <h3>Study with a clear intention.</h3>
-            <p>One focused session is more useful than an hour of distracted studying. Start small and protect the time you set aside.</p>
+            <span className="eyebrow">{s.study.tipEyebrow}</span>
+            <h3>{s.study.tipTitle}</h3>
+            <p>{s.study.tipText}</p>
           </div>
         </section>
       </div>
@@ -2590,46 +2654,46 @@ function Study({
         <div className="modal-backdrop" onClick={() => setTaskModal(null)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
-              <div><span className="eyebrow">STUDY PLANNER</span><h3>{taskModal.task ? 'Edit task' : 'Add a study task'}</h3></div>
+              <div><span className="eyebrow">{s.study.modalEyebrow}</span><h3>{taskModal.task ? s.study.modalEditTask : s.study.modalAddTask}</h3></div>
               <button className="icon-button" onClick={() => setTaskModal(null)}><X size={18} /></button>
             </div>
-            <label className="field-label">Task name</label>
-            <input className="form-input" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="e.g. Revise calculus" />
-            <label className="field-label">Subject</label>
+            <label className="field-label">{s.study.taskName}</label>
+            <input className="form-input" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder={s.study.taskNamePlaceholder} />
+            <label className="field-label">{s.study.subject}</label>
             <select className="form-input" value={taskSubjectId} onChange={(e) => setTaskSubjectId(e.target.value)}>
-              <option value="">No subject</option>
+              <option value="">{s.study.noSubject}</option>
               {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
-            <label className="field-label">Description</label>
-            <textarea className="form-input form-textarea" value={taskDescription} onChange={(e) => setTaskDescription(e.target.value)} placeholder="What exactly needs doing?" rows={3} />
+            <label className="field-label">{s.study.description}</label>
+            <textarea className="form-input form-textarea" value={taskDescription} onChange={(e) => setTaskDescription(e.target.value)} placeholder={s.study.descriptionPlaceholder} rows={3} />
             <div className="form-row">
               <div>
-                <label className="field-label">Priority</label>
+                <label className="field-label">{s.study.priority}</label>
                 <select className="form-input" value={taskPriority} onChange={(e) => setTaskPriority(e.target.value as TaskPriority)}>
-                  <option value="Low">Low</option>
-                  <option value="Medium">Medium</option>
-                  <option value="High">High</option>
+                  <option value="Low">{s.study.priorityLow}</option>
+                  <option value="Medium">{s.study.priorityMedium}</option>
+                  <option value="High">{s.study.priorityHigh}</option>
                 </select>
               </div>
               <div>
-                <label className="field-label">Duration (minutes)</label>
-                <input className="form-input" type="number" min={1} max={480} value={taskDuration} onChange={(e) => setTaskDuration(e.target.value)} placeholder="e.g. 60" />
+                <label className="field-label">{s.study.duration}</label>
+                <input className="form-input" type="number" min={1} max={480} value={taskDuration} onChange={(e) => setTaskDuration(e.target.value)} placeholder={s.study.durationPlaceholder} />
               </div>
             </div>
             <div className="form-row">
               <div>
-                <label className="field-label">Due date</label>
+                <label className="field-label">{s.study.dueDate}</label>
                 <input className="form-input" type="date" value={taskDueDate} onChange={(e) => setTaskDueDate(e.target.value)} />
               </div>
               <div>
-                <label className="field-label">Start time</label>
+                <label className="field-label">{s.study.startTime}</label>
                 <input className="form-input" type="time" value={taskStartTime} onChange={(e) => setTaskStartTime(e.target.value)} />
               </div>
             </div>
             <button className="primary-button full-width" disabled={busy} onClick={saveTask}>
-              {pendingAction === 'save-task' ? 'Saving…' : taskModal.task ? 'Save changes' : 'Add task'} <ArrowRight size={16} />
+              {pendingAction === 'save-task' ? s.study.saving : taskModal.task ? s.study.saveChanges : s.study.addTask} <ArrowRight size={16} />
             </button>
-            <p className="modal-note">Tasks are saved to your account in MongoDB and stay in sync across devices.</p>
+            <p className="modal-note">{s.study.modalNote}</p>
           </div>
         </div>
       )}
@@ -2637,34 +2701,27 @@ function Study({
   );
 }
 
-function SubjectRow({ name, label, tasksDone, tasksTotal, focusMinutes, colour }: {
+function SubjectRow({ name, label, tasksDone, tasksTotal, focusMinutes, colour, language }: {
   name: string;
   label: string;
   tasksDone: number;
   tasksTotal: number;
   focusMinutes: number;
   colour: string;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const pct = tasksTotal > 0 ? Math.round((tasksDone / tasksTotal) * 100) : 0;
   return (
     <div className="subject-row">
       <div>
-        <div><strong>{name}</strong><span>{label || 'No label'}</span></div>
-        <b>{tasksDone}/{tasksTotal} tasks · {focusMinutes}m this week</b>
+        <div><strong>{name}</strong><span>{label || s.study.noLabel}</span></div>
+        <b>{s.study.subjectProgress(tasksDone, tasksTotal, focusMinutes)}</b>
       </div>
       <div className="progress-track"><span className={`fill-${colour}`} style={{ width: `${pct}%` }} /></div>
     </div>
   );
 }
-
-const CHALLENGE_CATEGORY_LABELS: Record<ChallengeCategory, string> = {
-  prayers: 'Prayers',
-  quran: 'Quran',
-  study: 'Study',
-  focus: 'Focus',
-  sleep: 'Sleep',
-  discipline: 'Discipline',
-};
 
 const CHALLENGE_CATEGORY_ICONS: Record<ChallengeCategory, IconType> = {
   prayers: Compass,
@@ -2680,45 +2737,23 @@ function isAutoCategory(category: ChallengeCategory): boolean {
   return category === 'prayers' || category === 'study' || category === 'focus';
 }
 
-function requirementFor(category: ChallengeCategory): string {
-  switch (category) {
-    case 'prayers':
-      return 'All five prayers prayed or Qaza';
-    case 'study':
-      return 'Complete a task or finish a focus session';
-    case 'focus':
-      return 'Finish a focus session';
-    default:
-      return 'Self-reported daily check-in';
-  }
-}
-
-function progressSourceLabel(source: string): string {
-  switch (source) {
-    case 'salah':
-      return 'From your Salah record';
-    case 'study-task':
-      return 'From a completed task';
-    case 'focus-session':
-      return 'From a finished focus session';
-    case 'self-reported':
-      return 'Self-reported';
-    default:
-      return source;
-  }
-}
-
 function Challenges({
   onNotify,
   onRefresh,
   guestMode,
   onBack,
+  onOpenFriends,
+  language,
 }: {
   onNotify: (message: string) => void;
   onRefresh: () => void;
   guestMode: boolean;
   onBack: () => void;
+  /** Phase 15: opens the Friends screen, where the invite UI lives. */
+  onOpenFriends: () => void;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const [tab, setTab] = useState<'explore' | 'mine' | 'history'>('explore');
   const [templates, setTemplates] = useState<ChallengeTemplate[]>([]);
   const [myActive, setMyActive] = useState<ChallengeParticipation[]>([]);
@@ -2757,7 +2792,7 @@ function Challenges({
       setMyActive(mine.active);
       setMyHistory(mine.history);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Challenges could not be loaded.');
+      setError(err instanceof Error ? err.message : s.challenges.loadFailed);
     } finally {
       setLoading(false);
     }
@@ -2776,7 +2811,7 @@ function Challenges({
       const result = await fetchChallengeDetail(challengeId);
       setDetail(result);
     } catch (err) {
-      onNotify(err instanceof Error ? err.message : 'Challenge could not be loaded.');
+      onNotify(err instanceof Error ? err.message : s.challenges.loadDetailFailed);
     } finally {
       setDetailLoading(false);
     }
@@ -2789,20 +2824,20 @@ function Challenges({
 
   async function handleJoinTemplate(template: ChallengeTemplate) {
     if (!templateConsent) {
-      onNotify('Please read the rules and tick the consent box to join.');
+      onNotify(s.challenges.joinNeedsConsent);
       return;
     }
     setBusy(true);
     try {
       const { challenge } = await joinTemplate(template.id);
-      onNotify(`Joined “${template.title}”. Day 1 starts today.`);
+      onNotify(s.challenges.joined(template.title));
       setExpandedTemplate(null);
       setTemplateConsent(false);
       await refreshAfterChange();
       await openDetail(challenge.id);
       setTab('mine');
     } catch (err) {
-      onNotify(err instanceof Error ? err.message : 'Could not join this challenge.');
+      onNotify(err instanceof Error ? err.message : s.challenges.joinFailed);
     } finally {
       setBusy(false);
     }
@@ -2810,17 +2845,17 @@ function Challenges({
 
   async function handleJoinDetail() {
     if (!detail || !detailConsent) {
-      onNotify('Please read the rules and tick the consent box to join.');
+      onNotify(s.challenges.joinNeedsConsent);
       return;
     }
     setBusy(true);
     try {
       await joinChallenge(detail.challenge.id);
-      onNotify(`Joined “${detail.challenge.title}”. Day 1 starts today.`);
+      onNotify(s.challenges.joined(detail.challenge.title));
       await refreshAfterChange();
       await openDetail(detail.challenge.id);
     } catch (err) {
-      onNotify(err instanceof Error ? err.message : 'Could not join this challenge.');
+      onNotify(err instanceof Error ? err.message : s.challenges.joinFailed);
     } finally {
       setBusy(false);
     }
@@ -2836,7 +2871,7 @@ function Challenges({
       await refreshAfterChange();
       await openDetail(detail.challenge.id);
     } catch (err) {
-      onNotify(err instanceof Error ? err.message : 'Could not leave this challenge.');
+      onNotify(err instanceof Error ? err.message : s.challenges.leaveFailed);
     } finally {
       setBusy(false);
     }
@@ -2851,7 +2886,7 @@ function Challenges({
       await refreshAfterChange();
       await openDetail(detail.challenge.id);
     } catch (err) {
-      onNotify(err instanceof Error ? err.message : 'Check-in failed.');
+      onNotify(err instanceof Error ? err.message : s.challenges.checkInFailed);
     } finally {
       setBusy(false);
     }
@@ -2861,12 +2896,12 @@ function Challenges({
     event.preventDefault();
     const rules = createRules.split('\n').map((r) => r.trim()).filter(Boolean);
     if (!createTitle.trim() || rules.length === 0 || !createConsent) {
-      onNotify('Add a title, at least one rule, and tick the consent box.');
+      onNotify(s.challenges.createNeedsFields);
       return;
     }
     const durationDays = Number.parseInt(createDuration, 10);
     if (!Number.isFinite(durationDays) || durationDays < 1 || durationDays > 365) {
-      onNotify('Duration must be between 1 and 365 days.');
+      onNotify(s.challenges.createDurationRange);
       return;
     }
     setBusy(true);
@@ -2879,7 +2914,7 @@ function Challenges({
         rules,
         consent: true,
       });
-      onNotify(`“${challenge.title}” created — you joined automatically.`);
+      onNotify(s.challenges.created(challenge.title));
       setShowCreate(false);
       setCreateTitle('');
       setCreateDescription('');
@@ -2889,7 +2924,7 @@ function Challenges({
       await openDetail(challenge.id);
       setTab('mine');
     } catch (err) {
-      onNotify(err instanceof Error ? err.message : 'Challenge could not be created.');
+      onNotify(err instanceof Error ? err.message : s.challenges.createFailed);
     } finally {
       setBusy(false);
     }
@@ -2903,15 +2938,15 @@ function Challenges({
     return (
       <>
         <PageHeading
-          eyebrow="COMMUNITY · ACCOUNTABILITY"
-          title="Progress feels better together."
-          text="Choose a healthy goal and keep yourself accountable."
+          eyebrow={s.challenges.guestEyebrow}
+          title={s.challenges.guestTitle}
+          text={s.challenges.guestText}
         />
         <section className="panel" style={{ padding: 28 }}>
-          <span className="eyebrow">SIGN IN TO TRACK</span>
-          <h3>Challenges live in your account</h3>
+          <span className="eyebrow">{s.challenges.guestPanelEyebrow}</span>
+          <h3>{s.challenges.guestPanelTitle}</h3>
           <p className="onboarding-help">
-            Sign in to join challenges and earn points from your real activity. Nothing is tracked in guest preview.
+            {s.challenges.guestPanelText}
           </p>
         </section>
       </>
@@ -2929,24 +2964,27 @@ function Challenges({
     return (
       <section className="challenges-screen">
         <div className="apphead">
-          <button type="button" className="aback" onClick={() => setDetail(null)} aria-label="Saare challenges dekho">
+          <button type="button" className="aback" onClick={() => setDetail(null)} aria-label={s.challenges.backAll}>
             <ChevronLeft size={20} />
           </button>
           <div>
             <h4>{challenge.title}</h4>
-            <div className="asub">{CHALLENGE_CATEGORY_LABELS[challenge.category]} · {challenge.durationDays} din · {challenge.kind === 'template' ? 'Template' : 'Apna challenge'}</div>
+            <div className="asub">{challengeCategoryLabel(challenge.category, language)} · {s.challenges.kindDays(challenge.durationDays)} · {challenge.kind === 'template' ? s.challenges.templateKind : s.challenges.ownKind}</div>
+          </div>
+          <div className="aright">
+            <button type="button" className="sbtn gh" onClick={onOpenFriends}><Users size={15} /> {s.challenges.inviteFriends}</button>
           </div>
         </div>
-        {detailLoading && <p className="onboarding-help">Loading challenge details…</p>}
+        {detailLoading && <p className="onboarding-help">{s.challenges.detailLoading}</p>}
 
         {completed && participation && (
           <section className="panel challenge-completed">
             <Trophy size={22} />
             <div>
-              <span className="eyebrow">CHALLENGE COMPLETED</span>
-              <h3>You finished all {challenge.durationDays} days.</h3>
+              <span className="eyebrow">{s.challenges.completedEyebrow}</span>
+              <h3>{s.challenges.completedTitle(challenge.durationDays)}</h3>
               <p>
-                Badge earned: {challenge.durationDays >= 365 ? '365-Day Challenger' : challenge.durationDays >= 30 ? '30-Day Challenger' : 'Challenge Finisher'} · {participation.pointsEarned} points from this challenge.
+                {s.challenges.completedLine(challenge.durationDays >= 365 ? s.challenges.badge365 : challenge.durationDays >= 30 ? s.challenges.badge30 : s.challenges.badgeFinisher, participation.pointsEarned)}
               </p>
             </div>
           </section>
@@ -2954,24 +2992,24 @@ function Challenges({
 
         <div className="challenge-detail-grid">
           <section className="panel">
-            <span className="eyebrow">{CHALLENGE_CATEGORY_LABELS[challenge.category].toUpperCase()} · {challenge.durationDays} DAYS · {challenge.kind === 'template' ? 'TEMPLATE' : 'YOUR CHALLENGE'}</span>
-            <h3>Rules — read before joining</h3>
+            <span className="eyebrow">{challengeCategoryLabel(challenge.category, language).toUpperCase()} · {challenge.durationDays} DAYS · {challenge.kind === 'template' ? s.challenges.kindTemplate : s.challenges.kindOwn}</span>
+            <h3>{s.challenges.rulesTitle}</h3>
             <ul className="challenge-rules">
               {challenge.rules.map((rule, index) => <li key={index}>{rule}</li>)}
             </ul>
             <p className="onboarding-help">
-              What completes a day: {requirementFor(challenge.category)}.
-              {!auto && ' Days are self-reported — they are shown as self-reported, never as verified.'}
+              {s.challenges.completesDay(challengeRequirement(challenge.category, language))}
+              {!auto && s.challenges.selfReportedNote}
             </p>
 
             {!participation && (
               <div className="challenge-consent">
                 <label className="consent-row">
                   <input type="checkbox" checked={detailConsent} onChange={(e) => setDetailConsent(e.target.checked)} />
-                  <span>I have read the rules and I join this challenge willingly.</span>
+                  <span>{s.challenges.consentJoin}</span>
                 </label>
                 <button className="primary-button" disabled={!detailConsent || busy} onClick={handleJoinDetail}>
-                  Join this challenge
+                  {s.challenges.joinChallenge}
                 </button>
               </div>
             )}
@@ -2979,13 +3017,13 @@ function Challenges({
             {participation && participation.status === 'active' && (
               <div className="challenge-leave">
                 {!confirmLeave ? (
-                  <button className="outline-button" onClick={() => setConfirmLeave(true)}>Leave challenge</button>
+                  <button className="outline-button" onClick={() => setConfirmLeave(true)}>{s.challenges.leaveChallenge}</button>
                 ) : (
                   <>
                     <p className="onboarding-help">{detail.leaveRule}</p>
                     <div className="challenge-leave-actions">
-                      <button className="primary-button" disabled={busy} onClick={handleLeave}>Yes, leave — keep my history</button>
-                      <button className="outline-button" onClick={() => setConfirmLeave(false)}>Stay</button>
+                      <button className="primary-button" disabled={busy} onClick={handleLeave}>{s.challenges.leaveConfirm}</button>
+                      <button className="outline-button" onClick={() => setConfirmLeave(false)}>{s.challenges.stay}</button>
                     </div>
                   </>
                 )}
@@ -2996,34 +3034,34 @@ function Challenges({
           <section className="panel">
             {participation ? (
               <>
-                <span className="eyebrow">YOUR PROGRESS</span>
-                <h3>Day {participation.currentDay} of {participation.totalDays}</h3>
+                <span className="eyebrow">{s.challenges.yourProgress}</span>
+                <h3>{s.challenges.dayOf(participation.currentDay, participation.totalDays)}</h3>
                 <div className="progress-track"><span className="fill-mint" style={{ width: `${Math.round((participation.completedDays / participation.totalDays) * 100)}%` }} /></div>
                 <div className="challenge-stat-row">
-                  <div><strong>{participation.completedDays}</strong><span>days done</span></div>
-                  <div><strong>{participation.streak}</strong><span>day streak</span></div>
-                  <div><strong>{participation.pointsEarned}</strong><span>points</span></div>
+                  <div><strong>{participation.completedDays}</strong><span>{s.challenges.daysDone}</span></div>
+                  <div><strong>{participation.streak}</strong><span>{s.challenges.dayStreak}</span></div>
+                  <div><strong>{participation.pointsEarned}</strong><span>{s.challenges.points}</span></div>
                 </div>
                 <p className="onboarding-help">
                   {detail.todayCompleted
-                    ? 'Today is done. Come back tomorrow for the next day.'
+                    ? s.challenges.todayDone
                     : auto
-                      ? `Today is not done yet — ${requirementFor(challenge.category).toLowerCase()}. It completes automatically from your real activity.`
-                      : 'Today is not done yet — mark it yourself after you have kept the habit.'}
+                      ? s.challenges.todayNotDoneAuto(challengeRequirement(challenge.category, language))
+                      : s.challenges.todayNotDoneManual}
                 </p>
                 {participation.status === 'active' && !auto && !detail.todayCompleted && (
                   <button className="primary-button" disabled={busy} onClick={handleCheckIn}>
-                    <Check size={16} /> Check in for today (self-reported)
+                    <Check size={16} /> {s.challenges.checkInToday}
                   </button>
                 )}
                 {detail.progress.length > 0 && (
                   <>
-                    <h3 style={{ marginTop: 18 }}>Recent days</h3>
+                    <h3 style={{ marginTop: 18 }}>{s.challenges.recentDays}</h3>
                     <div className="challenge-progress-list">
                       {detail.progress.slice(0, 14).map((day) => (
                         <div className="challenge-progress-row" key={day.date}>
                           <span className="challenge-day-dot done" />
-                          <div><strong>Day {day.dayNumber} · {day.date}</strong><small>{progressSourceLabel(day.source)}{day.source === 'self-reported' ? ' — self-reported, not verified' : ''}</small></div>
+                          <div><strong>{s.challenges.dayDate(day.dayNumber, day.date)}</strong><small>{challengeProgressSource(day.source, language)}{day.source === 'self-reported' ? s.challenges.selfReportedSuffix : ''}</small></div>
                           <Check size={15} />
                         </div>
                       ))}
@@ -3033,17 +3071,17 @@ function Challenges({
               </>
             ) : (
               <>
-                <span className="eyebrow">YOUR PROGRESS</span>
-                <h3>Not joined yet</h3>
-                <p className="onboarding-help">Read the rules, tick the consent box and join to start day 1 today.</p>
+                <span className="eyebrow">{s.challenges.yourProgress}</span>
+                <h3>{s.challenges.notJoined}</h3>
+                <p className="onboarding-help">{s.challenges.notJoinedText}</p>
               </>
             )}
             {detail.history.length > 0 && (
               <>
-                <h3 style={{ marginTop: 18 }}>Past attempts</h3>
+                <h3 style={{ marginTop: 18 }}>{s.challenges.pastAttempts}</h3>
                 {detail.history.map((attempt) => (
                   <p className="onboarding-help" key={attempt.id}>
-                    {attempt.status === 'completed' ? 'Completed' : 'Left'} · {attempt.completedDays} of {attempt.totalDays} days · {attempt.pointsEarned} points kept
+                    {s.challenges.attemptLine(attempt.status === 'completed' ? s.challenges.attemptCompleted : s.challenges.attemptLeft, attempt.completedDays, attempt.totalDays, attempt.pointsEarned)}
                   </p>
                 ))}
               </>
@@ -3054,8 +3092,8 @@ function Challenges({
         <div className="privacy-callout">
           <Lock size={16} />
           <div>
-            <strong>Privacy comes first</strong>
-            <span>Your prayer history and private activity are never shared. Challenges here are solo — friends and invites come in a later phase.</span>
+            <strong>{s.challenges.privacyTitle}</strong>
+            <span>{s.challenges.privacyDetail}</span>
           </div>
         </div>
       </section>
@@ -3069,26 +3107,27 @@ function Challenges({
   return (
     <section className="challenges-screen">
       <div className="apphead">
-        <button type="button" className="aback" onClick={onBack} aria-label="Wapas jao">
+        <button type="button" className="aback" onClick={onBack} aria-label={s.common.back}>
           <ChevronLeft size={20} />
         </button>
         <div>
-          <h4>Challenges</h4>
-          <div className="asub">Roz thoda, lambay samay tak</div>
+          <h4>{s.challenges.title}</h4>
+          <div className="asub">{s.challenges.sub}</div>
         </div>
         <div className="aright">
-          <button type="button" className="sbtn" onClick={() => setShowCreate(true)}>+ Banao</button>
+          <button type="button" className="sbtn gh" onClick={onOpenFriends}><Users size={15} /> {s.challenges.inviteFriends}</button>
+          <button type="button" className="sbtn" onClick={() => setShowCreate(true)}>{s.challenges.create}</button>
         </div>
       </div>
 
       {error && <p className="salah-error">{error}</p>}
-      {loading && <p className="onboarding-help">Loading challenges…</p>}
+      {loading && <p className="onboarding-help">{s.challenges.loading}</p>}
 
       {hero ? (
         <div className="acard-l ch-hero">
           <div className="ch-hero-top">
-            <span className="mchip">CHAL RAHA HAI</span>
-            <span className="ch-hero-streak">🔥 {hero.streak} din streak</span>
+            <span className="mchip">{s.challenges.heroRunning}</span>
+            <span className="ch-hero-streak">🔥 {s.challenges.heroStreak(hero.streak)}</span>
           </div>
           <div className="ch-hero-title">{hero.challenge.title}</div>
           <p className="ch-hero-rules-line">
@@ -3096,10 +3135,10 @@ function Challenges({
             {hero.challenge.rules.length > 3 ? ' · …' : ''}
           </p>
           <div className="prog pk"><i style={{ width: `${hero.totalDays > 0 ? Math.round((hero.completedDays / hero.totalDays) * 100) : 0}%` }} /></div>
-          <div className="ch-hero-meta"><span>Day {hero.currentDay} / {hero.totalDays}</span><span>{hero.pointsEarned} points mile</span></div>
+          <div className="ch-hero-meta"><span>{s.challenges.dayOf(hero.currentDay, hero.totalDays)}</span><span>{s.challenges.heroPoints(hero.pointsEarned)}</span></div>
           <div className="btnrow">
-            <button type="button" className="sbtn pk" onClick={() => openDetail(hero.challengeId)}>Aaj ka din dekho</button>
-            <button type="button" className="sbtn gh" onClick={() => setHeroShowRules((v) => !v)}>Rules</button>
+            <button type="button" className="sbtn pk" onClick={() => openDetail(hero.challengeId)}>{s.challenges.heroSeeToday}</button>
+            <button type="button" className="sbtn gh" onClick={() => setHeroShowRules((v) => !v)}>{s.challenges.rulesButton}</button>
           </div>
           {heroShowRules && (
             <div className="challenge-rules-box ch-hero-rules">
@@ -3107,37 +3146,36 @@ function Challenges({
               <ul className="challenge-rules">
                 {hero.challenge.rules.map((rule, index) => <li key={index}>{rule}</li>)}
               </ul>
-              <p className="onboarding-help">What completes a day: {requirementFor(hero.challenge.category)}.</p>
+              <p className="onboarding-help">{s.challenges.completesDay(challengeRequirement(hero.challenge.category, language))}</p>
             </div>
           )}
         </div>
       ) : (
         !loading && (
           <div className="acard-l">
-            <h5>Koi challenge active nahi hai</h5>
+            <h5>{s.challenges.noActive}</h5>
             <p className="onboarding-help">
-              Neeche se ek ready-made challenge join karo ya apna banao — roz thoda-thoda,
-              points sirf asal activity se milenge.
+              {s.challenges.noActiveText}
             </p>
-            <button type="button" className="sbtn pk" onClick={() => setTab('explore')}>Challenge join karo</button>
+            <button type="button" className="sbtn pk" onClick={() => setTab('explore')}>{s.challenges.joinAChallenge}</button>
           </div>
         )
       )}
 
       <div className="challenge-controls">
         <div className="segmented">
-          <button className={tab === 'explore' ? 'on' : ''} onClick={() => setTab('explore')}>Explore</button>
-          <button className={tab === 'mine' ? 'on' : ''} onClick={() => setTab('mine')}>My challenges ({myActive.length})</button>
-          <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>History ({myHistory.length})</button>
+          <button className={tab === 'explore' ? 'on' : ''} onClick={() => setTab('explore')}>{s.challenges.tabExplore}</button>
+          <button className={tab === 'mine' ? 'on' : ''} onClick={() => setTab('mine')}>{s.challenges.tabMine(myActive.length)}</button>
+          <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>{s.challenges.tabHistory(myHistory.length)}</button>
         </div>
-        <div className="privacy-hint"><ShieldCheck size={14} /> Private progress by default</div>
+        <div className="privacy-hint"><ShieldCheck size={14} /> {s.challenges.privateDefault}</div>
       </div>
 
       {tab === 'explore' && (
         <div className="acard-l">
-          <h5>Ready-made challenges</h5>
+          <h5>{s.challenges.readyMade}</h5>
           {templates.length === 0 && !loading && (
-            <p className="onboarding-help">No templates available right now. Create your own challenge instead.</p>
+            <p className="onboarding-help">{s.challenges.noTemplates}</p>
           )}
           {templates.map((template) => {
             const joined = participationForTemplate(template.id);
@@ -3146,18 +3184,18 @@ function Challenges({
               <div key={template.id}>
                 <div className="taskrow">
                   <span className="snum2">{template.durationDays}</span>
-                  <div>{template.title}<small>{template.description || `${CHALLENGE_CATEGORY_LABELS[template.category]} · ${template.requirement}`}</small></div>
+                  <div>{template.title}<small>{template.description || `${challengeCategoryLabel(template.category, language)} · ${template.requirement}`}</small></div>
                   {joined ? (
                     <button type="button" className="sbtn" style={{ marginLeft: 'auto' }} onClick={() => openDetail(joined.challengeId)}>
-                      Day {joined.currentDay} — View
+                      {s.challenges.dayView(joined.currentDay)}
                     </button>
                   ) : expanded ? (
                     <button type="button" className="sbtn gh" style={{ marginLeft: 'auto' }} onClick={() => { setExpandedTemplate(null); setTemplateConsent(false); }}>
-                      Close
+                      {s.challenges.close}
                     </button>
                   ) : (
                     <button type="button" className="sbtn" style={{ marginLeft: 'auto' }} onClick={() => { setExpandedTemplate(template.id); setTemplateConsent(false); }}>
-                      Join
+                      {s.challenges.join}
                     </button>
                   )}
                 </div>
@@ -3169,10 +3207,10 @@ function Challenges({
                     </ul>
                     <label className="consent-row">
                       <input type="checkbox" checked={templateConsent} onChange={(e) => setTemplateConsent(e.target.checked)} />
-                      <span>I have read the rules and I join this challenge willingly.</span>
+                      <span>{s.challenges.consentJoin}</span>
                     </label>
                     <button type="button" className="primary-button full-width" disabled={!templateConsent || busy} onClick={() => handleJoinTemplate(template)}>
-                      Join this challenge
+                      {s.challenges.joinChallenge}
                     </button>
                   </div>
                 )}
@@ -3181,8 +3219,8 @@ function Challenges({
           })}
           <div className="taskrow">
             <span className="snum2 snum2-peach">+</span>
-            <div>Apna challenge banao<small>Apne din, apna target, apne rules</small></div>
-            <button type="button" className="sbtn pk" style={{ marginLeft: 'auto' }} onClick={() => setShowCreate(true)}>Banao</button>
+            <div>{s.challenges.createOwn}<small>{s.challenges.createOwnSub}</small></div>
+            <button type="button" className="sbtn pk" style={{ marginLeft: 'auto' }} onClick={() => setShowCreate(true)}>{s.challenges.createButton}</button>
           </div>
         </div>
       )}
@@ -3190,24 +3228,24 @@ function Challenges({
       {tab === 'mine' && (
         <div className="challenge-cards">
           {myActive.length === 0 && !loading && (
-            <p className="onboarding-help">You have no active challenges. Explore the templates or create your own.</p>
+            <p className="onboarding-help">{s.challenges.mineEmpty}</p>
           )}
           {myActive.map((participation) => {
             const Icon = CHALLENGE_CATEGORY_ICONS[participation.challenge.category];
             return (
               <div className="panel challenge-card" key={participation.id}>
                 <div className="challenge-card-icon"><Icon size={21} /></div>
-                <span className="eyebrow">{CHALLENGE_CATEGORY_LABELS[participation.challenge.category].toUpperCase()} · {participation.totalDays} DAYS</span>
+                <span className="eyebrow">{challengeCategoryLabel(participation.challenge.category, language).toUpperCase()} · {participation.totalDays} DAYS</span>
                 <h3>{participation.challenge.title}</h3>
                 <p>{participation.challenge.description}</p>
                 <div className="challenge-meta">
-                  <span><CalendarDays size={14} /> Day {participation.currentDay} of {participation.totalDays}</span>
-                  <span><Flame size={14} /> {participation.streak}-day streak</span>
+                  <span><CalendarDays size={14} /> {s.challenges.dayOf(participation.currentDay, participation.totalDays)}</span>
+                  <span><Flame size={14} /> {s.challenges.streakDays(participation.streak)}</span>
                 </div>
                 <div className="progress-track"><span className="fill-mint" style={{ width: `${Math.round((participation.completedDays / participation.totalDays) * 100)}%` }} /></div>
-                <p className="onboarding-help">{participation.completedDays} days done · {participation.pointsEarned} points{participation.todayCompleted ? ' · Today done' : ' · Today pending'}</p>
+                <p className="onboarding-help">{s.challenges.mineLine(participation.completedDays, participation.pointsEarned)}{participation.todayCompleted ? s.challenges.todayDoneSuffix : s.challenges.todayPendingSuffix}</p>
                 <button className="outline-button full-width" onClick={() => openDetail(participation.challengeId)}>
-                  View challenge <ArrowRight size={15} />
+                  {s.challenges.viewChallenge} <ArrowRight size={15} />
                 </button>
               </div>
             );
@@ -3218,21 +3256,21 @@ function Challenges({
       {tab === 'history' && (
         <div className="challenge-cards">
           {myHistory.length === 0 && !loading && (
-            <p className="onboarding-help">No finished or left challenges yet. Your history will appear here and is never deleted.</p>
+            <p className="onboarding-help">{s.challenges.historyEmpty}</p>
           )}
           {myHistory.map((participation) => {
             const Icon = CHALLENGE_CATEGORY_ICONS[participation.challenge.category];
             return (
               <div className="panel challenge-card" key={participation.id}>
                 <div className="challenge-card-icon"><Icon size={21} /></div>
-                <span className="eyebrow">{CHALLENGE_CATEGORY_LABELS[participation.challenge.category].toUpperCase()} · {participation.totalDays} DAYS · {participation.status === 'completed' ? 'COMPLETED' : 'LEFT'}</span>
+                <span className="eyebrow">{challengeCategoryLabel(participation.challenge.category, language).toUpperCase()} · {participation.totalDays} DAYS · {participation.status === 'completed' ? s.challenges.attemptCompleted.toUpperCase() : s.challenges.attemptLeft.toUpperCase()}</span>
                 <h3>{participation.challenge.title}</h3>
-                <p>{participation.completedDays} of {participation.totalDays} days done · {participation.pointsEarned} points kept</p>
+                <p>{s.challenges.historyLine(participation.completedDays, participation.totalDays, participation.pointsEarned)}</p>
                 {participation.status === 'completed' && (
-                  <p className="onboarding-help">Badge earned: {participation.totalDays >= 365 ? '365-Day Challenger' : participation.totalDays >= 30 ? '30-Day Challenger' : 'Challenge Finisher'}</p>
+                  <p className="onboarding-help">{s.challenges.badgeEarned(participation.totalDays >= 365 ? s.challenges.badge365 : participation.totalDays >= 30 ? s.challenges.badge30 : s.challenges.badgeFinisher)}</p>
                 )}
                 <button className="outline-button full-width" onClick={() => openDetail(participation.challengeId)}>
-                  View challenge <ArrowRight size={15} />
+                  {s.challenges.viewChallenge} <ArrowRight size={15} />
                 </button>
               </div>
             );
@@ -3242,17 +3280,15 @@ function Challenges({
 
       <div className="acard-l">
         <p className="mut" style={{ margin: 0 }}>
-          <b>Join se pehle rules:</b> ek challenge ek hi baar join hoga, beech me chhod sakte ho
-          (history rehti hai), points server par bante hain — haath se badle nahi ja sakte.
-          Poora karne par badge milega.
+          {s.challenges.footerRules}
         </p>
       </div>
 
       <div className="privacy-callout">
         <Lock size={16} />
         <div>
-          <strong>Privacy comes first</strong>
-          <span>Random matching will require consent. Your location, prayer history and private religious activity will never be shared with strangers. Friends and invites come in a later phase.</span>
+          <strong>{s.challenges.privacyTitle}</strong>
+          <span>{s.challenges.privacyDetail2}</span>
         </div>
       </div>
 
@@ -3260,37 +3296,37 @@ function Challenges({
         <div className="modal-backdrop" onClick={() => setShowCreate(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
-              <div><span className="eyebrow">CHALLENGES</span><h3>Create your own challenge</h3></div>
+              <div><span className="eyebrow">{s.challenges.title.toUpperCase()}</span><h3>{s.challenges.createTitle}</h3></div>
               <button className="icon-button" onClick={() => setShowCreate(false)}><X size={18} /></button>
             </div>
             <form onSubmit={handleCreate}>
-              <label className="field-label">Title</label>
-              <input className="form-input" value={createTitle} onChange={(e) => setCreateTitle(e.target.value)} placeholder="e.g. Read 10 pages every day" />
-              <label className="field-label">Description (optional)</label>
-              <input className="form-input" value={createDescription} onChange={(e) => setCreateDescription(e.target.value)} placeholder="What is this challenge about?" />
+              <label className="field-label">{s.challenges.createTitleLabel}</label>
+              <input className="form-input" value={createTitle} onChange={(e) => setCreateTitle(e.target.value)} placeholder={s.challenges.createTitlePlaceholder} />
+              <label className="field-label">{s.challenges.createDescriptionLabel}</label>
+              <input className="form-input" value={createDescription} onChange={(e) => setCreateDescription(e.target.value)} placeholder={s.challenges.createDescriptionPlaceholder} />
               <div className="form-row">
                 <div>
-                  <label className="field-label">Category</label>
+                  <label className="field-label">{s.challenges.createCategory}</label>
                   <select className="form-input" value={createCategory} onChange={(e) => setCreateCategory(e.target.value as ChallengeCategory)}>
-                    {(Object.keys(CHALLENGE_CATEGORY_LABELS) as ChallengeCategory[]).map((c) => (
-                      <option key={c} value={c}>{CHALLENGE_CATEGORY_LABELS[c]}</option>
+                    {(Object.keys(s.challenges.categories) as ChallengeCategory[]).map((c) => (
+                      <option key={c} value={c}>{challengeCategoryLabel(c, language)}</option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="field-label">Duration (days)</label>
+                  <label className="field-label">{s.challenges.createDuration}</label>
                   <input className="form-input" inputMode="numeric" value={createDuration} onChange={(e) => setCreateDuration(e.target.value)} placeholder="30" />
                 </div>
               </div>
-              <p className="onboarding-help">What completes a day: {requirementFor(createCategory)}.{!isAutoCategory(createCategory) && ' Days are self-reported — shown as self-reported, never as verified.'}</p>
-              <label className="field-label">Rules (one per line)</label>
-              <textarea className="form-input" value={createRules} onChange={(e) => setCreateRules(e.target.value)} placeholder={'e.g. A day counts when I finish the task.\nDays are counted in my own timezone.'} rows={4} />
+              <p className="onboarding-help">{s.challenges.completesDay(challengeRequirement(createCategory, language))}{!isAutoCategory(createCategory) && s.challenges.selfReportedNote}</p>
+              <label className="field-label">{s.challenges.createRulesLabel}</label>
+              <textarea className="form-input" value={createRules} onChange={(e) => setCreateRules(e.target.value)} placeholder={s.challenges.createRulesPlaceholder} rows={4} />
               <label className="consent-row">
                 <input type="checkbox" checked={createConsent} onChange={(e) => setCreateConsent(e.target.checked)} />
-                <span>I understand the rules and I join this challenge willingly. I can leave at any time — my history and earned points are kept.</span>
+                <span>{s.challenges.createConsent}</span>
               </label>
-              <button className="primary-button full-width" type="submit" disabled={busy}>Create &amp; join</button>
-              <p className="modal-note">You join automatically when you create a challenge. Friends and invites come in a later phase — this is solo for now.</p>
+              <button className="primary-button full-width" type="submit" disabled={busy}>{s.challenges.createAndJoin}</button>
+              <p className="modal-note">{s.challenges.createNote}</p>
             </form>
           </div>
         </div>
@@ -3299,7 +3335,7 @@ function Challenges({
   );
 }
 
-function Guidance({ onNotify, onOpenFeedback, tab, onTabChange, guestMode, profileCity, initialSurah, onInitialSurahOpened, onOpenSurah }: {
+function Guidance({ onNotify, onOpenFeedback, tab, onTabChange, guestMode, profileCity, initialSurah, onInitialSurahOpened, onOpenSurah, language }: {
   onNotify: (message: string) => void;
   onOpenFeedback: () => void;
   tab: GuidanceTab;
@@ -3309,15 +3345,20 @@ function Guidance({ onNotify, onOpenFeedback, tab, onTabChange, guestMode, profi
   initialSurah: number | null;
   onInitialSurahOpened: () => void;
   onOpenSurah: (surahNumber: number) => void;
+  language: AppLanguage;
 }) {
-  const [selected, setSelected] = useState('Feeling overwhelmed');
+  const s = stringsFor(language);
+  // Selected mood card as an index into s.guidance.cards (same order
+  // as GUIDANCE_ICONS) — the moods are dictionary strings now, so the
+  // index is the selection key, not the English text.
+  const [selected, setSelected] = useState(0);
 
   function openVerifiedReading() {
-    if (selected === 'Need a dua') {
+    if (selected === 2) {
       onTabChange('duas');
       return;
     }
-    if (selected === 'Feeling overwhelmed') {
+    if (selected === 0) {
       // Surah Ash-Sharh (94) — the reference already shown on this card.
       onOpenSurah(94);
       return;
@@ -3328,29 +3369,29 @@ function Guidance({ onNotify, onOpenFeedback, tab, onTabChange, guestMode, profi
   return (
     <>
       <PageHeading
-        eyebrow="REFLECTION · QURANIC GUIDANCE"
-        title="A moment to pause and reflect."
-        text="Find relevant, carefully sourced Quranic guidance for different moments in life."
+        eyebrow={s.guidance.eyebrow}
+        title={s.guidance.title}
+        text={s.guidance.text}
       />
 
       <div className="guidance-layout">
         <section className="panel guidance-main">
-          <span className="eyebrow">WHAT IS ON YOUR MIND?</span>
-          <h2>How are you feeling today?</h2>
-          <p>Choose a topic to explore relevant guidance.</p>
+          <span className="eyebrow">{s.guidance.whatOnMind}</span>
+          <h2>{s.guidance.feelingToday}</h2>
+          <p>{s.guidance.chooseTopic}</p>
 
           <div className="mood-grid">
-            {guidanceCards.map((m) => {
-              const Icon = m.icon;
+            {s.guidance.cards.map((card, index) => {
+              const Icon = GUIDANCE_ICONS[index];
               return (
                 <button
-                  key={m.mood}
-                  className={selected === m.mood ? 'selected' : ''}
-                  onClick={() => setSelected(m.mood)}
+                  key={index}
+                  className={selected === index ? 'selected' : ''}
+                  onClick={() => setSelected(index)}
                 >
                   <Icon size={19} />
-                  <strong>{m.mood}</strong>
-                  <span>{m.category}</span>
+                  <strong>{card.mood}</strong>
+                  <span>{card.category}</span>
                 </button>
               );
             })}
@@ -3358,16 +3399,16 @@ function Guidance({ onNotify, onOpenFeedback, tab, onTabChange, guestMode, profi
 
           <div className="guidance-result">
             <div className="guidance-result-top">
-              <span className="eyebrow">SUGGESTED READING · PREVIEW</span>
+              <span className="eyebrow">{s.guidance.suggested}</span>
               <BookOpen size={18} />
             </div>
-            <h3>{guidanceCards.find((m) => m.mood === selected)?.category}</h3>
-            <div className="reference-chip">{guidanceCards.find((m) => m.mood === selected)?.ref}</div>
+            <h3>{s.guidance.cards[selected].category}</h3>
+            <div className="reference-chip">{s.guidance.cards[selected].ref}</div>
             <p>
-              Verified Arabic text, translation, context and source attribution from the Qur'an browser below.
+              {s.guidance.suggestedText}
             </p>
             <button className="primary-button" onClick={openVerifiedReading}>
-              Open verified reading <ArrowRight size={15} />
+              {s.guidance.openReading} <ArrowRight size={15} />
             </button>
           </div>
         </section>
@@ -3375,31 +3416,31 @@ function Guidance({ onNotify, onOpenFeedback, tab, onTabChange, guestMode, profi
         <aside className="guidance-side">
           <div className="panel source-panel">
             <div className="source-icon"><ShieldCheck size={20} /></div>
-            <span className="eyebrow">OUR CONTENT PROMISE</span>
-            <h3>Accuracy before quantity.</h3>
-            <p>Quranic Arabic comes from the Tanzil Uthmani text via AlQuran Cloud, with translation attribution shown on every reading. Curated duas carry their exact surah, ayah, para and page references.</p>
-            <div className="source-check"><CheckCheck size={14} /> Exact surah and ayah references</div>
-            <div className="source-check"><CheckCheck size={14} /> Translation attribution</div>
-            <div className="source-check"><CheckCheck size={14} /> Source shown on every reading</div>
+            <span className="eyebrow">{s.guidance.promiseEyebrow}</span>
+            <h3>{s.guidance.promiseTitle}</h3>
+            <p>{s.guidance.promiseText}</p>
+            <div className="source-check"><CheckCheck size={14} /> {s.guidance.promiseCheck1}</div>
+            <div className="source-check"><CheckCheck size={14} /> {s.guidance.promiseCheck2}</div>
+            <div className="source-check"><CheckCheck size={14} /> {s.guidance.promiseCheck3}</div>
           </div>
 
           <div className="panel support-panel">
             <Heart size={20} />
-            <h3>Faith can support you. You don't have to handle everything alone.</h3>
-            <p>Spiritual reflection can sit alongside practical support and professional care when needed.</p>
+            <h3>{s.guidance.supportTitle}</h3>
+            <p>{s.guidance.supportText}</p>
             <button className="text-button" onClick={onOpenFeedback}>
-              Madad chahiye? Feedback bhejo <ArrowRight size={14} />
+              {s.guidance.supportButton} <ArrowRight size={14} />
             </button>
           </div>
         </aside>
       </div>
 
-      <div className="guidance-tabs" role="tablist" aria-label="Quranic guidance sections">
+      <div className="guidance-tabs" role="tablist" aria-label={s.guidance.tabsAria}>
         {([
-          ['quran', 'Read Qur\'an'],
-          ['duas', 'Curated duas'],
-          ['hijri', 'Hijri calendar'],
-          ['mosques', 'Find a masjid'],
+          ['quran', s.guidance.tabQuran],
+          ['duas', s.guidance.tabDuas],
+          ['hijri', s.guidance.tabHijri],
+          ['mosques', s.guidance.tabMosques],
         ] as [GuidanceTab, string][]).map(([value, label]) => (
           <button
             key={value}
@@ -3419,12 +3460,13 @@ function Guidance({ onNotify, onOpenFeedback, tab, onTabChange, guestMode, profi
           guestMode={guestMode}
           initialSurah={initialSurah}
           onInitialSurahOpened={onInitialSurahOpened}
+          language={language}
         />
       )}
-      {tab === 'duas' && <CuratedDuas onOpenSurah={onOpenSurah} />}
-      {tab === 'hijri' && <HijriCalendar onNotify={onNotify} guestMode={guestMode} />}
+      {tab === 'duas' && <CuratedDuas onOpenSurah={onOpenSurah} language={language} />}
+      {tab === 'hijri' && <HijriCalendar onNotify={onNotify} guestMode={guestMode} language={language} />}
       {tab === 'mosques' && (
-        <MosqueFinder onNotify={onNotify} guestMode={guestMode} profileCity={profileCity} />
+        <MosqueFinder onNotify={onNotify} guestMode={guestMode} profileCity={profileCity} language={language} />
       )}
     </>
   );
@@ -3448,6 +3490,7 @@ function Focus({
   onNotify,
   onNavigate,
   guestMode,
+  language,
 }: {
   activeSession: PomodoroSession | null;
   history: PomodoroSession[];
@@ -3457,7 +3500,9 @@ function Focus({
   onNotify: (message: string) => void;
   onNavigate: (page: Page) => void;
   guestMode: boolean;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -3479,10 +3524,10 @@ function Focus({
     completingRef.current = true;
     completePomodoro(activeSession.id)
       .then(async () => {
-        onNotify(activeSession.mode === 'focus' ? 'Focus session complete. Well done.' : 'Break complete.');
+        onNotify(activeSession.mode === 'focus' ? s.study.focusComplete : s.study.breakComplete);
         await onRefresh();
       })
-      .catch((error) => onNotify(error instanceof Error ? error.message : 'Session could not be completed.'))
+      .catch((error) => onNotify(error instanceof Error ? error.message : s.study.sessionCompleteError))
       .finally(() => { completingRef.current = false; });
   }, [activeSession, remainingMs, onNotify, onRefresh]);
 
@@ -3493,9 +3538,9 @@ function Focus({
     try {
       await pausePomodoro(activeSession.id);
       await onRefresh();
-      onNotify('Session paused.');
+      onNotify(s.study.sessionPaused);
     } catch (error) {
-      onNotify(error instanceof Error ? error.message : 'Session pause nahi ho paya.');
+      onNotify(error instanceof Error ? error.message : s.study.sessionPauseFailed);
     } finally {
       setBusy(false);
       setPendingAction(null);
@@ -3509,9 +3554,9 @@ function Focus({
     try {
       await resumePomodoro(activeSession.id);
       await onRefresh();
-      onNotify('Session resumed.');
+      onNotify(s.study.sessionResumed);
     } catch (error) {
-      onNotify(error instanceof Error ? error.message : 'Session resume nahi ho paya.');
+      onNotify(error instanceof Error ? error.message : s.study.sessionResumeFailed);
     } finally {
       setBusy(false);
       setPendingAction(null);
@@ -3525,21 +3570,13 @@ function Focus({
     try {
       await completePomodoro(activeSession.id);
       await onRefresh();
-      onNotify('Session finished.');
+      onNotify(s.study.sessionFinished);
     } catch (error) {
-      onNotify(error instanceof Error ? error.message : 'Session complete nahi ho paya.');
+      onNotify(error instanceof Error ? error.message : s.study.sessionCompleteFailed);
     } finally {
       setBusy(false);
       setPendingAction(null);
     }
-  }
-
-  function formatMinutes(total: number): string {
-    if (total >= 60) {
-      const hours = total / 60;
-      return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} gh`;
-    }
-    return `${total} min`;
   }
 
   const todayMinutes = stats?.todayFocusMinutes ?? 0;
@@ -3549,8 +3586,8 @@ function Focus({
     ? tasks.find((t) => t.id === activeSession.taskId)?.title ?? ''
     : '';
   const ringLabel = activeSession
-    ? (activeTaskTitle ? `${activeTaskTitle.toUpperCase()} CHAL RAHA HAI` : activeSession.mode === 'focus' ? 'FOCUS CHAL RAHA HAI' : 'BREAK CHAL RAHA HAI')
-    : 'KOI SESSION NAHI';
+    ? (activeTaskTitle ? s.focus.ringTask(activeTaskTitle.toUpperCase()) : activeSession.mode === 'focus' ? s.focus.ringFocus : s.focus.ringBreak)
+    : s.focus.ringNone;
   const ringPct = activeSession && activeSession.plannedMinutes > 0
     ? Math.max(0, Math.min(100, Math.round(((remainingMs ?? 0) / (activeSession.plannedMinutes * 60_000)) * 100)))
     : 0;
@@ -3558,23 +3595,22 @@ function Focus({
   return (
     <section className="focus-screen">
       <div className="apphead">
-        <button type="button" className="aback" onClick={() => onNavigate('home')} aria-label="Wapas jao">
+        <button type="button" className="aback" onClick={() => onNavigate('home')} aria-label={s.common.back}>
           <ChevronLeft size={20} />
         </button>
         <div>
-          <h4>Focus</h4>
-          <div className="asub">Bina rukawat padhai</div>
+          <h4>{s.focus.title}</h4>
+          <div className="asub">{s.focus.sub}</div>
         </div>
       </div>
 
       {guestMode ? (
         <div className="acard">
           <p className="mut" style={{ margin: 0 }}>
-            Focus sessions tumhare account me save hote hain. Guest preview me timer nahi
-            chalega — sign in karke apna pehla focus session shuru karo.
+            {s.focus.guestText}
           </p>
           <button type="button" className="sbtn pk" style={{ marginTop: 12 }} onClick={() => onNavigate('study')}>
-            Study planner dekho
+            {s.focus.guestButton}
           </button>
         </div>
       ) : (
@@ -3586,7 +3622,7 @@ function Focus({
             >
               <div className="focus-ring-inner">
                 <b>{activeSession ? formatCountdown(remainingMs ?? 0) : '00:00'}</b>
-                <span>{activeSession && activeSession.status === 'paused' ? 'PAUSED' : ringLabel}</span>
+                <span>{activeSession && activeSession.status === 'paused' ? s.focus.ringPaused : ringLabel}</span>
               </div>
             </div>
           </div>
@@ -3595,57 +3631,56 @@ function Focus({
             <div className="btnrow focus-actions">
               {activeSession.status === 'active' ? (
                 <button type="button" className="sbtn" disabled={busy} onClick={() => void handlePauseTimer()}>
-                  <Pause size={15} /> {pendingAction === 'pause' ? 'Pausing…' : 'Pause'}
+                  <Pause size={15} /> {pendingAction === 'pause' ? s.focus.pausing : s.focus.pause}
                 </button>
               ) : (
                 <button type="button" className="sbtn" disabled={busy} onClick={() => void handleResumeTimer()}>
-                  <Play size={15} /> {pendingAction === 'resume' ? 'Resuming…' : 'Resume'}
+                  <Play size={15} /> {pendingAction === 'resume' ? s.focus.resuming : s.focus.resume}
                 </button>
               )}
               <button type="button" className="sbtn gh" disabled={busy} onClick={() => void handleCompleteTimer()}>
-                <Square size={14} /> {pendingAction === 'complete' ? 'Finishing…' : 'Khatam'}
+                <Square size={14} /> {pendingAction === 'complete' ? s.focus.finishing : s.focus.finish}
               </button>
             </div>
           ) : (
             <div className="btnrow focus-actions">
               <button type="button" className="sbtn pk" onClick={() => onNavigate('study')}>
-                Study me session shuru karo
+                {s.focus.startInStudy}
               </button>
             </div>
           )}
           {activeSession && (
             <p className="mut focus-session-note">
-              {activeSession.mode === 'focus' ? `${activeSession.plannedMinutes}-minute focus` : `${activeSession.plannedMinutes}-minute break`}
+              {activeSession.mode === 'focus' ? s.study.focusMinutesLabel(activeSession.plannedMinutes) : s.study.breakMinutesLabel(activeSession.plannedMinutes)}
               {activeTaskTitle ? ` · ${activeTaskTitle}` : ''}
-              {' · '}Server par save hai — refresh ya device badalne par bhi timer chalta rahega.
+              {' · '}{s.focus.serverNote}
             </p>
           )}
 
           <div className="kpis">
-            <div className="kpi"><b>{formatMinutes(todayMinutes)}</b><span>AAJ</span></div>
-            <div className="kpi"><b>{formatMinutes(weekMinutes)}</b><span>IS HAFTE</span></div>
-            <div className="kpi"><b>{completedFocusSessions.length}</b><span>SESSIONS</span></div>
+            <div className="kpi"><b>{minutesOrHours(todayMinutes, language)}</b><span>{s.focus.today}</span></div>
+            <div className="kpi"><b>{minutesOrHours(weekMinutes, language)}</b><span>{s.focus.thisWeek}</span></div>
+            <div className="kpi"><b>{completedFocusSessions.length}</b><span>{s.focus.sessions}</span></div>
           </div>
-          <p className="mut focus-kpi-note">Sessions ki ginti pichhle 20 loaded sessions me se hai.</p>
+          <p className="mut focus-kpi-note">{s.focus.sessionsNote}</p>
 
           <div className="acard">
-            <h5>Pichhle sessions</h5>
+            <h5>{s.focus.pastSessions}</h5>
             {history.length === 0 ? (
               <p className="mut" style={{ margin: '8px 0 0' }}>
-                Abhi koi focus session nahi hai. Study planner se pehla session shuru karo —
-                poora hone par wo yahan dikhega.
+                {s.focus.noSessions}
               </p>
             ) : (
               history.slice(0, 10).map((session) => {
                 const title = session.taskId
-                  ? tasks.find((t) => t.id === session.taskId)?.title ?? (session.mode === 'focus' ? 'Focus session' : 'Break')
-                  : (session.mode === 'focus' ? 'Focus session' : 'Break');
+                  ? tasks.find((t) => t.id === session.taskId)?.title ?? (session.mode === 'focus' ? s.focus.focusSession : s.focus.breakLabel)
+                  : (session.mode === 'focus' ? s.focus.focusSession : s.focus.breakLabel);
                 const when = new Date(session.completedAt ?? session.startedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
                 return (
                   <div className="srow" key={session.id}>
                     <span className="snum2">📚</span>
                     <div>{title}<small>{when}</small></div>
-                    <b className="srow-right">{session.status === 'completed' ? `${session.focusMinutesEarned} min` : 'Abandoned · 0 min'}</b>
+                    <b className="srow-right">{session.status === 'completed' ? `${session.focusMinutesEarned} min` : s.focus.abandoned}</b>
                   </div>
                 );
               })
@@ -3654,9 +3689,7 @@ function Focus({
 
           <div className="acard">
             <p className="mut" style={{ margin: 0 }}>
-              Sach ye hai: web wala version doosri apps ko block nahi kar sakta — isliye yahan
-              koi nakli "app block" button nahi hai. Asal app-blocking sirf Android version me
-              hoga, wo bhi tumhari marzi se.
+              {s.focus.honestyNote}
             </p>
           </div>
         </>
@@ -3677,6 +3710,7 @@ function Analytics({
   sleepStartTime,
   sleepEndTime,
   onBack,
+  language,
 }: {
   stats: StudyStats | null;
   guestMode: boolean;
@@ -3690,7 +3724,9 @@ function Analytics({
   sleepStartTime: string;
   sleepEndTime: string;
   onBack: () => void;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   // P5: the "Activity history" pill used to be a dead <div>. It is now a
   // real button that opens the history panel below, built only from real
   // saved activity — points, focus sessions and challenge attempts.
@@ -3721,7 +3757,7 @@ function Analytics({
       setPointsHistory(result.transactions);
       setPointsHistoryTotal(result.total);
     } catch (err) {
-      setPointsHistoryError(err instanceof Error ? err.message : 'Points history load nahi ho payi.');
+      setPointsHistoryError(err instanceof Error ? err.message : s.analytics.pointsLoadFailed);
     } finally {
       setPointsHistoryLoading(false);
     }
@@ -3729,11 +3765,11 @@ function Analytics({
 
   const historyPanel = (
     <section className="panel history-card" style={{ marginTop: 14 }}>
-      <SectionTitle title="Activity history" />
+      <SectionTitle title={s.analytics.historyTitle} />
       <div>
-        <span className="eyebrow">POINTS</span>
+        <span className="eyebrow">{s.analytics.pointsEyebrow}</span>
         {pointsHistoryLoading ? (
-          <p className="onboarding-help">Loading your points history…</p>
+          <p className="onboarding-help">{s.analytics.pointsLoading}</p>
         ) : pointsHistoryError ? (
           <>
             <p className="onboarding-help">{pointsHistoryError}</p>
@@ -3741,7 +3777,7 @@ function Analytics({
               <div className="history-list">
                 {rewards.recent.map((entry) => (
                   <div className="history-row" key={entry.id}>
-                    <div><strong>+{entry.amount} points</strong><small>{POINT_REASON_LABELS[entry.reason]} · {new Date(entry.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</small></div>
+                    <div><strong>+{entry.amount} points</strong><small>{pointReasonLabel(entry.reason, language)} · {new Date(entry.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</small></div>
                   </div>
                 ))}
               </div>
@@ -3751,33 +3787,33 @@ function Analytics({
           <div className="history-list">
             {pointsHistory.map((entry) => (
               <div className="history-row" key={entry.id}>
-                <div><strong>+{entry.amount} points</strong><small>{POINT_REASON_LABELS[entry.reason]} · {new Date(entry.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</small></div>
+                <div><strong>+{entry.amount} points</strong><small>{pointReasonLabel(entry.reason, language)} · {new Date(entry.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</small></div>
               </div>
             ))}
             {pointsHistoryTotal > pointsHistory.length && (
-              <p className="onboarding-help">Showing latest {pointsHistory.length} of {pointsHistoryTotal} point awards.</p>
+              <p className="onboarding-help">{s.analytics.pointsShowing(pointsHistory.length, pointsHistoryTotal)}</p>
             )}
           </div>
         ) : (
-          <p className="onboarding-help">No points earned yet. Finish a focus session, complete a task, or complete a challenge day to earn your first points.</p>
+          <p className="onboarding-help">{s.analytics.noPoints}</p>
         )}
       </div>
       <div style={{ marginTop: 18 }}>
-        <span className="eyebrow">FOCUS SESSIONS</span>
+        <span className="eyebrow">{s.analytics.focusEyebrow}</span>
         {focusHistory.length === 0 ? (
-          <p className="onboarding-help">No focus sessions yet. Finished and abandoned sessions will appear here with their real minutes.</p>
+          <p className="onboarding-help">{s.study.noHistory}</p>
         ) : (
           <div className="history-list">
             {focusHistory.slice(0, 10).map((session) => (
               <div className="history-row" key={session.id}>
                 <div>
-                  <strong>{session.mode === 'focus' ? 'Focus' : 'Break'} · {session.plannedMinutes} min</strong>
+                  <strong>{session.mode === 'focus' ? s.study.historyFocus(session.plannedMinutes) : s.study.historyBreak(session.plannedMinutes)}</strong>
                   <small>
                     {new Date(session.completedAt ?? session.startedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                   </small>
                 </div>
                 <span className={`status-tag ${session.status === 'completed' ? 'status-done' : ''}`}>
-                  {session.status === 'completed' ? `${session.focusMinutesEarned}m earned` : 'Abandoned · 0m'}
+                  {session.status === 'completed' ? s.study.earned(session.focusMinutesEarned) : s.study.abandoned}
                 </span>
               </div>
             ))}
@@ -3785,9 +3821,9 @@ function Analytics({
         )}
       </div>
       <div style={{ marginTop: 18 }}>
-        <span className="eyebrow">CHALLENGES</span>
+        <span className="eyebrow">{s.analytics.challengesEyebrow}</span>
         {activeChallenges.length === 0 && challengeHistory.length === 0 ? (
-          <p className="onboarding-help">No challenges joined yet. Join one from the Challenges screen and your attempts will appear here.</p>
+          <p className="onboarding-help">{s.analytics.noChallenges}</p>
         ) : (
           <div className="history-list">
             {[...activeChallenges, ...challengeHistory].map((participation) => (
@@ -3795,7 +3831,7 @@ function Analytics({
                 <div>
                   <strong>{participation.challenge.title}</strong>
                   <small>
-                    Day {participation.currentDay} of {participation.totalDays} · {participation.status === 'active' ? 'Active' : participation.status === 'completed' ? 'Completed' : 'Left'} · {participation.pointsEarned} points
+                    {s.analytics.challengeLine(participation.currentDay, participation.totalDays, participation.status === 'active' ? s.analytics.statusActive : participation.status === 'completed' ? s.analytics.statusCompleted : s.analytics.statusLeft, participation.pointsEarned)}
                   </small>
                 </div>
                 <span className="status-tag">
@@ -3811,12 +3847,12 @@ function Analytics({
 
   const apphead = (
     <div className="apphead">
-      <button type="button" className="aback" onClick={onBack} aria-label="Wapas jao">
+      <button type="button" className="aback" onClick={onBack} aria-label={s.common.back}>
         <ChevronLeft size={20} />
       </button>
       <div>
-        <h4>Analytics</h4>
-        <div className="asub">Tumhari mehnat, gin kar</div>
+        <h4>{s.analytics.title}</h4>
+        <div className="asub">{s.analytics.sub}</div>
       </div>
       <div className="aright">
         <button
@@ -3825,7 +3861,7 @@ function Analytics({
           aria-expanded={showHistory}
           onClick={() => void toggleHistory()}
         >
-          <CalendarDays size={13} /> Activity history
+          <CalendarDays size={13} /> {s.analytics.historyButton}
         </button>
       </div>
     </div>
@@ -3836,10 +3872,10 @@ function Analytics({
       <section className="analytics-screen">
         {apphead}
         <section className="panel" style={{ padding: 28 }}>
-          <span className="eyebrow">SIGN IN TO TRACK</span>
-          <h3>Your progress lives in your account</h3>
+          <span className="eyebrow">{s.analytics.guestEyebrow}</span>
+          <h3>{s.analytics.guestTitle}</h3>
           <p className="onboarding-help">
-            Sign in to see analytics from your saved study activity. Nothing is tracked in guest preview.
+            {s.analytics.guestText}
           </p>
         </section>
       </section>
@@ -3851,8 +3887,8 @@ function Analytics({
       <section className="analytics-screen">
         {apphead}
         <section className="panel" style={{ padding: 28 }}>
-          <span className="eyebrow">PRIVATE ACTIVITY DATA</span>
-          <h3>Loading your progress…</h3>
+          <span className="eyebrow">{s.analytics.loadingEyebrow}</span>
+          <h3>{s.analytics.loadingTitle}</h3>
         </section>
       </section>
     );
@@ -3869,12 +3905,6 @@ function Analytics({
 
   const completedChallenges = challengeHistory.filter((c) => c.status === 'completed').length;
 
-  // ---- Real per-period focus bars (completed focus sessions only) ----
-  function formatHours(totalMinutes: number): string {
-    if (totalMinutes < 60) return `${totalMinutes} min`;
-    return `${parseFloat((totalMinutes / 60).toFixed(1))} gh`;
-  }
-
   const completedFocus = focusHistory.filter((s) => s.mode === 'focus' && s.status === 'completed');
   const now = new Date();
   const todayKeyStr = todayKey();
@@ -3887,10 +3917,10 @@ function Analytics({
   let barsTitle = '';
   if (period === 'day') {
     const buckets = [
-      { label: 'Subah', test: (h: number) => h >= 5 && h < 11 },
-      { label: 'Dopeher', test: (h: number) => h >= 11 && h < 16 },
-      { label: 'Shaam', test: (h: number) => h >= 16 && h < 21 },
-      { label: 'Raat', test: (h: number) => h >= 21 || h < 5 },
+      { label: s.analytics.bucketMorning, test: (h: number) => h >= 5 && h < 11 },
+      { label: s.analytics.bucketAfternoon, test: (h: number) => h >= 11 && h < 16 },
+      { label: s.analytics.bucketEvening, test: (h: number) => h >= 16 && h < 21 },
+      { label: s.analytics.bucketNight, test: (h: number) => h >= 21 || h < 5 },
     ];
     bars = buckets.map((bucket) => ({
       label: bucket.label,
@@ -3900,7 +3930,7 @@ function Analytics({
         .reduce((sum, s) => sum + s.focusMinutesEarned, 0),
       future: false,
     }));
-    barsTitle = 'Focus — aaj (minute)';
+    barsTitle = s.analytics.barsDay;
   } else if (period === 'week') {
     const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     bars = labels.map((label, index) => {
@@ -3915,14 +3945,14 @@ function Analytics({
         future: day > now,
       };
     });
-    barsTitle = 'Padhai — is hafte (ghante)';
+    barsTitle = s.analytics.barsWeek;
   } else {
     const buckets = [
-      { label: 'Week 1', test: (d: number) => d >= 1 && d <= 7 },
-      { label: 'Week 2', test: (d: number) => d >= 8 && d <= 14 },
-      { label: 'Week 3', test: (d: number) => d >= 15 && d <= 21 },
-      { label: 'Week 4', test: (d: number) => d >= 22 && d <= 28 },
-      { label: 'Week 5', test: (d: number) => d >= 29 },
+      { label: s.analytics.bucketWeek(1), test: (d: number) => d >= 1 && d <= 7 },
+      { label: s.analytics.bucketWeek(2), test: (d: number) => d >= 8 && d <= 14 },
+      { label: s.analytics.bucketWeek(3), test: (d: number) => d >= 15 && d <= 21 },
+      { label: s.analytics.bucketWeek(4), test: (d: number) => d >= 22 && d <= 28 },
+      { label: s.analytics.bucketWeek(5), test: (d: number) => d >= 29 },
     ];
     const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     bars = buckets.map((bucket) => ({
@@ -3933,7 +3963,7 @@ function Analytics({
         .reduce((sum, s) => sum + s.focusMinutesEarned, 0),
       future: false,
     }));
-    barsTitle = 'Focus — is mahine (ghante)';
+    barsTitle = s.analytics.barsMonth;
   }
   const barsTotal = bars.reduce((sum, bar) => sum + (bar.value ?? 0), 0);
   const barsMax = Math.max(0, ...bars.map((bar) => bar.value ?? 0));
@@ -3952,20 +3982,19 @@ function Analytics({
       {showHistory && historyPanel}
       {!hasActivity ? (
         <section className="panel" style={{ padding: 28 }}>
-          <span className="eyebrow">PRIVATE ACTIVITY DATA</span>
-          <h3>No analytics available yet</h3>
+          <span className="eyebrow">{s.analytics.emptyEyebrow}</span>
+          <h3>{s.analytics.emptyTitle}</h3>
           <p className="onboarding-help">
-            Complete a study task or finish a focus session and your real numbers will appear here.
-            AHDORA will not display invented scores or public rankings.
+            {s.analytics.emptyText}
           </p>
         </section>
       ) : (
         <>
           <div className="analytics-period">
             {([
-              ['day', 'Din'],
-              ['week', 'Hafta'],
-              ['month', 'Mahina'],
+              ['day', s.analytics.periodDay],
+              ['week', s.analytics.periodWeek],
+              ['month', s.analytics.periodMonth],
             ] as const).map(([value, label]) => (
               <button
                 key={value}
@@ -3983,15 +4012,14 @@ function Analytics({
             <h5>{barsTitle}</h5>
             {barsTotal === 0 ? (
               <p className="onboarding-help">
-                Is {period === 'day' ? 'din' : period === 'week' ? 'hafte' : 'mahine'} ka koi finished
-                focus session nahi hai — graph khali hai, andaza nahi lagaya gaya.
+                {period === 'day' ? s.analytics.barsEmptyDay : period === 'week' ? s.analytics.barsEmptyWeek : s.analytics.barsEmptyMonth}
               </p>
             ) : (
               <>
                 <div className="wbars">
                   {bars.map((bar) => (
                     <div className="wb" key={bar.label}>
-                      <em>{bar.future || bar.value === null ? '—' : period === 'day' ? `${bar.value}m` : formatHours(bar.value)}</em>
+                      <em>{bar.future || bar.value === null ? '—' : period === 'day' ? `${bar.value}m` : minutesOrHours(bar.value, language)}</em>
                       <i
                         className={bar.future ? 'wb-future' : bar.value === barsMax && barsMax > 0 ? 'wb-best' : ''}
                         style={{ height: `${bar.future || barsMax === 0 ? 6 : Math.max(8, Math.round(((bar.value ?? 0) / barsMax) * 100))}%` }}
@@ -4001,26 +4029,26 @@ function Analytics({
                   ))}
                 </div>
                 <p className="mut" style={{ margin: '8px 0 0' }}>
-                  Kul: <b>{formatHours(barsTotal)}</b>
-                  {bestBar ? ` · sabse achha: ${bestBar.label}` : ''}
-                  {period === 'month' ? ' · sirf pichhle 20 loaded sessions se (kam se kam)' : ''}
+                  {s.analytics.total(minutesOrHours(barsTotal, language))}
+                  {bestBar ? s.analytics.best(bestBar.label) : ''}
+                  {period === 'month' ? s.analytics.monthLowerBound : ''}
                 </p>
               </>
             )}
           </div>
 
           <div className="acard-l analytics-summary">
-            <div className="setrow"><div>🕌 Namaz<small>Aaj {prayedToday} / 5 padhi</small></div><b>{prayedToday}/5</b></div>
-            <div className="setrow"><div>📚 Padhai<small>Aaj {stats.tasksCompletedToday} task poore · {formatHours(stats.todayFocusMinutes)} focus</small></div><b>{formatHours(stats.todayFocusMinutes)}</b></div>
-            <div className="setrow"><div>🎯 Focus<small>Is hafte {completedFocus.length} finished sessions (loaded)</small></div><b>{formatHours(stats.weekFocusMinutes)}</b></div>
-            <div className="setrow"><div>🌙 Neend ka schedule<small>{formatTime12h(sleepStartTime)} – {formatTime12h(sleepEndTime)}{sleepLabel ? ` · ${sleepLabel}` : ''} · schedule, asal neend nahi</small></div><b>Schedule</b></div>
-            <div className="setrow"><div>🏆 Challenge<small>{firstChallenge ? `${firstChallenge.challenge.title} · Day ${firstChallenge.currentDay}` : 'Koi challenge active nahi'}</small></div><b>{challengePct === null ? '—' : `${challengePct}%`}</b></div>
+            <div className="setrow"><div>{s.analytics.prayerRow}<small>{s.analytics.prayerRowSub(prayedToday)}</small></div><b>{prayedToday}/5</b></div>
+            <div className="setrow"><div>{s.analytics.studyRow}<small>{s.analytics.studyRowSub(stats.tasksCompletedToday, minutesOrHours(stats.todayFocusMinutes, language))}</small></div><b>{minutesOrHours(stats.todayFocusMinutes, language)}</b></div>
+            <div className="setrow"><div>{s.analytics.focusRow}<small>{s.analytics.focusRowSub(completedFocus.length)}</small></div><b>{minutesOrHours(stats.weekFocusMinutes, language)}</b></div>
+            <div className="setrow"><div>{s.analytics.sleepRow}<small>{s.analytics.sleepRowSub(formatTime12h(sleepStartTime), formatTime12h(sleepEndTime), sleepLabel ?? '')}</small></div><b>{s.analytics.sleepRowValue}</b></div>
+            <div className="setrow"><div>{s.analytics.challengeRow}<small>{firstChallenge ? s.analytics.challengeRowSub(firstChallenge.challenge.title, firstChallenge.currentDay) : s.analytics.noActiveChallenge}</small></div><b>{challengePct === null ? '—' : `${challengePct}%`}</b></div>
           </div>
 
           <section className="panel progress-breakdown" style={{ marginTop: 14 }}>
-            <SectionTitle title="Subjects this week" />
+            <SectionTitle title={s.analytics.subjectsWeek} />
             {stats.subjectBreakdown.length === 0 ? (
-              <p className="onboarding-help">No subjects yet. Add one from the Study planner.</p>
+              <p className="onboarding-help">{s.analytics.noSubjects}</p>
             ) : (
               stats.subjectBreakdown.map((subject) => (
                 <SubjectRow
@@ -4031,27 +4059,28 @@ function Analytics({
                   tasksTotal={subject.tasksTotal}
                   focusMinutes={subject.focusMinutesWeek}
                   colour={subject.colour}
+                  language={language}
                 />
               ))
             )}
           </section>
           <section className="panel progress-breakdown" style={{ marginTop: 14 }}>
-            <SectionTitle title="Challenges & points" />
+            <SectionTitle title={s.analytics.challengesPoints} />
             <div className="analytics-grid" style={{ marginTop: 0 }}>
               <div className="panel metric-card">
-                <span className="eyebrow">TOTAL POINTS</span>
+                <span className="eyebrow">{s.analytics.totalPoints}</span>
                 <strong>{rewards?.total ?? 0}</strong>
-                <span className="metric-trend"><Zap size={13} /> From real activity only — never per prayer</span>
+                <span className="metric-trend"><Zap size={13} /> {s.analytics.pointsNote}</span>
               </div>
               <div className="panel metric-card">
-                <span className="eyebrow">BADGES EARNED</span>
+                <span className="eyebrow">{s.analytics.badgesEarned}</span>
                 <strong>{rewards?.badges.length ?? 0}</strong>
-                <span className="metric-trend"><Trophy size={13} /> {rewards && rewards.badges.length > 0 ? rewards.badges.map((b) => b.title).join(', ') : 'No badges yet'}</span>
+                <span className="metric-trend"><Trophy size={13} /> {rewards && rewards.badges.length > 0 ? rewards.badges.map((b) => b.title).join(', ') : s.analytics.noBadges}</span>
               </div>
               <div className="panel metric-card">
-                <span className="eyebrow">ACTIVE CHALLENGES</span>
+                <span className="eyebrow">{s.analytics.activeChallenges}</span>
                 <strong>{activeChallenges.length}</strong>
-                <span className="metric-trend"><Target size={13} /> {completedChallenges} completed in total</span>
+                <span className="metric-trend"><Target size={13} /> {s.analytics.completedTotal(completedChallenges)}</span>
               </div>
             </div>
             {rewards && rewards.recent.length > 0 && (
@@ -4059,20 +4088,17 @@ function Analytics({
                 {rewards.recent.map((entry) => (
                   <div className="challenge-progress-row" key={entry.id}>
                     <span className="challenge-day-dot done" />
-                    <div><strong>+{entry.amount} points</strong><small>{POINT_REASON_LABELS[entry.reason]} · {new Date(entry.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</small></div>
+                    <div><strong>+{entry.amount} points</strong><small>{pointReasonLabel(entry.reason, language)} · {new Date(entry.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</small></div>
                   </div>
                 ))}
               </div>
             )}
             {(!rewards || rewards.recent.length === 0) && (
-              <p className="onboarding-help">No points yet. Finish a focus session, complete a task, or complete a challenge day to earn your first points.</p>
+              <p className="onboarding-help">{s.analytics.noPointsYet}</p>
             )}
           </section>
           <p className="analytics-footnote">
-            Study analytics are calculated only from your saved tasks and finished focus sessions.
-            Challenge and points analytics come only from your saved activity and server-side awards.
-            Salah analytics here show only today's count — weekly Salah reports are not connected yet,
-            so no weekly percentage is invented.
+            {s.analytics.footnote}
           </p>
         </>
       )}
@@ -4116,7 +4142,8 @@ function Profile({
   studyStats: StudyStats | null;
   profile: UserProfile;
 }) {
-  const displayName = user?.name || (guestMode ? 'Guest preview' : 'Your account');
+  const s = stringsFor(language);
+  const displayName = user?.name || (guestMode ? s.profile.guestPreview : s.profile.yourAccount);
   const initials = displayName
     .split(/\s+/)
     .filter(Boolean)
@@ -4130,31 +4157,31 @@ function Profile({
   // Preview #19 college line, from the real saved profile.
   const collegeLine = [profile.collegeName, profile.course, profile.semester ? `Sem ${profile.semester}` : '']
     .filter(Boolean)
-    .join(' · ') || (user?.email ?? 'Preview without an account');
+    .join(' · ') || (user?.email ?? s.profile.previewNoAccount);
   const streak = studyStats?.streak ?? 0;
 
   // Settings rows in EXACTLY the preview's order. Sleep schedule is
   // kept as an extra row after Notifications (it existed before and
   // now points at the standalone Sleep screen, not Focus).
   const rows: { icon: string; title: string; detail: string; onClick: () => void; disabled?: boolean }[] = [
-    { icon: '✏️', title: 'Apni details badlo', detail: 'Naam, course, college — onboarding wali details', onClick: () => onEditProfile(0), disabled: guestMode },
-    { icon: '🕌', title: 'Namaz settings', detail: 'City, tareeqa (Hanafi), apne set time', onClick: () => onEditProfile(4), disabled: guestMode },
-    { icon: '🔔', title: 'Notifications', detail: 'Categories aur quiet hours', onClick: () => setShowNotifSettings((open) => !open) },
-    { icon: '🔑', title: 'Password badlo', detail: 'Email verification ke saath', onClick: () => setShowSecurity((open) => !open), disabled: guestMode },
-    { icon: '🌙', title: 'Sleep schedule', detail: 'Neend ka time aur sleep focus', onClick: () => onNavigate('sleep') },
-    { icon: '💬', title: 'Feedback / Shikayat', detail: 'Koi dikkat ho to seedha likho', onClick: onOpenFeedback },
-    { icon: '↩', title: 'Onboarding dobara', detail: 'Details wapas step-by-step bharo', onClick: () => onEditProfile(0), disabled: guestMode },
+    { icon: '✏️', title: s.profile.editDetails, detail: s.profile.editDetailsSub, onClick: () => onEditProfile(0), disabled: guestMode },
+    { icon: '🕌', title: s.profile.prayerSettings, detail: s.profile.prayerSettingsSub, onClick: () => onEditProfile(4), disabled: guestMode },
+    { icon: '🔔', title: s.profile.notifications, detail: s.profile.notificationsSub, onClick: () => setShowNotifSettings((open) => !open) },
+    { icon: '🔑', title: s.profile.changePassword, detail: s.profile.changePasswordSub, onClick: () => setShowSecurity((open) => !open), disabled: guestMode },
+    { icon: '🌙', title: s.profile.sleepSchedule, detail: s.profile.sleepScheduleSub, onClick: () => onNavigate('sleep') },
+    { icon: '💬', title: s.profile.feedback, detail: s.profile.feedbackSub, onClick: onOpenFeedback },
+    { icon: '↩', title: s.profile.onboardingAgain, detail: s.profile.onboardingAgainSub, onClick: () => onEditProfile(0), disabled: guestMode },
   ];
 
   return (
     <section className="profile-screen">
       <div className="apphead">
-        <button type="button" className="aback" onClick={() => onNavigate('home')} aria-label="Wapas jao">
+        <button type="button" className="aback" onClick={() => onNavigate('home')} aria-label={s.common.back}>
           <ChevronLeft size={20} />
         </button>
         <div>
-          <h4>Profile</h4>
-          <div className="asub">Tumhara account, tumhare control me</div>
+          <h4>{s.profile.title}</h4>
+          <div className="asub">{s.profile.sub}</div>
         </div>
       </div>
 
@@ -4162,18 +4189,18 @@ function Profile({
       <div className="profile-name">{displayName}</div>
       <div className="mut profile-college">{collegeLine}</div>
       <div className="profile-status">
-        {user ? 'Authenticated account · Session active' : 'Guest preview · Not signed in'}
+        {user ? s.profile.statusAuthenticated : s.profile.statusGuest}
       </div>
 
       <div className="kpis">
-        <div className="kpi"><b>{rewards?.total ?? 0}</b><span>POINTS</span></div>
-        <div className="kpi"><b>{streak} din</b><span>STREAK</span></div>
-        <div className="kpi"><b>{rewards?.badges.length ?? 0}</b><span>BADGES</span></div>
+        <div className="kpi"><b>{rewards?.total ?? 0}</b><span>{s.profile.points}</span></div>
+        <div className="kpi"><b>{s.common.days(streak)}</b><span>{s.profile.streak}</span></div>
+        <div className="kpi"><b>{rewards?.badges.length ?? 0}</b><span>{s.profile.badges}</span></div>
       </div>
 
       {onboardingIncomplete && !guestMode && (
         <button type="button" className="sbtn pk profile-complete-btn" onClick={() => onEditProfile(onboardingResumeStep)}>
-          <UserRound size={15} /> Profile poora karo
+          <UserRound size={15} /> {s.profile.completeButton}
         </button>
       )}
 
@@ -4191,7 +4218,7 @@ function Profile({
           </button>
         ))}
         <div className="setrow setrow-static">
-          <div>🌐 Language · Bhasha<small>Login aur onboarding ki bhasha</small></div>
+          <div>{s.profile.languageRow}<small>{s.profile.languageRowSub}</small></div>
           <div className="lang-switch" role="group" aria-label="Language">
             <button type="button" className={language === 'en' ? 'selected' : ''} onClick={() => onLanguageChange('en')}>English</button>
             <button type="button" className={language === 'hi' ? 'selected' : ''} onClick={() => onLanguageChange('hi')}>Hinglish</button>
@@ -4200,18 +4227,18 @@ function Profile({
         {showNotifSettings && (
           <div className="profile-panel">
             {guestMode ? (
-              <p className="onboarding-help">Sign in to change notification preferences.</p>
+              <p className="onboarding-help">{s.profile.signInNotifications}</p>
             ) : (
-              <NotificationSettingsPanel onNotify={onNotify} />
+              <NotificationSettingsPanel onNotify={onNotify} language={language} />
             )}
           </div>
         )}
         {showSecurity && (
           <div className="profile-panel">
             {guestMode || !user ? (
-              <p className="onboarding-help">Sign in to change security settings.</p>
+              <p className="onboarding-help">{s.profile.signInSecurity}</p>
             ) : (
-              <SecuritySettings onNotify={onNotify} emailVerified={user.emailVerified} onAccountDeleted={onAccountDeleted} />
+              <SecuritySettings onNotify={onNotify} emailVerified={user.emailVerified} onAccountDeleted={onAccountDeleted} language={language} />
             )}
           </div>
         )}
@@ -4219,7 +4246,7 @@ function Profile({
 
       <div className="acard">
         <button type="button" className="setrow" onClick={onLogout}>
-          <div>🚪 Logout</div>
+          <div>🚪 {s.profile.logout}</div>
           <span className="chev">›</span>
         </button>
         <button
@@ -4228,17 +4255,16 @@ function Profile({
           disabled={guestMode}
           onClick={() => { setShowSecurity(true); setDeleteHint(true); }}
         >
-          <div>🗑 Account delete karo<small>Saara data hamesha ke liye mit jayega</small></div>
+          <div>🗑 {s.profile.deleteAccount}<small>{s.profile.deleteAccountSub}</small></div>
           <span className="chev">›</span>
         </button>
         {deleteHint && !guestMode && (
           <p className="onboarding-help profile-delete-hint">
-            Account delete karne ke liye upar khule Security panel me password daalo aur confirm
-            karo — wahi purana confirm flow hai, yahan se seedha delete nahi hota.
+            {s.profile.deleteHint}
           </p>
         )}
         {guestMode && (
-          <p className="onboarding-help">Guest preview me account delete nahi hota — sign in karo.</p>
+          <p className="onboarding-help">{s.profile.deleteGuest}</p>
         )}
       </div>
     </section>

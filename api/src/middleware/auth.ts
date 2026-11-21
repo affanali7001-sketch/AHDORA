@@ -26,3 +26,25 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     next(error);
   }
 }
+
+/**
+ * Optional auth for PUBLIC endpoints (Hijri today/month): when the
+ * request carries a valid session cookie, req.authUser is populated
+ * so the handler can apply the user's own timezone and settings;
+ * when it does not — guest, logged out on this device, expired
+ * session — the request still proceeds unauthenticated instead of
+ * 401ing. Never rejects: a stale cookie must not turn public
+ * calendar info into an "Authentication required" error.
+ */
+export async function optionalAuth(req: Request, res: Response, next: NextFunction) {
+  try {
+    const token = req.cookies?.[config.SESSION_COOKIE_NAME];
+    if (typeof token === 'string') {
+      const user = await resolveSessionUser(token);
+      if (user) req.authUser = user;
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+}

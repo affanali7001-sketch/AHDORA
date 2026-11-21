@@ -1,10 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Check, Plus, Search, Trophy, UserPlus, X } from 'lucide-react';
+import type { AppLanguage } from '../lib/language';
+import { stringsFor } from '../lib/strings';
 import {
   acceptChallengeInvite,
   acceptFriendRequest,
   cancelFriendRequest,
   declineChallengeInvite,
+  fetchDiscoverUsers,
   fetchFriends,
   fetchFriendRequests,
   fetchInvites,
@@ -42,14 +45,20 @@ export default function Friends({
   onNotify,
   refreshKey,
   guestMode,
+  language,
 }: {
   onNotify: (message: string) => void;
   refreshKey: number;
   guestMode: boolean;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<PublicUser[]>([]);
   const [searching, setSearching] = useState(false);
+  const [discover, setDiscover] = useState<PublicUser[]>([]);
+  const [discoverLoaded, setDiscoverLoaded] = useState(false);
+  const [discoverFailed, setDiscoverFailed] = useState(false);
   const [friends, setFriends] = useState<Friend[]>([]);
   const [incoming, setIncoming] = useState<FriendRequestItem[]>([]);
   const [outgoing, setOutgoing] = useState<FriendRequestItem[]>([]);
@@ -59,7 +68,7 @@ export default function Friends({
   const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
   const [shared, setShared] = useState<SharedChallenge[]>([]);
   const [sharedLoading, setSharedLoading] = useState(false);
-  const [inviteFor, setInviteFor] = useState<Friend | null>(null);
+  const [inviteFor, setInviteFor] = useState<PublicUser | null>(null);
   const [inviteChallengeId, setInviteChallengeId] = useState('');
   const [acceptingInvite, setAcceptingInvite] = useState<ChallengeInvite | null>(null);
   const [consentChecked, setConsentChecked] = useState(false);
@@ -70,12 +79,13 @@ export default function Friends({
   async function refresh() {
     if (guestMode) return;
     try {
-      const [friendsResult, requestsResult, invitesResult, mineResult] =
+      const [friendsResult, requestsResult, invitesResult, mineResult, discoverResult] =
         await Promise.allSettled([
           fetchFriends(),
           fetchFriendRequests(),
           fetchInvites(),
           fetchMyChallenges(),
+          fetchDiscoverUsers(),
         ]);
       if (friendsResult.status === 'fulfilled') setFriends(friendsResult.value);
       if (requestsResult.status === 'fulfilled') {
@@ -87,9 +97,16 @@ export default function Friends({
         setInvitesOut(invitesResult.value.outgoing);
       }
       if (mineResult.status === 'fulfilled') setMyChallenges(mineResult.value.active);
+      if (discoverResult.status === 'fulfilled') {
+        setDiscover(discoverResult.value);
+        setDiscoverFailed(false);
+      } else {
+        setDiscoverFailed(true);
+      }
+      setDiscoverLoaded(true);
       setError('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Friends could not be loaded.');
+      setError(err instanceof Error ? err.message : s.friends.loadFailed);
     }
   }
 
@@ -105,7 +122,7 @@ export default function Friends({
       await action();
       await refresh();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Something went wrong.';
+      const message = err instanceof Error ? err.message : s.friends.somethingWrong;
       setError(message);
       onNotify(message);
     } finally {
@@ -116,14 +133,14 @@ export default function Friends({
   async function handleSearch(event: FormEvent) {
     event.preventDefault();
     if (searchQuery.trim().length < 2) {
-      onNotify('Search needs at least 2 characters.');
+      onNotify(s.friends.searchNeedsTwo);
       return;
     }
     setSearching(true);
     try {
       setSearchResults(await searchUsers(searchQuery.trim()));
     } catch (err) {
-      onNotify(err instanceof Error ? err.message : 'Search failed.');
+      onNotify(err instanceof Error ? err.message : s.friends.searchFailed);
     } finally {
       setSearching(false);
     }
@@ -137,7 +154,7 @@ export default function Friends({
       const result = await fetchSharedChallenges(friend.id);
       setShared(result.shared);
     } catch (err) {
-      onNotify(err instanceof Error ? err.message : 'Shared challenges could not be loaded.');
+      onNotify(err instanceof Error ? err.message : s.friends.sharedFailed);
     } finally {
       setSharedLoading(false);
     }
@@ -147,14 +164,13 @@ export default function Friends({
     return (
       <section className="sc-friends">
         <PageHeading
-          eyebrow="COMMUNITY · FRIENDS"
-          title="Study together, with consent."
-          text="Add friends, share challenge progress, and invite people you trust — only ever with their explicit acceptance."
+          eyebrow={s.friends.eyebrow}
+          title={s.friends.title}
+          text={s.friends.textGuest}
         />
         <div className="acard-l">
           <p className="mut">
-            Friends need a signed-in account. Sign in to send friend requests and share
-            challenge progress.
+            {s.friends.guestText}
           </p>
         </div>
       </section>
@@ -167,18 +183,17 @@ export default function Friends({
   return (
     <section className="sc-friends">
       <PageHeading
-        eyebrow="COMMUNITY · FRIENDS"
-        title="Study together, with consent."
-        text="Add friends, share challenge progress, and invite people you trust — only ever with their explicit acceptance. Nobody is ever added automatically."
+        eyebrow={s.friends.eyebrow}
+        title={s.friends.title}
+        text={s.friends.textMain}
       />
 
       {error && <p className="form-error">{error}</p>}
 
       <div className="acard-l">
-        <h5>Dost dhoondo</h5>
+        <h5>{s.friends.findTitle}</h5>
         <p className="mut">
-          Search by name, or by the exact email address they signed up with. Search
-          results show only a name — never an email or profile details.
+          {s.friends.findText}
         </p>
         <form className="friend-search" onSubmit={handleSearch}>
           <Search size={16} />
@@ -186,11 +201,11 @@ export default function Friends({
             className="form-input"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Dost ka naam dhoondo…"
-            aria-label="Search users"
+            placeholder={s.friends.searchPlaceholder}
+            aria-label={s.friends.searchAria}
           />
           <button className="primary-button" type="submit" disabled={searching}>
-            {searching ? 'Searching…' : 'Search'}
+            {searching ? s.friends.searching : s.friends.search}
           </button>
         </form>
         {searchResults.length > 0 && (
@@ -203,7 +218,7 @@ export default function Friends({
                   <span className="snum2">{person.initial}</span>
                   <div>
                     <strong>{person.name}</strong>
-                    <small>{isFriend ? 'Already your friend' : pending ? 'Request sent' : 'AHDORA user'}</small>
+                    <small>{isFriend ? s.friends.alreadyFriend : pending ? s.friends.requestSent : s.friends.ahdoraUser}</small>
                   </div>
                   {!isFriend && !pending && (
                     <button
@@ -212,11 +227,11 @@ export default function Friends({
                       onClick={() =>
                         run(`add-${person.id}`, async () => {
                           await sendFriendRequest(person.id);
-                          onNotify(`Friend request sent to ${person.name}.`);
+                          onNotify(s.friends.requestSentTo(person.name));
                         })
                       }
                     >
-                      <UserPlus size={15} /> Add friend
+                      <UserPlus size={15} /> {s.friends.addFriend}
                     </button>
                   )}
                 </div>
@@ -225,21 +240,153 @@ export default function Friends({
           </div>
         )}
         {searchResults.length === 0 && searchQuery.trim().length >= 2 && !searching && (
-          <p className="mut">No users found for that search.</p>
+          <p className="mut">{s.friends.noUsersFound}</p>
         )}
       </div>
 
       <div className="acard-l">
-        <h5>Friend request aayi hai ({incoming.length})</h5>
+        <h5>{s.friends.discoverTitle}</h5>
+        <p className="mut">
+          {s.friends.discoverText}
+        </p>
+        {!discoverLoaded && <p className="mut">{s.friends.loading}</p>}
+        {discoverLoaded && discoverFailed && (
+          <div>
+            <p className="mut">{s.friends.discoverFailed}</p>
+            <button className="outline-button" onClick={() => refresh()}>
+              {s.friends.retry}
+            </button>
+          </div>
+        )}
+        {discoverLoaded && !discoverFailed && discover.length === 0 && (
+          <p className="mut">{s.friends.noDiscover}</p>
+        )}
+        {discover.map((person) => {
+          const isFriend = friendIds.has(person.id);
+          const pending = pendingOutgoingIds.has(person.id);
+          return (
+            <div className="taskrow" key={person.id}>
+              <span className="snum2">{person.initial}</span>
+              <div>
+                <strong>{person.name}</strong>
+                <small>{isFriend ? s.friends.alreadyFriend : pending ? s.friends.requestSent : s.friends.ahdoraUser}</small>
+              </div>
+              <div className="friend-actions">
+                {!isFriend && !pending && (
+                  <button
+                    className="outline-button"
+                    disabled={busy === `add-${person.id}`}
+                    onClick={() =>
+                      run(`add-${person.id}`, async () => {
+                        await sendFriendRequest(person.id);
+                        onNotify(s.friends.requestSentTo(person.name));
+                      })
+                    }
+                  >
+                    <UserPlus size={15} /> {s.friends.addFriend}
+                  </button>
+                )}
+                <button
+                  className="outline-button"
+                  onClick={() => {
+                    setInviteFor(person);
+                    setInviteChallengeId(myChallenges[0]?.challengeId ?? '');
+                  }}
+                >
+                  <Plus size={15} /> {s.friends.inviteToChallenge}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {inviteFor && (
+        <div className="acard-l">
+          <h5>{s.friends.inviteTitle(inviteFor.name)}</h5>
+          {friendIds.has(inviteFor.id) ? (
+            <>
+              <p>{s.friends.inviteText(inviteFor.name)}</p>
+              {myChallenges.length === 0 ? (
+                <p className="mut">
+                  {s.friends.inviteNoChallenge}
+                </p>
+              ) : (
+                <>
+                  <select
+                    className="form-input"
+                    value={inviteChallengeId}
+                    onChange={(e) => setInviteChallengeId(e.target.value)}
+                    aria-label={s.friends.chooseChallenge}
+                  >
+                    {myChallenges.map((p) => (
+                      <option key={p.challengeId} value={p.challengeId}>
+                        {s.friends.inviteOption(p.challenge.title, p.currentDay, p.totalDays)}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="friend-actions">
+                    <button
+                      className="primary-button"
+                      disabled={!inviteChallengeId || busy === 'send-invite'}
+                      onClick={() =>
+                        run('send-invite', async () => {
+                          await sendChallengeInvite(inviteChallengeId, inviteFor.id);
+                          setInviteFor(null);
+                          onNotify(s.friends.invitationSent(inviteFor.name));
+                        })
+                      }
+                    >
+                      {s.friends.sendInvitation}
+                    </button>
+                    <button className="outline-button" onClick={() => setInviteFor(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <p>{s.friends.inviteFriendsOnly(inviteFor.name)}</p>
+              <div className="friend-actions">
+                {pendingOutgoingIds.has(inviteFor.id) ? (
+                  <p className="mut">{s.friends.requestWaiting}</p>
+                ) : (
+                  <button
+                    className="primary-button"
+                    disabled={busy === `add-${inviteFor.id}`}
+                    onClick={() =>
+                      run(`add-${inviteFor.id}`, async () => {
+                        await sendFriendRequest(inviteFor.id);
+                        setInviteFor(null);
+                        onNotify(`Friend request sent to ${inviteFor.name}.`);
+                      })
+                    }
+                  >
+                    <UserPlus size={15} /> {s.friends.sendFriendRequest}
+                  </button>
+                )}
+                <button className="outline-button" onClick={() => setInviteFor(null)}>
+                  {s.friends.cancel}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      <div className="acard-l">
+        <h5>{s.friends.requestsTitle(incoming.length)}</h5>
         {incoming.length === 0 && outgoing.length === 0 && (
-          <p className="mut">No pending friend requests.</p>
+          <p className="mut">{s.friends.noRequests}</p>
         )}
         {incoming.map((request) => (
           <div className="taskrow" key={request.id}>
             <span className="snum2 av-peach">{request.other?.initial ?? '?'}</span>
             <div>
-              <strong>{request.other?.name ?? 'Unknown user'}</strong>
-              <small>Dost banna chahta hai</small>
+              <strong>{request.other?.name ?? s.friends.unknownUser}</strong>
+              <small>{s.friends.wantsToBeFriends}</small>
             </div>
             <div className="friend-actions">
               <button
@@ -248,11 +395,11 @@ export default function Friends({
                 onClick={() =>
                   run(`accept-${request.id}`, async () => {
                     await acceptFriendRequest(request.id);
-                    onNotify(`You are now friends with ${request.other?.name ?? 'them'}.`);
+                    onNotify(s.friends.nowFriends(request.other?.name ?? 'them'));
                   })
                 }
               >
-                <Check size={15} /> Accept
+                <Check size={15} /> {s.friends.accept}
               </button>
               <button
                 className="outline-button"
@@ -260,11 +407,11 @@ export default function Friends({
                 onClick={() =>
                   run(`reject-${request.id}`, async () => {
                     await rejectFriendRequest(request.id);
-                    onNotify('Friend request declined.');
+                    onNotify(s.friends.requestDeclined);
                   })
                 }
               >
-                Decline
+                {s.friends.decline}
               </button>
             </div>
           </div>
@@ -273,8 +420,8 @@ export default function Friends({
           <div className="taskrow" key={request.id}>
             <span className="snum2">{request.other?.initial ?? '?'}</span>
             <div>
-              <strong>{request.other?.name ?? 'Unknown user'}</strong>
-              <small>Request sent — waiting for them</small>
+              <strong>{request.other?.name ?? s.friends.unknownUser}</strong>
+              <small>{s.friends.requestSentWaiting}</small>
             </div>
             <button
               className="outline-button"
@@ -282,21 +429,21 @@ export default function Friends({
               onClick={() =>
                 run(`cancel-${request.id}`, async () => {
                   await cancelFriendRequest(request.id);
-                  onNotify('Friend request cancelled.');
+                  onNotify(s.friends.requestCancelled);
                 })
               }
             >
-              Cancel
+              {s.friends.cancel}
             </button>
           </div>
         ))}
       </div>
 
       <div className="acard-l">
-        <h5>Mere dost ({friends.length})</h5>
+        <h5>{s.friends.friendsTitle(friends.length)}</h5>
         {friends.length === 0 && (
           <p className="mut">
-            No friends yet. Send a request above — they join only when they accept it.
+            {s.friends.noFriends}
           </p>
         )}
         {friends.map((friend) => (
@@ -304,18 +451,11 @@ export default function Friends({
             <span className="snum2">{friend.initial}</span>
             <div>
               <strong>{friend.name}</strong>
-              <small>
-                Friends since{' '}
-                {new Date(friend.since).toLocaleDateString('en-IN', {
-                  day: 'numeric',
-                  month: 'short',
-                  year: 'numeric',
-                })}
-              </small>
+              <small>{s.friends.friendsSince(new Date(friend.since).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }))}</small>
             </div>
             <div className="friend-actions">
               <button className="outline-button" onClick={() => openShared(friend)}>
-                <Trophy size={15} /> Shared progress
+                <Trophy size={15} /> {s.friends.sharedProgress}
               </button>
               <button
                 className="outline-button"
@@ -325,11 +465,11 @@ export default function Friends({
                   setInviteChallengeId(myChallenges[0]?.challengeId ?? '');
                 }}
               >
-                <Plus size={15} /> Invite
+                <Plus size={15} /> {s.friends.invite}
               </button>
               <button
                 className="icon-button"
-                aria-label={`Remove ${friend.name}`}
+                aria-label={s.friends.removeAria(friend.name)}
                 onClick={() => setRemovingFriend(friend)}
               >
                 <X size={16} />
@@ -338,13 +478,12 @@ export default function Friends({
           </div>
         ))}
         <p className="mut">
-          Dost ko challenge me bulana ho to Challenges screen se invite bhejo — wo accept kare tabhi judta hai.
+          {s.friends.inviteHint}
         </p>
         {removingFriend && (
           <div className="friend-confirm">
             <p>
-              Remove <strong>{removingFriend.name}</strong> from your friends? You will no
-              longer see each other&apos;s shared challenge progress.
+              {s.friends.removeConfirm(removingFriend.name)}
             </p>
             <div className="friend-actions">
               <button
@@ -358,81 +497,31 @@ export default function Friends({
                       setShared([]);
                     }
                     setRemovingFriend(null);
-                    onNotify(`${removingFriend.name} removed from your friends.`);
+                    onNotify(s.friends.friendRemoved(removingFriend.name));
                   })
                 }
               >
-                Remove friend
+                {s.friends.removeFriend}
               </button>
               <button className="outline-button" onClick={() => setRemovingFriend(null)}>
-                Keep them
+                {s.friends.keepThem}
               </button>
             </div>
-          </div>
-        )}
-        {inviteFor && (
-          <div className="friend-confirm">
-            <p>
-              Invite <strong>{inviteFor.name}</strong> to one of your challenges. They join
-              only if they accept — and only the shared challenge progress is visible to
-              each other.
-            </p>
-            {myChallenges.length === 0 ? (
-              <p className="mut">
-                You are not taking part in any challenge yet. Join a challenge first.
-              </p>
-            ) : (
-              <>
-                <select
-                  className="form-input"
-                  value={inviteChallengeId}
-                  onChange={(e) => setInviteChallengeId(e.target.value)}
-                  aria-label="Choose a challenge"
-                >
-                  {myChallenges.map((p) => (
-                    <option key={p.challengeId} value={p.challengeId}>
-                      {p.challenge.title} — Day {p.currentDay} of {p.totalDays}
-                    </option>
-                  ))}
-                </select>
-                <div className="friend-actions">
-                  <button
-                    className="primary-button"
-                    disabled={!inviteChallengeId || busy === 'send-invite'}
-                    onClick={() =>
-                      run('send-invite', async () => {
-                        await sendChallengeInvite(inviteChallengeId, inviteFor.id);
-                        setInviteFor(null);
-                        onNotify(`Challenge invitation sent to ${inviteFor.name}.`);
-                      })
-                    }
-                  >
-                    Send invitation
-                  </button>
-                  <button className="outline-button" onClick={() => setInviteFor(null)}>
-                    Cancel
-                  </button>
-                </div>
-              </>
-            )}
           </div>
         )}
       </div>
 
       <div className="acard-l">
-        <h5>Challenge invitations</h5>
+        <h5>{s.friends.invitesTitle}</h5>
         {invitesIn.length === 0 && invitesOut.length === 0 && (
-          <p className="mut">No challenge invitations.</p>
+          <p className="mut">{s.friends.noInvites}</p>
         )}
         {invitesIn.map((invite) => (
           <div className="taskrow" key={invite.id}>
             <span className="snum2">{invite.other?.initial ?? '?'}</span>
             <div>
               <strong>{invite.challenge?.title ?? 'A challenge'}</strong>
-              <small>
-                {invite.other?.name ?? 'A friend'} invited you ·{' '}
-                {invite.challenge?.durationDays ?? ''} days
-              </small>
+              <small>{s.friends.invitedYou(invite.other?.name ?? 'A friend', invite.challenge?.durationDays ?? '')}</small>
             </div>
             <div className="friend-actions">
               <button
@@ -442,7 +531,7 @@ export default function Friends({
                   setConsentChecked(false);
                 }}
               >
-                Accept
+                {s.friends.accept}
               </button>
               <button
                 className="outline-button"
@@ -450,11 +539,11 @@ export default function Friends({
                 onClick={() =>
                   run(`decline-invite-${invite.id}`, async () => {
                     await declineChallengeInvite(invite.id);
-                    onNotify('Challenge invitation declined.');
+                    onNotify(s.friends.inviteDeclined);
                   })
                 }
               >
-                Decline
+                {s.friends.decline}
               </button>
             </div>
           </div>
@@ -464,17 +553,15 @@ export default function Friends({
             <span className="snum2">{invite.other?.initial ?? '?'}</span>
             <div>
               <strong>{invite.challenge?.title ?? 'A challenge'}</strong>
-              <small>Invitation sent to {invite.other?.name ?? 'them'} — waiting</small>
+              <small>{s.friends.inviteSentWaiting(invite.other?.name ?? 'them')}</small>
             </div>
           </div>
         ))}
         {acceptingInvite && (
           <div className="friend-confirm">
             <p>
-              Join <strong>{acceptingInvite.challenge?.title ?? 'this challenge'}</strong>?
-              The rules of the challenge apply, and your progress on it becomes visible to
-              {acceptingInvite.other?.name ? ` ${acceptingInvite.other.name}` : ' your friend'} —
-              only the challenge name, day, completed days and points.
+              {s.friends.joinTitle(acceptingInvite.challenge?.title ?? 'this challenge')}{' '}
+              {s.friends.joinText(acceptingInvite.other?.name ?? 'your friend')}
             </p>
             <label className="consent-row">
               <input
@@ -482,7 +569,7 @@ export default function Friends({
                 checked={consentChecked}
                 onChange={(e) => setConsentChecked(e.target.checked)}
               />
-              <span>I understand the rules and join with my consent.</span>
+              <span>{s.friends.joinConsent}</span>
             </label>
             <div className="friend-actions">
               <button
@@ -492,14 +579,14 @@ export default function Friends({
                   run('accept-invite', async () => {
                     await acceptChallengeInvite(acceptingInvite.id);
                     setAcceptingInvite(null);
-                    onNotify(`You joined "${acceptingInvite.challenge?.title ?? 'the challenge'}".`);
+                    onNotify(s.friends.joinedChallenge(acceptingInvite.challenge?.title ?? 'the challenge'));
                   })
                 }
               >
-                Join challenge
+                {s.friends.joinChallenge}
               </button>
               <button className="outline-button" onClick={() => setAcceptingInvite(null)}>
-                Not now
+                {s.friends.notNow}
               </button>
             </div>
           </div>
@@ -508,16 +595,14 @@ export default function Friends({
 
       {selectedFriend && (
         <div className="acard-l">
-          <h5>Shared progress with {selectedFriend.name}</h5>
+          <h5>{s.friends.sharedTitle(selectedFriend.name)}</h5>
           <p className="mut">
-            Only challenges you both take part in are shown, and only these fields: challenge
-            name, current day, completed days, progress and points earned. Nothing else about
-            either of you is shared.
+            {s.friends.sharedText}
           </p>
-          {sharedLoading && <p className="mut">Loading shared progress…</p>}
+          {sharedLoading && <p className="mut">{s.friends.sharedLoading}</p>}
           {!sharedLoading && shared.length === 0 && (
             <p className="mut">
-              No shared challenges yet. Invite {selectedFriend.name} to one of your challenges.
+              {s.friends.noShared(selectedFriend.name)}
             </p>
           )}
           {shared.map((item) => (
@@ -526,19 +611,19 @@ export default function Friends({
                 <strong>{item.challengeTitle}</strong>
                 <span>{item.category}</span>
               </div>
-              <SharedProgressRow label="You" progress={item.mine} />
-              <SharedProgressRow label={selectedFriend.name} progress={item.friend} />
+              <SharedProgressRow label={s.friends.you} progress={item.mine} language={language} />
+              <SharedProgressRow label={selectedFriend.name} progress={item.friend} language={language} />
             </div>
           ))}
           <button className="outline-button" onClick={() => setSelectedFriend(null)}>
-            Close shared view
+            {s.friends.closeShared}
           </button>
         </div>
       )}
 
       <div className="acard-l sc-privacy">
         <p>
-          🔒 <b>Privacy pakki:</b> dost sirf challenge ka naam, din, progress aur points dekhte hain. Tumhare tasks, neend, profile ya namaz ki tafseel private rehti hai.
+          {s.friends.privacy}
         </p>
       </div>
     </section>
@@ -548,10 +633,13 @@ export default function Friends({
 function SharedProgressRow({
   label,
   progress,
+  language,
 }: {
   label: string;
   progress: { currentDay: number; totalDays: number; completedDays: number; pointsEarned: number; status: string };
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const percent =
     progress.totalDays > 0
       ? Math.min(100, Math.round((progress.completedDays / progress.totalDays) * 100))
@@ -561,9 +649,8 @@ function SharedProgressRow({
       <div className="shared-progress-label">
         <strong>{label}</strong>
         <span>
-          Day {progress.currentDay} of {progress.totalDays} · {progress.completedDays} days
-          done · {progress.pointsEarned} points
-          {progress.status === 'completed' ? ' · Completed' : ''}
+          {s.friends.sharedLine(progress.currentDay, progress.totalDays, progress.completedDays, progress.pointsEarned)}
+          {progress.status === 'completed' ? s.friends.sharedCompleted : ''}
         </span>
       </div>
       <div className="shared-progress-bar" aria-label={`${label}: ${percent}% complete`}>

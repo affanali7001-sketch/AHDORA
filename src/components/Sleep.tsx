@@ -3,6 +3,8 @@ import { BookOpen, ChevronLeft, Moon, ShieldCheck, Sun } from 'lucide-react';
 import { sleepDurationLabel } from '../types/profile';
 import { formatTime12h } from '../App';
 import NotificationSettingsPanel from './NotificationSettings';
+import type { AppLanguage } from '../lib/language';
+import { stringsFor } from '../lib/strings';
 
 const SOCIAL_APPS = ['Instagram', 'Facebook', 'Snapchat', 'WhatsApp', 'Telegram', 'X'];
 
@@ -53,6 +55,7 @@ export default function Sleep({
   onBack,
   onOpenGuidance,
   guestMode,
+  language,
 }: {
   sleepStartTime: string;
   sleepEndTime: string;
@@ -69,7 +72,9 @@ export default function Sleep({
   onBack: () => void;
   onOpenGuidance: (tab: 'quran' | 'duas' | 'hijri' | 'mosques') => void;
   guestMode: boolean;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const sleepStart = formatTime12h(sleepStartTime || '22:00');
   const sleepEnd = formatTime12h(sleepEndTime || '04:00');
   const sleepDuration = sleepDurationLabel(sleepStartTime || '22:00', sleepEndTime || '04:00');
@@ -104,20 +109,20 @@ export default function Sleep({
   }
 
   const reminderRows: { key: keyof SleepReminders; title: string; sub: string }[] = [
-    { key: 'before30', title: 'Sone se 30 min pehle reminder', sub: `Sone ke time se aadha ghanta pehle` },
-    { key: 'wake', title: 'Subah uthne ka reminder', sub: `Uthne ka time — ${sleepEnd}` },
-    { key: 'nudge', title: '"Phone side rakho" wali salah', sub: 'Sone se pehle halki si nudge' },
+    { key: 'before30', title: s.sleep.reminderBefore, sub: s.sleep.reminderBeforeSub },
+    { key: 'wake', title: s.sleep.reminderWake, sub: s.sleep.reminderWakeSub(sleepEnd) },
+    { key: 'nudge', title: s.sleep.reminderNudge, sub: s.sleep.reminderNudgeSub },
   ];
 
   return (
     <section className="sleep-screen">
       <div className="apphead">
-        <button type="button" className="aback" onClick={onBack} aria-label="Wapas jao">
+        <button type="button" className="aback" onClick={onBack} aria-label={s.common.back}>
           <ChevronLeft size={20} />
         </button>
         <div>
-          <h4>Sleep</h4>
-          <div className="asub">Neend ka schedule aur reminder</div>
+          <h4>{s.sleep.title}</h4>
+          <div className="asub">{s.sleep.sub}</div>
         </div>
       </div>
 
@@ -125,59 +130,59 @@ export default function Sleep({
         <div>
           <div className="sleep-head3-ic">🌙</div>
           <b>{sleepStart}</b>
-          <div className="mut">Sone ka time</div>
+          <div className="mut">{s.sleep.bedtime}</div>
         </div>
         <div className="sleep-head3-mid">
-          <div className="sleep-head3-kul">KUL NEEND</div>
+          <div className="sleep-head3-kul">{s.sleep.totalSleep}</div>
           <b>{sleepDuration || '—'}</b>
-          <div className="mut">schedule ke hisab se</div>
+          <div className="mut">{s.sleep.asPerSchedule}</div>
         </div>
         <div>
           <div className="sleep-head3-ic">☀️</div>
           <b>{sleepEnd}</b>
-          <div className="mut">Uthne ka time</div>
+          <div className="mut">{s.sleep.wakeTime}</div>
         </div>
       </div>
 
       <div className="acard-l">
-        <h5>Neend ka time badlo</h5>
+        <h5>{s.sleep.changeTime}</h5>
         <div className="sleep-window">
           <div className="sleep-time">
             <Moon size={19} />
-            <span>START</span>
+            <span>{s.sleep.start}</span>
             <strong>{sleepStart}</strong>
           </div>
           <div className="sleep-duration">
             <div className="sleep-line" />
-            <span>{sleepDuration ? `${sleepDuration} protected` : 'Protected'}</span>
+            <span>{sleepDuration ? s.sleep.protected(sleepDuration) : s.sleep.protectedOnly}</span>
             <div className="sleep-line" />
           </div>
           <div className="sleep-time">
             <Sun size={19} />
-            <span>END</span>
+            <span>{s.sleep.end}</span>
             <strong>{sleepEnd}</strong>
           </div>
         </div>
 
         <div className="onboarding-two-col" style={{ marginTop: 14 }}>
           <div>
-            <label className="field-label">Neend ka time (start)</label>
+            <label className="field-label">{s.sleep.startLabel}</label>
             <input className="form-input" type="time" value={sleepStartTime || '22:00'} onChange={(e) => handleSleepChange(e.target.value, sleepEndTime || '04:00')} />
           </div>
           <div>
-            <label className="field-label">Uthne ka time (end)</label>
+            <label className="field-label">{s.sleep.endLabel}</label>
             <input className="form-input" type="time" value={sleepEndTime || '04:00'} onChange={(e) => handleSleepChange(sleepStartTime || '22:00', e.target.value)} />
           </div>
         </div>
 
         <div className="focus-setting-row">
           <div>
-            <strong>Sleep focus</strong>
-            <small>Neend ke time par selected apps ko out of reach rakho.</small>
+            <strong>{s.sleep.focusTitle}</strong>
+            <small>{s.sleep.focusText}</small>
           </div>
           <button
             className={`toggle ${focusEnabled ? 'toggle-on' : ''}`}
-            aria-label="Toggle sleep focus"
+            aria-label={s.sleep.focusToggleAria}
             onClick={() => setFocusEnabled(!focusEnabled)}
           >
             <i />
@@ -185,24 +190,24 @@ export default function Sleep({
         </div>
 
         <button className="primary-button" disabled={focusSaving} onClick={() => void handleSaveClick()}>
-          {focusSaving ? 'Save ho raha hai…' : 'Save focus schedule'}
+          {focusSaving ? s.sleep.saving : s.sleep.saveSchedule}
         </button>
         {saveResult === 'saved' && (
-          <p className="onboarding-help" role="status">✓ Save ho gaya — neend ka time ({sleepStart} – {sleepEnd}) aapke account me save hai.</p>
+          <p className="onboarding-help" role="status">{s.sleep.saved(sleepStart, sleepEnd)}</p>
         )}
         {saveResult === 'error' && (
-          <p className="salah-error" role="status">Save nahi ho paya. Dobara try karo.</p>
+          <p className="salah-error" role="status">{s.sleep.saveFailed}</p>
         )}
-        <p className="onboarding-help">Neend ka time aapke account me save hota hai. App restrictions Android-only hain — web par ye sirf preview hai.</p>
+        <p className="onboarding-help">{s.sleep.saveNote}</p>
       </div>
 
       <div className="acard-l">
         <div className="focus-setting-head">
           <div>
-            <strong>Apps to restrict</strong>
-            <small>Choose the apps you want out of reach.</small>
+            <strong>{s.sleep.restrictTitle}</strong>
+            <small>{s.sleep.restrictText}</small>
           </div>
-          <span>{`${socialApps.length} selected`}</span>
+          <span>{s.sleep.selectedCount(socialApps.length)}</span>
         </div>
 
         <div className="app-chip-list">
@@ -222,13 +227,13 @@ export default function Sleep({
 
         <div className="focus-setting-row">
           <div>
-            <strong>YouTube</strong>
-            <small>Keep YouTube available during sleep focus.</small>
+            <strong>{s.sleep.youtubeTitle}</strong>
+            <small>{s.sleep.youtubeText}</small>
           </div>
           <button
             className={`toggle ${youtubeAllowed ? 'toggle-on' : ''}`}
             onClick={() => setYoutubeAllowed(!youtubeAllowed)}
-            aria-label="Allow YouTube"
+            aria-label={s.sleep.youtubeAria}
           >
             <i />
           </button>
@@ -236,24 +241,22 @@ export default function Sleep({
 
         <div className="focus-setting-row">
           <div>
-            <strong>Cellular calls &amp; emergency access</strong>
-            <small>Always remain available.</small>
+            <strong>{s.sleep.callsTitle}</strong>
+            <small>{s.sleep.callsText}</small>
           </div>
-          <span className="always-allowed"><ShieldCheck size={13} /> Allowed</span>
+          <span className="always-allowed"><ShieldCheck size={13} /> {s.sleep.allowed}</span>
         </div>
       </div>
 
       <div className="acard-l">
-        <h5>Is hafte schedule follow hua?</h5>
+        <h5>{s.sleep.weekTitle}</h5>
         <p className="onboarding-help">
-          Abhi koi record nahi hai. "So gaya / uth gaya" mark karne ka option abhi app me nahi
-          hai, isliye hafte ka graph khali hai — yahan koi andaza wali bars nahi dikhayi
-          jayengi. Upar wala time sirf tumhara set kiya hua schedule hai, asal neend nahi.
+          {s.sleep.weekText}
         </p>
       </div>
 
       <div className="acard-l">
-        <h5>Reminders</h5>
+        <h5>{s.sleep.remindersTitle}</h5>
         {reminderRows.map((row) => (
           <div className="setrow" key={row.key}>
             <div>{row.title}<small>{row.sub}</small></div>
@@ -268,33 +271,30 @@ export default function Sleep({
           </div>
         ))}
         <p className="onboarding-help">
-          Ye teen switches sirf is device par save hote hain — app band ho to reminder nahi
-          aata. Neend ki asal notifications neeche wali setting se chalti hain.
+          {s.sleep.remindersNote}
         </p>
         {guestMode ? (
-          <p className="onboarding-help">Notification preferences badalne ke liye sign in karo.</p>
+          <p className="onboarding-help">{s.sleep.signInNotifications}</p>
         ) : (
-          <NotificationSettingsPanel onNotify={onNotify} />
+          <NotificationSettingsPanel onNotify={onNotify} language={language} />
         )}
       </div>
 
       <div className="acard-l">
-        <h5>🌙 Sone se pehle ki dua — Dua for Sleep</h5>
+        <h5>{s.sleep.duaTitle}</h5>
         <div className="sleep-dua-arab">بِاسْمِكَ اللَّهُمَّ أَمُوتُ وَأَحْيَا</div>
         <p className="mut" style={{ margin: '5px 0 0' }}>
           <i>Bismika Allaahumma amootu wa ahyaa.</i> — "Ae Allah! Tere naam se main sota hoon
           (neend ek chhoti si maut hai) aur Tere hi naam se jaagta hoon." (Sahih al-Bukhari 6324)
         </p>
         <button type="button" className="text-button" onClick={() => onOpenGuidance('duas')}>
-          <BookOpen size={14} /> Sone ki saari duaein — Dua for Sleep dekho
+          <BookOpen size={14} /> {s.sleep.duaButton}
         </button>
       </div>
 
       <div className="acard-l">
         <p className="mut" style={{ margin: 0 }}>
-          Android version me neend ke time par social apps rokne ka option milega — YouTube
-          chaaho to khula rahega, calls aur emergency hamesha chalenge. Sab tumhare control
-          me, koi zabardasti lock nahi.
+          {s.sleep.footerNote}
         </p>
       </div>
     </section>

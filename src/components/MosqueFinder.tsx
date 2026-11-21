@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react';
 import { Compass, MapPin, Navigation, Phone, Search } from 'lucide-react';
+import type { AppLanguage } from '../lib/language';
+import { stringsFor } from '../lib/strings';
 import {
   fetchMosquesNearMe,
   fetchNearbyMosques,
@@ -20,11 +22,14 @@ export default function MosqueFinder({
   onNotify,
   guestMode,
   profileCity,
+  language,
 }: {
   onNotify: (message: string) => void;
   guestMode: boolean;
   profileCity: string;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const [city, setCity] = useState('');
   const [radiusKm, setRadiusKm] = useState(10);
   const [result, setResult] = useState<MosqueResult | null>(null);
@@ -45,10 +50,10 @@ export default function MosqueFinder({
       const data = await promise;
       setResult(data);
       if (data.count === 0) {
-        onNotify('No mosques found in OpenStreetMap data for that area.');
+        onNotify(s.mosques.noneFound);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Mosque search failed.');
+      setError(err instanceof Error ? err.message : s.mosques.searchFailed);
       setCanRetry(lastSearchRef.current !== null);
     } finally {
       setLoading(false);
@@ -57,7 +62,7 @@ export default function MosqueFinder({
 
   function searchCity() {
     if (!city.trim()) {
-      onNotify('Enter a city name first.');
+      onNotify(s.mosques.enterCity);
       return;
     }
     const query = city.trim();
@@ -69,7 +74,7 @@ export default function MosqueFinder({
 
   function useMyLocation() {
     if (!('geolocation' in navigator)) {
-      onNotify('Your browser does not support location access.');
+      onNotify(s.mosques.noGeolocation);
       return;
     }
     setLocating(true);
@@ -85,7 +90,7 @@ export default function MosqueFinder({
       },
       () => {
         setLocating(false);
-        onNotify('Location permission was not granted. Try a manual city search instead.');
+        onNotify(s.mosques.locationDenied);
       },
       { timeout: 15000 },
     );
@@ -95,9 +100,9 @@ export default function MosqueFinder({
     <section className="sc-mosque">
       <div className="quran-browser-head">
         <div>
-          <span className="eyebrow">MOSQUE FINDER · OPENSTREETMAP</span>
-          <h3>Find a masjid near you</h3>
-          <p>Real places from OpenStreetMap data. Distances are from your location or the searched city.</p>
+          <span className="eyebrow">{s.mosques.eyebrow}</span>
+          <h3>{s.mosques.title}</h3>
+          <p>{s.mosques.intro}</p>
         </div>
         <span className="iconbtn"><Compass size={18} /></span>
       </div>
@@ -110,8 +115,8 @@ export default function MosqueFinder({
           <input
             value={city}
             onChange={(event) => setCity(event.target.value)}
-            placeholder="Search a city, e.g. Pune"
-            aria-label="Search a city"
+            placeholder={s.mosques.searchPlaceholder}
+            aria-label={s.mosques.searchAria}
             onKeyDown={(event) => {
               if (event.key === 'Enter') searchCity();
             }}
@@ -119,7 +124,7 @@ export default function MosqueFinder({
         </label>
         <div className="sc-controls-row">
           <label className="field-label">
-            Radius
+            {s.mosques.radius}
             <select
               className="form-input"
               value={radiusKm}
@@ -131,10 +136,10 @@ export default function MosqueFinder({
             </select>
           </label>
           <button className="primary-button" onClick={searchCity} disabled={loading}>
-            Search
+            {s.mosques.search}
           </button>
           <button className="outline-button" onClick={useMyLocation} disabled={loading || locating}>
-            <Navigation size={15} /> {locating ? 'Locating…' : 'Use my location'}
+            <Navigation size={15} /> {locating ? s.mosques.locating : s.mosques.useMyLocation}
           </button>
           {!guestMode && profileCity && (
             <button
@@ -146,7 +151,7 @@ export default function MosqueFinder({
               }}
               disabled={loading}
             >
-              <MapPin size={15} /> Near {profileCity}
+              <MapPin size={15} /> {s.mosques.nearCity(profileCity)}
             </button>
           )}
         </div>
@@ -155,12 +160,12 @@ export default function MosqueFinder({
       {error && canRetry && !loading && (
         <p>
           <button className="outline-button" onClick={() => lastSearchRef.current?.()}>
-            Try again · Dobara koshish karein
+            {s.mosques.retry}
           </button>
         </p>
       )}
 
-      {loading && <p className="empty-note">Searching OpenStreetMap… this can take up to 30 seconds when OpenStreetMap is slow.</p>}
+      {loading && <p className="empty-note">{s.mosques.searching}</p>}
 
       {result && !loading && (
         <>
@@ -171,8 +176,7 @@ export default function MosqueFinder({
           </p>
           {result.mosques.length === 0 ? (
             <p className="empty-note">
-              No mosques found within {result.radiusKm} km in OpenStreetMap data. Try a larger
-              radius or a nearby larger city.
+              {s.mosques.noneInRadius(result.radiusKm)}
             </p>
           ) : (
             <div className="acard">
@@ -183,7 +187,7 @@ export default function MosqueFinder({
                     <div>
                       <strong>{mosque.name}</strong>
                       <small>
-                        {mosque.address ? mosque.address : 'Address not listed in OpenStreetMap'}
+                        {mosque.address ? mosque.address : '{s.mosques.noAddress}'}
                       </small>
                       {mosque.phone && (
                         <small>
@@ -193,7 +197,7 @@ export default function MosqueFinder({
                       {mosque.website && (
                         <small>
                           <a href={mosque.website} target="_blank" rel="noreferrer">
-                            Website
+                            {s.mosques.website}
                           </a>
                         </small>
                       )}
@@ -206,7 +210,7 @@ export default function MosqueFinder({
                         target="_blank"
                         rel="noreferrer"
                       >
-                        Directions →
+                        {s.mosques.directions}
                       </a>
                     </span>
                   </li>
@@ -219,8 +223,7 @@ export default function MosqueFinder({
 
       <div className="acard">
         <p className="mut">
-          Location ki permission doge to list doori ke hisab se khud sort ho jayegi.
-          Permission nahi dena to city likh kar bhi search ho jata hai — koi zabardasti nahi.
+          {s.mosques.footerNote}
         </p>
       </div>
     </section>

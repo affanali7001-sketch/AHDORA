@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight, ShieldCheck } from 'lucide-react';
 import { apiFetch } from '../lib/http.js';
+import type { AppLanguage } from '../lib/language';
+import { stringsFor, type Strings } from '../lib/strings';
 import {
   emptyPrayerSettings,
   fetchPrayerSettings,
@@ -51,15 +53,22 @@ function toEntry(value: unknown): PrayerEntry {
  * missed earlier" (P13): the select's own "Prayed on time" status
  * must not carry a contradictory miss label. Miss history itself is
  * still preserved in the record (wasMissed/missedAt) for Qaza. */
-function statusLabel(entry: PrayerEntry): string {
-  const base = entry.status[0].toUpperCase() + entry.status.slice(1);
+function statusLabel(entry: PrayerEntry, s: Strings): string {
   if (entry.status === 'missed' && entry.autoMissed) {
-    return 'Missed — auto-marked after deadline';
+    return s.salahCalendar.statusMissedAuto;
   }
   if (entry.status === 'qaza' && entry.wasMissed) {
-    return 'Qaza (was missed)';
+    return s.salahCalendar.statusQazaWasMissed;
   }
-  return base;
+  return s.salahCalendar[
+    entry.status === 'pending'
+      ? 'statusPending'
+      : entry.status === 'prayed'
+        ? 'statusPrayed'
+        : entry.status === 'qaza'
+          ? 'statusQaza'
+          : 'statusMissed'
+  ];
 }
 
 const dateKey = (date: Date) =>
@@ -67,9 +76,11 @@ const dateKey = (date: Date) =>
 
 type Props = {
   onNotify: (message: string) => void;
+  language: AppLanguage;
 };
 
-export default function SalahTracker({ onNotify }: Props) {
+export default function SalahTracker({ onNotify, language }: Props) {
+  const s = stringsFor(language);
   const today = dateKey(new Date());
   const [month, setMonth] = useState(today.slice(0, 7));
   const [selectedDate, setSelectedDate] = useState(today);
@@ -99,8 +110,8 @@ export default function SalahTracker({ onNotify }: Props) {
     apiFetch(`/api/salah/calendar/${month}`)
       .then(async response => {
         if (!response.ok) {
-          if (response.status === 401) throw new Error('Login required to view your saved Salah records.');
-          throw new Error('Salah records could not be loaded.');
+          if (response.status === 401) throw new Error(s.salahCalendar.loginRequired);
+          throw new Error(s.salahCalendar.loadFailed);
         }
         return response.json();
       })
@@ -122,7 +133,7 @@ export default function SalahTracker({ onNotify }: Props) {
         });
       })
       .catch(err => {
-        if (active) setError(err.message || 'Could not load Salah records.');
+        if (active) setError(err.message || s.salahCalendar.loadFailedShort);
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -152,7 +163,7 @@ export default function SalahTracker({ onNotify }: Props) {
       .catch(err => {
         if (active) {
           setTimes(null);
-          setTimesNote(err instanceof Error ? err.message : 'Prayer times load nahi ho paye.');
+          setTimesNote(err instanceof Error ? err.message : s.salahCalendar.timesLoadFailed);
         }
       });
     return () => { active = false; };
@@ -170,7 +181,7 @@ export default function SalahTracker({ onNotify }: Props) {
     try {
       setDraftSettings(await fetchPrayerSettings());
     } catch (err) {
-      setTimesMessage(err instanceof Error ? err.message : 'Prayer settings load nahi ho paye.');
+      setTimesMessage(err instanceof Error ? err.message : s.salahCalendar.settingsLoadFailed);
     } finally {
       setSettingsLoading(false);
     }
@@ -182,15 +193,15 @@ export default function SalahTracker({ onNotify }: Props) {
     setTimesMessage('');
     try {
       await savePrayerSettings(draftSettings);
-      setTimesMessage('Namaz ke time save ho gaye.');
-      onNotify('Namaz ke time save ho gaye.');
+      setTimesMessage(s.salahCalendar.timesSaved);
+      onNotify(s.salahCalendar.timesSaved);
       if (selectedDate === today) {
         fetchPrayerTimes(selectedDate)
           .then(setTimes)
           .catch(() => undefined);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Prayer times save nahi ho paye.';
+      const message = err instanceof Error ? err.message : s.salahCalendar.timesSaveFailed;
       setTimesMessage(message);
       onNotify(message);
     } finally {
@@ -202,7 +213,7 @@ export default function SalahTracker({ onNotify }: Props) {
 
   async function updateStatus(prayer: Prayer, status: Status) {
     if (selectedDate > today) {
-      onNotify('Future dates cannot be marked.');
+      onNotify(s.salahCalendar.futureCannotMark);
       return;
     }
 
@@ -221,7 +232,7 @@ export default function SalahTracker({ onNotify }: Props) {
 
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(data.error || 'Salah status could not be saved.');
+        throw new Error(data.error || s.salahCalendar.statusSaveFailed);
       }
 
       const savedRecord = Object.fromEntries(
@@ -235,7 +246,7 @@ export default function SalahTracker({ onNotify }: Props) {
 
       setRecords(previous => ({ ...previous, [selectedDate]: savedRecord }));
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Save failed.';
+      const message = err instanceof Error ? err.message : s.salahCalendar.saveFailed;
       setError(message);
       onNotify(message);
     } finally {
@@ -295,18 +306,18 @@ export default function SalahTracker({ onNotify }: Props) {
   return (
     <section className="sc-salah">
       <div className="sc-head">
-        <span className="eyebrow">PRIVATE WORSHIP RECORD</span>
-        <h3>Your Salah calendar</h3>
-        <p>Track each prayer honestly. Only your account can access these records.</p>
-        <span className="salah-sync"><ShieldCheck size={13} /> {monthTitle} · this month</span>
+        <span className="eyebrow">{s.salahCalendar.eyebrow}</span>
+        <h3>{s.salahCalendar.heading}</h3>
+        <p>{s.salahCalendar.intro}</p>
+        <span className="salah-sync"><ShieldCheck size={13} /> {s.salahCalendar.syncLine(monthTitle)}</span>
       </div>
 
       {error && <p className="salah-error">{error}</p>}
-      {loading && <p className="salah-loading">Loading your saved prayer records...</p>}
+      {loading && <p className="salah-loading">{s.salahCalendar.loadingRecords}</p>}
 
       <div className="acard-l">
         <div className="salah-month">
-          <button className="sbtn gh" onClick={() => moveMonth(-1)} aria-label="Previous month">
+          <button className="sbtn gh" onClick={() => moveMonth(-1)} aria-label={s.hijri.prevMonth}>
             <ChevronLeft size={17} />
           </button>
           <strong>{monthTitle}</strong>
@@ -314,7 +325,7 @@ export default function SalahTracker({ onNotify }: Props) {
             className="sbtn gh"
             onClick={() => moveMonth(1)}
             disabled={`${year}-${String(monthNumber).padStart(2, '0')}` >= today.slice(0, 7)}
-            aria-label="Next month"
+            aria-label={s.hijri.nextMonth}
           >
             <ChevronRight size={17} />
           </button>
@@ -360,28 +371,28 @@ export default function SalahTracker({ onNotify }: Props) {
         </div>
 
         <div className="legend">
-          <span><i className="lg-teal" /> Sab padhi</span>
-          <span><i className="lg-peach" /> Kuch miss / qaza</span>
-          <span><i className="lg-red" /> Zyada miss</span>
+          <span><i className="lg-teal" /> {s.salahCalendar.legendAll}</span>
+          <span><i className="lg-peach" /> {s.salahCalendar.legendSome}</span>
+          <span><i className="lg-red" /> {s.salahCalendar.legendMany}</span>
         </div>
       </div>
 
       <div className="acard-l">
-        <h5>Is mahine ka haal ({summaryRange})</h5>
+        <h5>{s.salahCalendar.monthSummary(summaryRange)}</h5>
         {onTimePct === null ? (
-          <p className="mut">Abhi is mahine ka koi record nahi hai — kisi din par tap karke status mark karo.</p>
+          <p className="mut">{s.salahCalendar.monthEmpty}</p>
         ) : (
           <>
-            <div className="statrow">Waqt par padhi <span>{onTimePct}%</span></div>
+            <div className="statrow">{s.salahCalendar.onTime} <span>{onTimePct}%</span></div>
             <div className="prog"><i style={{ width: `${onTimePct}%` }} /></div>
           </>
         )}
         <div className="kpis">
-          <div className="kpi"><b>{recorded}</b><span>KUL NAMAZ</span></div>
-          <div className="kpi"><b className="kpi-red">{totals.missed}</b><span>MISS</span></div>
-          <div className="kpi"><b>{totals.qaza}</b><span>QAZA PADHI</span></div>
+          <div className="kpi"><b>{recorded}</b><span>{s.salahCalendar.totalPrayers}</span></div>
+          <div className="kpi"><b className="kpi-red">{totals.missed}</b><span>{s.salahCalendar.miss}</span></div>
+          <div className="kpi"><b>{totals.qaza}</b><span>{s.salahCalendar.qazaPrayed}</span></div>
         </div>
-        <p className="mut">Kisi din par tap karo — us din ki har namaz ka haal khul jayega.</p>
+        <p className="mut">{s.salahCalendar.tapDayHint}</p>
       </div>
 
       <div className="acard-l">
@@ -392,7 +403,7 @@ export default function SalahTracker({ onNotify }: Props) {
               'en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' },
             )}</h4>
           </div>
-          <span>{prayerNames.filter(name => selected[name].status === 'prayed').length}/5 prayed</span>
+          <span>{s.salahCalendar.prayedOf(prayerNames.filter(name => selected[name].status === 'prayed').length)}</span>
         </div>
 
         {prayerNames.map(prayer => (
@@ -402,15 +413,15 @@ export default function SalahTracker({ onNotify }: Props) {
               {selectedDate === today && times && (
                 <small>
                   {times.perPrayer[prayer].source === 'unavailable'
-                    ? 'Time set nahi hai — neeche manual time set karo'
+                    ? s.salahCalendar.timeNotSet
                     : (
                       <>
                         {times.perPrayer[prayer].time}
                         {' · '}
-                        {times.perPrayer[prayer].source === 'manual' ? 'Manual time' : 'Calculated time'}
+                        {times.perPrayer[prayer].source === 'manual' ? s.salahCalendar.manualTime : s.salahCalendar.calculatedTime}
                         {times.perPrayer[prayer].deadline && (
                           <>
-                            {' · deadline '}
+                            {' · '}{s.salahCalendar.deadline} 
                             {times.perPrayer[prayer].deadline}
                           </>
                         )}
@@ -418,7 +429,7 @@ export default function SalahTracker({ onNotify }: Props) {
                     )}
                 </small>
               )}
-              <small>{statusLabel(selected[prayer])}</small>
+              <small>{statusLabel(selected[prayer], s)}</small>
             </div>
             <select
               className="form-input"
@@ -427,10 +438,10 @@ export default function SalahTracker({ onNotify }: Props) {
               onChange={event => updateStatus(prayer, event.target.value as Status)}
               aria-label={`${prayer} status`}
             >
-              <option value="pending">Not recorded</option>
-              <option value="prayed">Prayed on time</option>
-              <option value="qaza">Prayed Qaza</option>
-              <option value="missed">Missed</option>
+              <option value="pending">{s.salahCalendar.optionNotRecorded}</option>
+              <option value="prayed">{s.salahCalendar.optionPrayedOnTime}</option>
+              <option value="qaza">{s.salahCalendar.optionPrayedQaza}</option>
+              <option value="missed">{s.salahCalendar.optionMissed}</option>
             </select>
           </div>
         ))}
@@ -441,17 +452,14 @@ export default function SalahTracker({ onNotify }: Props) {
 
         <div className="salah-time-editor">
           <button className="text-button" type="button" onClick={openTimeEditor} disabled={settingsLoading}>
-            {showTimeEditor ? 'Time editor band karo' : 'Apni namaz ka time khud set karo'}
+            {showTimeEditor ? s.salahCalendar.closeTimeEditor : s.salahCalendar.openTimeEditor}
           </button>
           {showTimeEditor && (
             <div>
               <p className="salah-private-note">
-                Har namaz ka time khud set kar sakte ho — jo time yahan save karoge,
-                wahi tracker me aur reminders me use hoga. Khali chhodo to Aladhan ka
-                calculated time use hoga. Deadline khali ho to agle namaz ka time
-                deadline hota hai (Isha ke liye 23:59).
+                {s.salahCalendar.timeEditorNote}
               </p>
-              {settingsLoading && <p className="salah-loading">Prayer settings load ho rahe hain...</p>}
+              {settingsLoading && <p className="salah-loading">{s.salahCalendar.settingsLoading}</p>}
               {draftSettings && prayerNames.map(prayer => (
                 <div className="salah-prayer-row" key={`edit-${prayer}`}>
                   <div>
@@ -465,11 +473,11 @@ export default function SalahTracker({ onNotify }: Props) {
                           [prayer]: { ...previous[prayer], reminder: event.target.checked },
                         }))}
                       />
-                      {' '}Reminder
+                      {' '}{s.salahCalendar.reminder}
                     </label>
                   </div>
                   <div>
-                    <label className="field-label">Time
+                    <label className="field-label">{s.salahCalendar.timeLabel}
                       <input
                         className="form-input"
                         type="time"
@@ -481,7 +489,7 @@ export default function SalahTracker({ onNotify }: Props) {
                         aria-label={`${prayer} manual time`}
                       />
                     </label>
-                    <label className="field-label">Deadline
+                    <label className="field-label">{s.salahCalendar.deadlineLabel}
                       <input
                         className="form-input"
                         type="time"
@@ -500,7 +508,7 @@ export default function SalahTracker({ onNotify }: Props) {
               {draftSettings && (
                 <div>
                   <button className="primary-button" type="button" onClick={saveTimes} disabled={savingTimes}>
-                    {savingTimes ? 'Save ho raha hai...' : 'Namaz ke time save karo'}
+                    {savingTimes ? s.salahCalendar.savingTimes : s.salahCalendar.saveTimes}
                   </button>
                   {' '}
                   <button
@@ -509,7 +517,7 @@ export default function SalahTracker({ onNotify }: Props) {
                     onClick={() => setDraftSettings(emptyPrayerSettings())}
                     disabled={savingTimes}
                   >
-                    Sab calculated time par wapas
+                    {s.salahCalendar.resetCalculated}
                   </button>
                 </div>
               )}
@@ -518,15 +526,12 @@ export default function SalahTracker({ onNotify }: Props) {
         </div>
 
         <p className="salah-private-note">
-          Your worship history is private. A status changes when you select and save it — except a prayer
-          left unrecorded past its deadline plus 5 minutes, which is marked missed automatically and can
-          still be corrected to Qaza afterwards. A Qaza keeps its original miss visible.
+          {s.salahCalendar.privacyNote}
         </p>
       </div>
 
       <p className="salah-private-note">
-        <CalendarDays size={13} /> Calendar sirf tumhare saved record se banta hai — koi
-        namaz pehle se padhi hui nahi maani jati.
+        <CalendarDays size={13} /> {s.salahCalendar.calendarNote}
       </p>
     </section>
   );

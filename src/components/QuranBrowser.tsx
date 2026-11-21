@@ -8,6 +8,8 @@ import {
   Search,
   Target,
 } from 'lucide-react';
+import type { AppLanguage } from '../lib/language';
+import { stringsFor } from '../lib/strings';
 import { curatedHinglishMeaning } from '../lib/curatedQuranMeanings';
 import {
   addBookmark,
@@ -44,12 +46,15 @@ export default function QuranBrowser({
   guestMode,
   initialSurah,
   onInitialSurahOpened,
+  language,
 }: {
   onNotify: (message: string) => void;
   guestMode: boolean;
   initialSurah?: number | null;
   onInitialSurahOpened?: () => void;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const [surahs, setSurahs] = useState<SurahMeta[]>([]);
   const [source, setSource] = useState('');
   const [loading, setLoading] = useState(true);
@@ -93,7 +98,7 @@ export default function QuranBrowser({
         setTargetInput(String(hist.dailyTarget));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Surah list could not be loaded.');
+      setError(err instanceof Error ? err.message : s.quran.surahListFailed);
     } finally {
       setLoading(false);
     }
@@ -133,7 +138,7 @@ export default function QuranBrowser({
         fetchQuranHistory().then(setHistory).catch(() => undefined);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Surah could not be loaded.');
+      setError(err instanceof Error ? err.message : s.quran.surahFailed);
     } finally {
       setReadingSurah(false);
     }
@@ -153,7 +158,7 @@ export default function QuranBrowser({
       setAyahSearchError(result.ayahSearchError ?? '');
     } catch {
       setAyahMatches([]);
-      setAyahSearchError('Search is unavailable right now.');
+      setAyahSearchError(s.quran.searchUnavailable);
     } finally {
       setSearching(false);
     }
@@ -182,7 +187,7 @@ export default function QuranBrowser({
     let triedFallback = false;
 
     const fail = () => {
-      onNotify('Audio could not be played. Check your connection and try again.');
+      onNotify(s.quran.audioFailed);
       setPlayingAyah(null);
     };
     const trySrc = (src: string) => {
@@ -221,7 +226,7 @@ export default function QuranBrowser({
 
   async function toggleBookmark(surahNumber: number, ayahNumber: number) {
     if (guestMode) {
-      onNotify('Sign in to save bookmarks.');
+      onNotify(s.quran.signInBookmarks);
       return;
     }
     const existing = bookmarks.find(
@@ -231,20 +236,20 @@ export default function QuranBrowser({
       if (existing) {
         await deleteBookmark(existing.id);
         setBookmarks((prev) => prev.filter((item) => item.id !== existing.id));
-        onNotify('Bookmark removed.');
+        onNotify(s.quran.bookmarkRemoved);
       } else {
         const result = await addBookmark(surahNumber, ayahNumber);
         setBookmarks((prev) => [result.bookmark, ...prev]);
-        onNotify('Bookmark saved.');
+        onNotify(s.quran.bookmarkSaved);
       }
     } catch (err) {
-      onNotify(err instanceof Error ? err.message : 'Bookmark could not be saved.');
+      onNotify(err instanceof Error ? err.message : s.quran.bookmarkFailed);
     }
   }
 
   function toggleBookmarksPanel() {
     if (guestMode) {
-      onNotify('Sign in to save bookmarks.');
+      onNotify(s.quran.signInBookmarks);
       return;
     }
     setShowBookmarks((value) => !value);
@@ -253,7 +258,7 @@ export default function QuranBrowser({
   async function saveTarget() {
     const value = Number(targetInput);
     if (!Number.isInteger(value) || value < 0 || value > 500) {
-      onNotify('Daily target must be 0–500 ayahs.');
+      onNotify(s.quran.targetRange);
       return;
     }
     try {
@@ -261,9 +266,9 @@ export default function QuranBrowser({
       setHistory((prev) =>
         prev ? { ...prev, dailyTarget: result.dailyTarget } : prev,
       );
-      onNotify('Daily reading target saved.');
+      onNotify(s.quran.targetSaved);
     } catch (err) {
-      onNotify(err instanceof Error ? err.message : 'Target could not be saved.');
+      onNotify(err instanceof Error ? err.message : s.quran.targetFailed);
     }
   }
 
@@ -292,7 +297,7 @@ export default function QuranBrowser({
             loadMeta();
           }}
         >
-          <ArrowLeft size={15} /> Back to all surahs · Saari surahein
+          <ArrowLeft size={15} /> {s.quran.backToAll}
         </button>
 
         <div className="quran-reader-head">
@@ -308,7 +313,7 @@ export default function QuranBrowser({
             </p>
           </div>
           <label className="field-label">
-            Reciter · Qari
+            {s.quran.reciter}
             <select
               className="form-input"
               value={reciter}
@@ -321,7 +326,7 @@ export default function QuranBrowser({
                   const detail = await fetchSurah(selected.surah.number, next);
                   setSelected(detail);
                 } catch (err) {
-                  onNotify(err instanceof Error ? err.message : 'Reciter could not be changed.');
+                  onNotify(err instanceof Error ? err.message : s.quran.reciterFailed);
                 }
               }}
             >
@@ -346,28 +351,26 @@ export default function QuranBrowser({
             aria-pressed={showTransliteration}
             onClick={() => setShowTransliteration((value) => !value)}
           >
-            Hinglish transliteration: {showTransliteration ? 'On · Dikhao' : 'Off · Chhupao'}
+            {showTransliteration ? s.quran.transliterationOn : s.quran.transliterationOff}
           </button>
           <button
             className="outline-button"
             aria-pressed={showTranslation}
             onClick={() => setShowTranslation((value) => !value)}
           >
-            English tarjuma: {showTranslation ? 'On · Dikhao' : 'Off · Chhupao'}
+            {showTranslation ? s.quran.translationOn : s.quran.translationOff}
           </button>
           <button
             className="outline-button"
             aria-pressed={showHinglishMeaning}
             onClick={() => setShowHinglishMeaning((value) => !value)}
           >
-            Hinglish tarjuma: {showHinglishMeaning ? 'On · Dikhao' : 'Off · Chhupao'}
+            {showHinglishMeaning ? s.quran.hinglishMeaningOn : s.quran.hinglishMeaningOff}
           </button>
         </div>
 
         <p className="quran-source-line">
-          Hinglish tarjuma sirf curated aayaton (13:28, 2:286, 20:25–28, 23:97–98) ke liye
-          dikhta hai — poore Qur'an ka verified Hinglish tarjuma abhi available nahi hai,
-          isliye baaki aayaton par sirf transliteration + English tarjuma hai.
+          {s.quran.hinglishNote}
         </p>
 
         <div>
@@ -378,14 +381,14 @@ export default function QuranBrowser({
                 <div className="quran-ayah-actions">
                   <button
                     className="icon-button"
-                    aria-label={playingAyah === ayah.numberInSurah ? 'Pause audio' : 'Play audio'}
+                    aria-label={playingAyah === ayah.numberInSurah ? s.quran.pauseAudio : s.quran.playAudio}
                     onClick={() => playAyah(ayah)}
                   >
                     {playingAyah === ayah.numberInSurah ? <Pause size={16} /> : <Play size={16} />}
                   </button>
                   <button
                     className="icon-button"
-                    aria-label={isBookmarked(ayah.numberInSurah) ? 'Remove bookmark' : 'Bookmark ayah'}
+                    aria-label={isBookmarked(ayah.numberInSurah) ? s.quran.removeBookmark : s.quran.bookmarkAyah}
                     onClick={() => toggleBookmark(selected.surah.number, ayah.numberInSurah)}
                   >
                     {isBookmarked(ayah.numberInSurah) ? (
@@ -401,13 +404,13 @@ export default function QuranBrowser({
               </p>
               {showTransliteration && ayah.transliteration && (
                 <p className="quran-transliteration">
-                  <span className="eyebrow">HINGLISH MEIN PADHEIN · </span>
+                  <span className="eyebrow">{s.quran.readInHinglish}</span>
                   {ayah.transliteration}
                 </p>
               )}
               {showTranslation && ayah.translation && (
                 <p className="quran-translation">
-                  <span className="eyebrow">TARJUMA · ENGLISH · </span>
+                  <span className="eyebrow">{s.quran.translationEnglish}</span>
                   {ayah.translation}
                 </p>
               )}
@@ -419,12 +422,12 @@ export default function QuranBrowser({
                   );
                   return curated ? (
                     <p className="quran-translation">
-                      <span className="eyebrow">TARJUMA · HINGLISH · </span>
+                      <span className="eyebrow">{s.quran.translationHinglish}</span>
                       {curated.meaning}
                     </p>
                   ) : null;
                 })()}
-              {ayah.sajda && <span className="quran-sajda">Sajda ayah · Sajda wali ayat</span>}
+              {ayah.sajda && <span className="quran-sajda">{s.quran.sajda}</span>}
               <div className="chiprow">
                 <span className="mchip">Source: {selected.source}</span>
               </div>
@@ -452,9 +455,9 @@ export default function QuranBrowser({
     <section className="sc-quran">
       <div className="quran-browser-head">
         <div>
-          <span className="eyebrow">QUR'AN · VERIFIED TEXT</span>
-          <h3>Read the Qur'an · Qur'an padhein</h3>
-          <p>Arabic ke saath Hinglish transliteration aur English tarjuma — verified source se, kuch bhi banaya hua nahi.</p>
+          <span className="eyebrow">{s.quran.eyebrow}</span>
+          <h3>{s.quran.title}</h3>
+          <p>{s.quran.intro}</p>
           {source && <p className="quran-source-line">Source: {source}</p>}
         </div>
         <button
@@ -474,34 +477,34 @@ export default function QuranBrowser({
         <input
           value={query}
           onChange={(event) => runSearch(event.target.value)}
-          placeholder="Surah dhoondo — naam ya number…"
-          aria-label="Search surahs"
+          placeholder={s.quran.searchPlaceholder}
+          aria-label={s.quran.searchAria}
         />
       </label>
 
       {lastRead && (
         <div className="acard sc-continue">
-          <div className="sc-eyebrow-peach">PADHNA JAARI RAKHO</div>
+          <div className="sc-eyebrow-peach">{s.quran.continueEyebrow}</div>
           <div className="sc-continue-title">
             Surah {lastReadMeta ? lastReadMeta.englishName : lastRead.surahNumber}
           </div>
           <p className="mut">
-            Ayah {lastRead.lastAyahNumber} par ruke the · aaj {history?.ayahsOpenedToday ?? 0} / {history?.dailyTarget ?? 0} ayahs
+            {s.quran.continueStoppedAt(lastRead.lastAyahNumber, history?.ayahsOpenedToday ?? 0, history?.dailyTarget ?? 0)}
           </p>
           {lastReadPct !== null && (
             <div className="prog"><i style={{ width: `${lastReadPct}%` }} /></div>
           )}
           <button className="sbtn pk" onClick={() => openSurah(lastRead.surahNumber)}>
-            Aage padho →
+            {s.quran.continueButton}
           </button>
         </div>
       )}
 
       {showBookmarks && !guestMode && (
         <div className="acard quran-bookmarks">
-          <h4>Your bookmarks ({bookmarks.length})</h4>
+          <h4>{s.quran.bookmarksTitle(bookmarks.length)}</h4>
           {bookmarks.length === 0 ? (
-            <p className="empty-note">No bookmarks yet. Open a surah and tap the bookmark icon on any ayah.</p>
+            <p className="empty-note">{s.quran.noBookmarks}</p>
           ) : (
             <ul>
               {bookmarks.map((item) => (
@@ -510,14 +513,14 @@ export default function QuranBrowser({
                     className="text-button"
                     onClick={() => openSurah(item.surahNumber)}
                   >
-                    Surah {item.surahNumber} · Ayah {item.ayahNumber}
+                    {s.quran.surahAyah(item.surahNumber, item.ayahNumber)}
                   </button>
                   {item.note && <span> — {item.note}</span>}
                   <button
                     className="text-button danger-text"
                     onClick={() => toggleBookmark(item.surahNumber, item.ayahNumber)}
                   >
-                    Remove
+                    {s.quran.remove}
                   </button>
                 </li>
               ))}
@@ -529,18 +532,18 @@ export default function QuranBrowser({
       {!guestMode && history && (
         <div className="acard quran-progress">
           <div>
-            <span className="eyebrow">READING TODAY · AAJ KI READING · {history.date}</span>
+            <span className="eyebrow">{s.quran.readingToday(history.date)}</span>
             <h4>
-              {history.ayahsOpenedToday} of {history.dailyTarget} ayahs opened
+              {s.quran.ayahsOpened(history.ayahsOpenedToday, history.dailyTarget)}
             </h4>
             <p className="mut">
               {history.history.length === 0
-                ? 'No reading recorded yet today.'
-                : `Last read: Surah ${history.history[0]?.surahNumber}, Ayah ${history.history[0]?.lastAyahNumber}.`}
+                ? s.quran.noReadingToday
+                : s.quran.lastRead(history.history[0]?.surahNumber ?? 0, history.history[0]?.lastAyahNumber ?? 0)}
             </p>
           </div>
           <label className="field-label">
-            <Target size={14} /> Roz ka target (ayahs) · Daily target
+            <Target size={14} /> {s.quran.dailyTarget}
             <span className="quran-target-row">
               <input
                 className="form-input"
@@ -549,21 +552,21 @@ export default function QuranBrowser({
                 onChange={(event) => setTargetInput(event.target.value)}
               />
               <button className="outline-button" onClick={saveTarget}>
-                Save
+                {s.quran.save}
               </button>
             </span>
           </label>
         </div>
       )}
       {guestMode && (
-        <p className="empty-note">Sign in to save bookmarks, track reading history and set a daily target.</p>
+        <p className="empty-note">{s.quran.guestNote}</p>
       )}
 
-      {searching && <p className="empty-note">Searching…</p>}
+      {searching && <p className="empty-note">{s.quran.searching}</p>}
       {ayahSearchError && <p className="form-error">{ayahSearchError}</p>}
       {ayahMatches.length > 0 && (
         <div className="acard quran-search-results">
-          <h4>Ayah matches · Tarjume mein mile</h4>
+          <h4>{s.quran.ayahMatches}</h4>
           <ul>
             {ayahMatches.slice(0, 10).map((match) => (
               <li key={match.number}>
@@ -578,10 +581,10 @@ export default function QuranBrowser({
       )}
 
       {loading || readingSurah ? (
-        <p className="empty-note">Loading…</p>
+        <p className="empty-note">{s.quran.loading}</p>
       ) : filteredSurahs.length === 0 ? (
         <p className="empty-note">
-          {query.trim() ? 'No surah matches that search.' : 'No surahs could be loaded.'}
+          {query.trim() ? '{s.quran.noSurahMatch}' : '{s.quran.noSurahs}'}
         </p>
       ) : (
         <div className="acard sc-surah-list">
@@ -592,12 +595,12 @@ export default function QuranBrowser({
                 {surah.englishName}
                 <small>
                   {surah.revelationType === 'Meccan'
-                    ? 'Makki'
+                    ? s.quran.revelationMeccan
                     : surah.revelationType === 'Medinan'
-                      ? 'Madani'
+                      ? s.quran.revelationMedinan
                       : surah.revelationType}
                   {' · '}
-                  {surah.numberOfAyahs} Aayaat
+                  {s.quran.ayahsCount(surah.numberOfAyahs)}
                 </small>
               </div>
               <span className="sar">{surah.name}</span>
@@ -608,7 +611,7 @@ export default function QuranBrowser({
 
       <div className="acard">
         <p className="mut">
-          Har surah khulne par Arabic text ke saath Hinglish transliteration, <b style={{ color: '#fff' }}>Hinglish tarjuma aur English translation — dono</b>, aur audio (EveryAyah) milega — source hamesha dikhega. Quran ke tarjume hamesha dono bhashaon me hain; baaki jagah ke tarjume sirf Hinglish me.
+          {s.quran.footer}
         </p>
       </div>
     </section>

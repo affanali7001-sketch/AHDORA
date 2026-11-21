@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { apiFetch } from '../lib/http.js';
 import PasswordField from './PasswordField.js';
+import type { AppLanguage } from '../lib/language';
+import { stringsFor } from '../lib/strings';
 
 /**
  * Privacy & security panel (Profile → Privacy & security).
@@ -39,11 +41,14 @@ export default function SecuritySettings({
   onNotify,
   emailVerified,
   onAccountDeleted,
+  language,
 }: {
   onNotify: (message: string) => void;
   emailVerified: boolean;
   onAccountDeleted: () => void;
+  language: AppLanguage;
 }) {
+  const s = stringsFor(language);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -64,7 +69,7 @@ export default function SecuritySettings({
       setSessions(data.sessions);
       setSessionsError('');
     } catch (error) {
-      setSessionsError(error instanceof Error ? error.message : 'Sessions could not be loaded.');
+      setSessionsError(error instanceof Error ? error.message : s.security.sessionsFailed);
     }
   }
 
@@ -76,11 +81,11 @@ export default function SecuritySettings({
     e.preventDefault();
     setPasswordMessage('');
     if (newPassword.length < 12) {
-      setPasswordMessage('New password must be at least 12 characters.');
+      setPasswordMessage(s.security.passwordTooShort);
       return;
     }
     if (newPassword !== confirmPassword) {
-      setPasswordMessage('Dono password ek jaise nahi hain.');
+      setPasswordMessage(s.security.passwordsMismatch);
       return;
     }
     setPasswordBusy(true);
@@ -89,13 +94,13 @@ export default function SecuritySettings({
         method: 'POST',
         body: JSON.stringify({ currentPassword, newPassword }),
       });
-      setPasswordMessage('Password changed. All other sessions were signed out.');
+      setPasswordMessage(s.security.passwordChanged);
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
       await loadSessions();
     } catch (error) {
-      setPasswordMessage(error instanceof Error ? error.message : 'Password could not be changed.');
+      setPasswordMessage(error instanceof Error ? error.message : s.security.passwordChangeFailed);
     } finally {
       setPasswordBusy(false);
     }
@@ -104,17 +109,17 @@ export default function SecuritySettings({
   async function handleRevokeSession(id: string) {
     try {
       await request<null>(`/api/auth/sessions/${id}`, { method: 'DELETE' });
-      onNotify('Session revoked.');
+      onNotify(s.security.sessionRevoked);
       await loadSessions();
     } catch (error) {
-      onNotify(error instanceof Error ? error.message : 'Session could not be revoked.');
+      onNotify(error instanceof Error ? error.message : s.security.sessionRevokeFailed);
     }
   }
 
   async function handleExport() {
     try {
       const response = await apiFetch('/api/auth/export');
-      if (!response.ok) throw new Error('Export failed. Please try again.');
+      if (!response.ok) throw new Error(s.security.exportFailed);
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -122,9 +127,9 @@ export default function SecuritySettings({
       link.download = 'ahdora-export.json';
       link.click();
       URL.revokeObjectURL(url);
-      onNotify('Your data export was downloaded.');
+      onNotify(s.security.exportDownloaded);
     } catch (error) {
-      onNotify(error instanceof Error ? error.message : 'Export failed. Please try again.');
+      onNotify(error instanceof Error ? error.message : s.security.exportFailed);
     }
   }
 
@@ -133,20 +138,20 @@ export default function SecuritySettings({
       const result = await request<{ sent?: boolean; alreadyVerified?: boolean }>('/api/auth/verify-email', {
         method: 'POST',
       });
-      onNotify(result.alreadyVerified ? 'Your email is already verified.' : 'Verification email sent. Check your inbox.');
+      onNotify(result.alreadyVerified ? s.security.emailAlreadyVerified : s.security.verificationEmailSent);
     } catch (error) {
-      onNotify(error instanceof Error ? error.message : 'Could not send the verification email.');
+      onNotify(error instanceof Error ? error.message : s.security.verificationEmailFailed);
     }
   }
 
   async function handleDeleteAccount() {
     setDeleteError('');
     if (!deleteConfirmed) {
-      setDeleteError('Tick the confirmation box first.');
+      setDeleteError(s.security.deleteNeedsConfirm);
       return;
     }
     if (!deletePassword) {
-      setDeleteError('Enter your password to confirm deletion.');
+      setDeleteError(s.security.deleteNeedsPassword);
       return;
     }
     setDeleteBusy(true);
@@ -157,7 +162,7 @@ export default function SecuritySettings({
       });
       onAccountDeleted();
     } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : 'Account could not be deleted.');
+      setDeleteError(error instanceof Error ? error.message : s.security.deleteFailed);
     } finally {
       setDeleteBusy(false);
     }
@@ -166,35 +171,35 @@ export default function SecuritySettings({
   return (
     <div className="security-settings">
       <p className="onboarding-help">
-        Email: {emailVerified ? 'verified' : 'not verified yet.'}
+        Email: {emailVerified ? s.security.emailVerified : s.security.emailNotVerified}
         {!emailVerified && (
           <>
             {' '}
             <button type="button" className="text-button" onClick={handleResendVerification}>
-              Resend verification email
+              {s.security.resendVerification}
             </button>
           </>
         )}
       </p>
 
-      <h4>Change password</h4>
+      <h4>{s.security.changePassword}</h4>
       <form onSubmit={handleChangePassword}>
-        <label className="field-label">Current password</label>
+        <label className="field-label">{s.security.currentPassword}</label>
         <PasswordField
           value={currentPassword}
           onChange={setCurrentPassword}
           autoComplete="current-password"
           required
         />
-        <label className="field-label">New password</label>
+        <label className="field-label">{s.security.newPassword}</label>
         <PasswordField
           value={newPassword}
           onChange={setNewPassword}
-          placeholder="Minimum 12 characters"
+          placeholder={s.security.newPasswordPlaceholder}
           autoComplete="new-password"
           required
         />
-        <label className="field-label">Confirm new password</label>
+        <label className="field-label">{s.security.confirmNewPassword}</label>
         <PasswordField
           value={confirmPassword}
           onChange={setConfirmPassword}
@@ -203,30 +208,32 @@ export default function SecuritySettings({
         />
         {passwordMessage && <p className="onboarding-help">{passwordMessage}</p>}
         <button type="submit" className="primary-button" disabled={passwordBusy}>
-          {passwordBusy ? 'Please wait...' : 'Change password'}
+          {passwordBusy ? s.security.pleaseWait : s.security.changePasswordButton}
         </button>
       </form>
 
-      <h4>Active sessions</h4>
+      <h4>{s.security.activeSessions}</h4>
       {sessionsError ? (
         <p className="onboarding-help">{sessionsError}</p>
       ) : sessions.length === 0 ? (
-        <p className="onboarding-help">No active sessions found.</p>
+        <p className="onboarding-help">{s.security.noSessions}</p>
       ) : (
         <div className="session-list">
           {sessions.map((session) => (
             <div key={session.id} className="session-row">
               <div>
-                <strong>{session.current ? 'This device' : 'Other device'}</strong>
-                <small>{session.userAgent ?? 'Unknown browser'}</small>
+                <strong>{session.current ? s.security.thisDevice : s.security.otherDevice}</strong>
+                <small>{session.userAgent ?? s.security.unknownBrowser}</small>
                 <small>
-                  Signed in {new Date(session.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
-                  {' · '}expires {new Date(session.expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                  {s.security.sessionDates(
+                    new Date(session.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
+                    new Date(session.expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
+                  )}
                 </small>
               </div>
               {!session.current && (
                 <button type="button" className="outline-button" onClick={() => void handleRevokeSession(session.id)}>
-                  Revoke
+                  {s.security.revoke}
                 </button>
               )}
             </div>
@@ -234,24 +241,22 @@ export default function SecuritySettings({
         </div>
       )}
 
-      <h4>Your data</h4>
-      <p className="onboarding-help">Download a JSON copy of everything stored under your account (no passwords or session tokens included).</p>
+      <h4>{s.security.yourData}</h4>
+      <p className="onboarding-help">{s.security.exportText}</p>
       <button type="button" className="outline-button" onClick={() => void handleExport()}>
-        Download my data
+        {s.security.downloadData}
       </button>
 
-      <h4 className="danger-text">Delete account</h4>
+      <h4 className="danger-text">{s.security.deleteAccount}</h4>
       <p className="onboarding-help">
-        This permanently deletes your account and ALL of its data: profile, Salah records, study subjects/tasks/sessions,
-        challenges and their progress, friends and requests, points and badges, notifications, and Quran bookmarks/history.
-        Challenges you created stay only when other people still take part in them. This cannot be undone.
+        {s.security.deleteText}
       </p>
-      <label className="field-label">Your password</label>
+      <label className="field-label">{s.security.yourPassword}</label>
       <PasswordField
         value={deletePassword}
         onChange={setDeletePassword}
         autoComplete="current-password"
-        placeholder="Enter your password to confirm"
+        placeholder={s.security.deletePasswordPlaceholder}
       />
       <label className="check-row">
         <input
@@ -259,7 +264,7 @@ export default function SecuritySettings({
           checked={deleteConfirmed}
           onChange={(e) => setDeleteConfirmed(e.target.checked)}
         />
-        <span>I understand this deletes everything permanently.</span>
+        <span>{s.security.deleteConsent}</span>
       </label>
       {deleteError && <p className="danger-text">{deleteError}</p>}
       <button
@@ -268,7 +273,7 @@ export default function SecuritySettings({
         disabled={deleteBusy || !deleteConfirmed}
         onClick={() => void handleDeleteAccount()}
       >
-        {deleteBusy ? 'Deleting...' : 'Delete my account permanently'}
+        {deleteBusy ? s.security.deleting : s.security.deleteButton}
       </button>
     </div>
   );
