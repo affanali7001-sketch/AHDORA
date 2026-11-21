@@ -12,6 +12,9 @@ import {
  * Overpass) via the backend — name, address, distance and the
  * directions link only. Phone/website appear only when
  * OpenStreetMap has them; they are never invented.
+ *
+ * Layout (preview #11, dark): .srow rows — mosque icon chip,
+ * name + address, distance + peach Directions button right.
  */
 export default function MosqueFinder({
   onNotify,
@@ -89,62 +92,64 @@ export default function MosqueFinder({
   }
 
   return (
-    <section className="mosque-finder">
+    <section className="sc-mosque">
       <div className="quran-browser-head">
         <div>
           <span className="eyebrow">MOSQUE FINDER · OPENSTREETMAP</span>
           <h3>Find a masjid near you</h3>
           <p>Real places from OpenStreetMap data. Distances are from your location or the searched city.</p>
         </div>
-        <Compass size={22} />
+        <span className="iconbtn"><Compass size={18} /></span>
       </div>
 
       {error && <p className="form-error">{error}</p>}
 
       <div className="mosque-controls">
-        <label className="quran-search">
+        <label className="searchbar">
           <Search size={16} />
           <input
-            className="form-input"
             value={city}
             onChange={(event) => setCity(event.target.value)}
             placeholder="Search a city, e.g. Pune"
+            aria-label="Search a city"
             onKeyDown={(event) => {
               if (event.key === 'Enter') searchCity();
             }}
           />
         </label>
-        <label className="field-label">
-          Radius
-          <select
-            className="form-input"
-            value={radiusKm}
-            onChange={(event) => setRadiusKm(Number(event.target.value))}
-          >
-            <option value={5}>5 km</option>
-            <option value={10}>10 km</option>
-            <option value={25}>25 km</option>
-          </select>
-        </label>
-        <button className="primary-button" onClick={searchCity} disabled={loading}>
-          Search
-        </button>
-        <button className="outline-button" onClick={useMyLocation} disabled={loading || locating}>
-          <Navigation size={15} /> {locating ? 'Locating…' : 'Use my location'}
-        </button>
-        {!guestMode && profileCity && (
-          <button
-            className="outline-button"
-            onClick={() => {
-              const doSearch = () => run(fetchMosquesNearMe());
-              lastSearchRef.current = doSearch;
-              doSearch();
-            }}
-            disabled={loading}
-          >
-            <MapPin size={15} /> Near {profileCity}
+        <div className="sc-controls-row">
+          <label className="field-label">
+            Radius
+            <select
+              className="form-input"
+              value={radiusKm}
+              onChange={(event) => setRadiusKm(Number(event.target.value))}
+            >
+              <option value={5}>5 km</option>
+              <option value={10}>10 km</option>
+              <option value={25}>25 km</option>
+            </select>
+          </label>
+          <button className="primary-button" onClick={searchCity} disabled={loading}>
+            Search
           </button>
-        )}
+          <button className="outline-button" onClick={useMyLocation} disabled={loading || locating}>
+            <Navigation size={15} /> {locating ? 'Locating…' : 'Use my location'}
+          </button>
+          {!guestMode && profileCity && (
+            <button
+              className="outline-button"
+              onClick={() => {
+                const doSearch = () => run(fetchMosquesNearMe());
+                lastSearchRef.current = doSearch;
+                doSearch();
+              }}
+              disabled={loading}
+            >
+              <MapPin size={15} /> Near {profileCity}
+            </button>
+          )}
+        </div>
       </div>
 
       {error && canRetry && !loading && (
@@ -170,40 +175,54 @@ export default function MosqueFinder({
               radius or a nearby larger city.
             </p>
           ) : (
-            <ul className="mosque-list">
-              {result.mosques.map((mosque) => (
-                <li key={mosque.id} className="panel mosque-card">
-                  <div>
-                    <strong>{mosque.name}</strong>
-                    <span>
-                      {mosque.distanceKm} km away
-                      {mosque.address ? ` · ${mosque.address}` : ''}
-                    </span>
-                    {mosque.phone && (
-                      <span>
-                        <Phone size={13} /> {mosque.phone}
-                      </span>
-                    )}
-                    {mosque.website && (
-                      <a href={mosque.website} target="_blank" rel="noreferrer">
-                        Website
+            <div className="acard">
+              <ul className="mosque-list">
+                {result.mosques.map((mosque) => (
+                  <li key={mosque.id} className="srow">
+                    <span className="snum2">🕌</span>
+                    <div>
+                      <strong>{mosque.name}</strong>
+                      <small>
+                        {mosque.address ? mosque.address : 'Address not listed in OpenStreetMap'}
+                      </small>
+                      {mosque.phone && (
+                        <small>
+                          <Phone size={12} /> {mosque.phone}
+                        </small>
+                      )}
+                      {mosque.website && (
+                        <small>
+                          <a href={mosque.website} target="_blank" rel="noreferrer">
+                            Website
+                          </a>
+                        </small>
+                      )}
+                    </div>
+                    <span className="sc-mosque-right">
+                      <b>{mosque.distanceKm} km</b>
+                      <a
+                        className="sbtn pk"
+                        href={mosque.directionsUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Directions →
                       </a>
-                    )}
-                  </div>
-                  <a
-                    className="outline-button"
-                    href={mosque.directionsUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Directions
-                  </a>
-                </li>
-              ))}
-            </ul>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </>
       )}
+
+      <div className="acard">
+        <p className="mut">
+          Location ki permission doge to list doori ke hisab se khud sort ho jayegi.
+          Permission nahi dena to city likh kar bhi search ho jata hai — koi zabardasti nahi.
+        </p>
+      </div>
     </section>
   );
 }

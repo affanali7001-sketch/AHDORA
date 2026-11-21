@@ -26,7 +26,10 @@ import {
 } from '../lib/challengesApi';
 
 /**
- * Friends page.
+ * Friends page (preview #16, light). Single-column order:
+ * search → pending requests → friends (per-friend challenge
+ * progress + points, loaded on tap as before) → challenge
+ * invitations → peach privacy callout.
  *
  * Privacy by design: the server only ever returns another user as
  * { id, name, initial }, and shared progress shows ONLY the fields
@@ -142,19 +145,19 @@ export default function Friends({
 
   if (guestMode) {
     return (
-      <>
+      <section className="sc-friends">
         <PageHeading
           eyebrow="COMMUNITY · FRIENDS"
           title="Study together, with consent."
           text="Add friends, share challenge progress, and invite people you trust — only ever with their explicit acceptance."
         />
-        <section className="panel">
-          <p className="onboarding-help">
+        <div className="acard-l">
+          <p className="mut">
             Friends need a signed-in account. Sign in to send friend requests and share
             challenge progress.
           </p>
-        </section>
-      </>
+        </div>
+      </section>
     );
   }
 
@@ -162,7 +165,7 @@ export default function Friends({
   const pendingOutgoingIds = new Set(outgoing.map((r) => r.toUserId));
 
   return (
-    <>
+    <section className="sc-friends">
       <PageHeading
         eyebrow="COMMUNITY · FRIENDS"
         title="Study together, with consent."
@@ -171,352 +174,349 @@ export default function Friends({
 
       {error && <p className="form-error">{error}</p>}
 
-      <div className="friends-grid">
-        <section className="panel">
-          <h3>Find people</h3>
-          <p className="onboarding-help">
-            Search by name, or by the exact email address they signed up with. Search
-            results show only a name — never an email or profile details.
-          </p>
-          <form className="friend-search" onSubmit={handleSearch}>
-            <Search size={16} />
-            <input
-              className="form-input"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by name or email"
-              aria-label="Search users"
-            />
-            <button className="primary-button" type="submit" disabled={searching}>
-              {searching ? 'Searching…' : 'Search'}
-            </button>
-          </form>
-          {searchResults.length > 0 && (
-            <div className="friend-list">
-              {searchResults.map((person) => {
-                const isFriend = friendIds.has(person.id);
-                const pending = pendingOutgoingIds.has(person.id);
-                return (
-                  <div className="friend-row" key={person.id}>
-                    <span className="friend-avatar">{person.initial}</span>
-                    <div>
-                      <strong>{person.name}</strong>
-                      <small>{isFriend ? 'Already your friend' : pending ? 'Request sent' : 'AHDORA user'}</small>
-                    </div>
-                    {!isFriend && !pending && (
-                      <button
-                        className="outline-button"
-                        disabled={busy === `add-${person.id}`}
-                        onClick={() =>
-                          run(`add-${person.id}`, async () => {
-                            await sendFriendRequest(person.id);
-                            onNotify(`Friend request sent to ${person.name}.`);
-                          })
-                        }
-                      >
-                        <UserPlus size={15} /> Add friend
-                      </button>
-                    )}
+      <div className="acard-l">
+        <h5>Dost dhoondo</h5>
+        <p className="mut">
+          Search by name, or by the exact email address they signed up with. Search
+          results show only a name — never an email or profile details.
+        </p>
+        <form className="friend-search" onSubmit={handleSearch}>
+          <Search size={16} />
+          <input
+            className="form-input"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Dost ka naam dhoondo…"
+            aria-label="Search users"
+          />
+          <button className="primary-button" type="submit" disabled={searching}>
+            {searching ? 'Searching…' : 'Search'}
+          </button>
+        </form>
+        {searchResults.length > 0 && (
+          <div>
+            {searchResults.map((person) => {
+              const isFriend = friendIds.has(person.id);
+              const pending = pendingOutgoingIds.has(person.id);
+              return (
+                <div className="taskrow" key={person.id}>
+                  <span className="snum2">{person.initial}</span>
+                  <div>
+                    <strong>{person.name}</strong>
+                    <small>{isFriend ? 'Already your friend' : pending ? 'Request sent' : 'AHDORA user'}</small>
                   </div>
-                );
-              })}
-            </div>
-          )}
-          {searchResults.length === 0 && searchQuery.trim().length >= 2 && !searching && (
-            <p className="onboarding-help">No users found for that search.</p>
-          )}
-        </section>
-
-        <section className="panel">
-          <h3>Friend requests</h3>
-          {incoming.length === 0 && outgoing.length === 0 && (
-            <p className="onboarding-help">No pending friend requests.</p>
-          )}
-          {incoming.map((request) => (
-            <div className="friend-row" key={request.id}>
-              <span className="friend-avatar">{request.other?.initial ?? '?'}</span>
-              <div>
-                <strong>{request.other?.name ?? 'Unknown user'}</strong>
-                <small>Wants to be your friend</small>
-              </div>
-              <div className="friend-actions">
-                <button
-                  className="primary-button"
-                  disabled={busy === `accept-${request.id}`}
-                  onClick={() =>
-                    run(`accept-${request.id}`, async () => {
-                      await acceptFriendRequest(request.id);
-                      onNotify(`You are now friends with ${request.other?.name ?? 'them'}.`);
-                    })
-                  }
-                >
-                  <Check size={15} /> Accept
-                </button>
-                <button
-                  className="outline-button"
-                  disabled={busy === `reject-${request.id}`}
-                  onClick={() =>
-                    run(`reject-${request.id}`, async () => {
-                      await rejectFriendRequest(request.id);
-                      onNotify('Friend request declined.');
-                    })
-                  }
-                >
-                  Decline
-                </button>
-              </div>
-            </div>
-          ))}
-          {outgoing.map((request) => (
-            <div className="friend-row" key={request.id}>
-              <span className="friend-avatar">{request.other?.initial ?? '?'}</span>
-              <div>
-                <strong>{request.other?.name ?? 'Unknown user'}</strong>
-                <small>Request sent — waiting for them</small>
-              </div>
-              <button
-                className="outline-button"
-                disabled={busy === `cancel-${request.id}`}
-                onClick={() =>
-                  run(`cancel-${request.id}`, async () => {
-                    await cancelFriendRequest(request.id);
-                    onNotify('Friend request cancelled.');
-                  })
-                }
-              >
-                Cancel
-              </button>
-            </div>
-          ))}
-        </section>
-      </div>
-
-      <div className="friends-grid">
-        <section className="panel">
-          <h3>Your friends ({friends.length})</h3>
-          {friends.length === 0 && (
-            <p className="onboarding-help">
-              No friends yet. Send a request above — they join only when they accept it.
-            </p>
-          )}
-          <div className="friend-list">
-            {friends.map((friend) => (
-              <div className="friend-row" key={friend.id}>
-                <span className="friend-avatar">{friend.initial}</span>
-                <div>
-                  <strong>{friend.name}</strong>
-                  <small>
-                    Friends since{' '}
-                    {new Date(friend.since).toLocaleDateString('en-IN', {
-                      day: 'numeric',
-                      month: 'short',
-                      year: 'numeric',
-                    })}
-                  </small>
-                </div>
-                <div className="friend-actions">
-                  <button className="outline-button" onClick={() => openShared(friend)}>
-                    <Trophy size={15} /> Shared progress
-                  </button>
-                  <button
-                    className="outline-button"
-                    disabled={myChallenges.length === 0}
-                    onClick={() => {
-                      setInviteFor(friend);
-                      setInviteChallengeId(myChallenges[0]?.challengeId ?? '');
-                    }}
-                  >
-                    <Plus size={15} /> Invite
-                  </button>
-                  <button
-                    className="icon-button"
-                    aria-label={`Remove ${friend.name}`}
-                    onClick={() => setRemovingFriend(friend)}
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-          {removingFriend && (
-            <div className="friend-confirm">
-              <p>
-                Remove <strong>{removingFriend.name}</strong> from your friends? You will no
-                longer see each other&apos;s shared challenge progress.
-              </p>
-              <div className="friend-actions">
-                <button
-                  className="primary-button"
-                  disabled={busy === 'remove-friend'}
-                  onClick={() =>
-                    run('remove-friend', async () => {
-                      await removeFriend(removingFriend.id);
-                      if (selectedFriend?.id === removingFriend.id) {
-                        setSelectedFriend(null);
-                        setShared([]);
-                      }
-                      setRemovingFriend(null);
-                      onNotify(`${removingFriend.name} removed from your friends.`);
-                    })
-                  }
-                >
-                  Remove friend
-                </button>
-                <button className="outline-button" onClick={() => setRemovingFriend(null)}>
-                  Keep them
-                </button>
-              </div>
-            </div>
-          )}
-          {inviteFor && (
-            <div className="friend-confirm">
-              <p>
-                Invite <strong>{inviteFor.name}</strong> to one of your challenges. They join
-                only if they accept — and only the shared challenge progress is visible to
-                each other.
-              </p>
-              {myChallenges.length === 0 ? (
-                <p className="onboarding-help">
-                  You are not taking part in any challenge yet. Join a challenge first.
-                </p>
-              ) : (
-                <>
-                  <select
-                    className="form-input"
-                    value={inviteChallengeId}
-                    onChange={(e) => setInviteChallengeId(e.target.value)}
-                    aria-label="Choose a challenge"
-                  >
-                    {myChallenges.map((p) => (
-                      <option key={p.challengeId} value={p.challengeId}>
-                        {p.challenge.title} — Day {p.currentDay} of {p.totalDays}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="friend-actions">
+                  {!isFriend && !pending && (
                     <button
-                      className="primary-button"
-                      disabled={!inviteChallengeId || busy === 'send-invite'}
+                      className="outline-button"
+                      disabled={busy === `add-${person.id}`}
                       onClick={() =>
-                        run('send-invite', async () => {
-                          await sendChallengeInvite(inviteChallengeId, inviteFor.id);
-                          setInviteFor(null);
-                          onNotify(`Challenge invitation sent to ${inviteFor.name}.`);
+                        run(`add-${person.id}`, async () => {
+                          await sendFriendRequest(person.id);
+                          onNotify(`Friend request sent to ${person.name}.`);
                         })
                       }
                     >
-                      Send invitation
+                      <UserPlus size={15} /> Add friend
                     </button>
-                    <button className="outline-button" onClick={() => setInviteFor(null)}>
-                      Cancel
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-        </section>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {searchResults.length === 0 && searchQuery.trim().length >= 2 && !searching && (
+          <p className="mut">No users found for that search.</p>
+        )}
+      </div>
 
-        <section className="panel">
-          <h3>Challenge invitations</h3>
-          {invitesIn.length === 0 && invitesOut.length === 0 && (
-            <p className="onboarding-help">No challenge invitations.</p>
-          )}
-          {invitesIn.map((invite) => (
-            <div className="friend-row" key={invite.id}>
-              <span className="friend-avatar">{invite.other?.initial ?? '?'}</span>
-              <div>
-                <strong>{invite.challenge?.title ?? 'A challenge'}</strong>
-                <small>
-                  {invite.other?.name ?? 'A friend'} invited you ·{' '}
-                  {invite.challenge?.durationDays ?? ''} days
-                </small>
-              </div>
-              <div className="friend-actions">
-                <button
-                  className="primary-button"
-                  onClick={() => {
-                    setAcceptingInvite(invite);
-                    setConsentChecked(false);
-                  }}
-                >
-                  Accept
-                </button>
-                <button
-                  className="outline-button"
-                  disabled={busy === `decline-invite-${invite.id}`}
-                  onClick={() =>
-                    run(`decline-invite-${invite.id}`, async () => {
-                      await declineChallengeInvite(invite.id);
-                      onNotify('Challenge invitation declined.');
-                    })
-                  }
-                >
-                  Decline
-                </button>
-              </div>
+      <div className="acard-l">
+        <h5>Friend request aayi hai ({incoming.length})</h5>
+        {incoming.length === 0 && outgoing.length === 0 && (
+          <p className="mut">No pending friend requests.</p>
+        )}
+        {incoming.map((request) => (
+          <div className="taskrow" key={request.id}>
+            <span className="snum2 av-peach">{request.other?.initial ?? '?'}</span>
+            <div>
+              <strong>{request.other?.name ?? 'Unknown user'}</strong>
+              <small>Dost banna chahta hai</small>
             </div>
-          ))}
-          {invitesOut.map((invite) => (
-            <div className="friend-row" key={invite.id}>
-              <span className="friend-avatar">{invite.other?.initial ?? '?'}</span>
-              <div>
-                <strong>{invite.challenge?.title ?? 'A challenge'}</strong>
-                <small>Invitation sent to {invite.other?.name ?? 'them'} — waiting</small>
-              </div>
+            <div className="friend-actions">
+              <button
+                className="primary-button"
+                disabled={busy === `accept-${request.id}`}
+                onClick={() =>
+                  run(`accept-${request.id}`, async () => {
+                    await acceptFriendRequest(request.id);
+                    onNotify(`You are now friends with ${request.other?.name ?? 'them'}.`);
+                  })
+                }
+              >
+                <Check size={15} /> Accept
+              </button>
+              <button
+                className="outline-button"
+                disabled={busy === `reject-${request.id}`}
+                onClick={() =>
+                  run(`reject-${request.id}`, async () => {
+                    await rejectFriendRequest(request.id);
+                    onNotify('Friend request declined.');
+                  })
+                }
+              >
+                Decline
+              </button>
             </div>
-          ))}
-          {acceptingInvite && (
-            <div className="friend-confirm">
-              <p>
-                Join <strong>{acceptingInvite.challenge?.title ?? 'this challenge'}</strong>?
-                The rules of the challenge apply, and your progress on it becomes visible to
-                {acceptingInvite.other?.name ? ` ${acceptingInvite.other.name}` : ' your friend'} —
-                only the challenge name, day, completed days and points.
+          </div>
+        ))}
+        {outgoing.map((request) => (
+          <div className="taskrow" key={request.id}>
+            <span className="snum2">{request.other?.initial ?? '?'}</span>
+            <div>
+              <strong>{request.other?.name ?? 'Unknown user'}</strong>
+              <small>Request sent — waiting for them</small>
+            </div>
+            <button
+              className="outline-button"
+              disabled={busy === `cancel-${request.id}`}
+              onClick={() =>
+                run(`cancel-${request.id}`, async () => {
+                  await cancelFriendRequest(request.id);
+                  onNotify('Friend request cancelled.');
+                })
+              }
+            >
+              Cancel
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="acard-l">
+        <h5>Mere dost ({friends.length})</h5>
+        {friends.length === 0 && (
+          <p className="mut">
+            No friends yet. Send a request above — they join only when they accept it.
+          </p>
+        )}
+        {friends.map((friend) => (
+          <div className="taskrow" key={friend.id}>
+            <span className="snum2">{friend.initial}</span>
+            <div>
+              <strong>{friend.name}</strong>
+              <small>
+                Friends since{' '}
+                {new Date(friend.since).toLocaleDateString('en-IN', {
+                  day: 'numeric',
+                  month: 'short',
+                  year: 'numeric',
+                })}
+              </small>
+            </div>
+            <div className="friend-actions">
+              <button className="outline-button" onClick={() => openShared(friend)}>
+                <Trophy size={15} /> Shared progress
+              </button>
+              <button
+                className="outline-button"
+                disabled={myChallenges.length === 0}
+                onClick={() => {
+                  setInviteFor(friend);
+                  setInviteChallengeId(myChallenges[0]?.challengeId ?? '');
+                }}
+              >
+                <Plus size={15} /> Invite
+              </button>
+              <button
+                className="icon-button"
+                aria-label={`Remove ${friend.name}`}
+                onClick={() => setRemovingFriend(friend)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+        ))}
+        <p className="mut">
+          Dost ko challenge me bulana ho to Challenges screen se invite bhejo — wo accept kare tabhi judta hai.
+        </p>
+        {removingFriend && (
+          <div className="friend-confirm">
+            <p>
+              Remove <strong>{removingFriend.name}</strong> from your friends? You will no
+              longer see each other&apos;s shared challenge progress.
+            </p>
+            <div className="friend-actions">
+              <button
+                className="primary-button"
+                disabled={busy === 'remove-friend'}
+                onClick={() =>
+                  run('remove-friend', async () => {
+                    await removeFriend(removingFriend.id);
+                    if (selectedFriend?.id === removingFriend.id) {
+                      setSelectedFriend(null);
+                      setShared([]);
+                    }
+                    setRemovingFriend(null);
+                    onNotify(`${removingFriend.name} removed from your friends.`);
+                  })
+                }
+              >
+                Remove friend
+              </button>
+              <button className="outline-button" onClick={() => setRemovingFriend(null)}>
+                Keep them
+              </button>
+            </div>
+          </div>
+        )}
+        {inviteFor && (
+          <div className="friend-confirm">
+            <p>
+              Invite <strong>{inviteFor.name}</strong> to one of your challenges. They join
+              only if they accept — and only the shared challenge progress is visible to
+              each other.
+            </p>
+            {myChallenges.length === 0 ? (
+              <p className="mut">
+                You are not taking part in any challenge yet. Join a challenge first.
               </p>
-              <label className="consent-row">
-                <input
-                  type="checkbox"
-                  checked={consentChecked}
-                  onChange={(e) => setConsentChecked(e.target.checked)}
-                />
-                <span>I understand the rules and join with my consent.</span>
-              </label>
-              <div className="friend-actions">
-                <button
-                  className="primary-button"
-                  disabled={!consentChecked || busy === 'accept-invite'}
-                  onClick={() =>
-                    run('accept-invite', async () => {
-                      await acceptChallengeInvite(acceptingInvite.id);
-                      setAcceptingInvite(null);
-                      onNotify(`You joined "${acceptingInvite.challenge?.title ?? 'the challenge'}".`);
-                    })
-                  }
+            ) : (
+              <>
+                <select
+                  className="form-input"
+                  value={inviteChallengeId}
+                  onChange={(e) => setInviteChallengeId(e.target.value)}
+                  aria-label="Choose a challenge"
                 >
-                  Join challenge
-                </button>
-                <button className="outline-button" onClick={() => setAcceptingInvite(null)}>
-                  Not now
-                </button>
-              </div>
+                  {myChallenges.map((p) => (
+                    <option key={p.challengeId} value={p.challengeId}>
+                      {p.challenge.title} — Day {p.currentDay} of {p.totalDays}
+                    </option>
+                  ))}
+                </select>
+                <div className="friend-actions">
+                  <button
+                    className="primary-button"
+                    disabled={!inviteChallengeId || busy === 'send-invite'}
+                    onClick={() =>
+                      run('send-invite', async () => {
+                        await sendChallengeInvite(inviteChallengeId, inviteFor.id);
+                        setInviteFor(null);
+                        onNotify(`Challenge invitation sent to ${inviteFor.name}.`);
+                      })
+                    }
+                  >
+                    Send invitation
+                  </button>
+                  <button className="outline-button" onClick={() => setInviteFor(null)}>
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="acard-l">
+        <h5>Challenge invitations</h5>
+        {invitesIn.length === 0 && invitesOut.length === 0 && (
+          <p className="mut">No challenge invitations.</p>
+        )}
+        {invitesIn.map((invite) => (
+          <div className="taskrow" key={invite.id}>
+            <span className="snum2">{invite.other?.initial ?? '?'}</span>
+            <div>
+              <strong>{invite.challenge?.title ?? 'A challenge'}</strong>
+              <small>
+                {invite.other?.name ?? 'A friend'} invited you ·{' '}
+                {invite.challenge?.durationDays ?? ''} days
+              </small>
             </div>
-          )}
-        </section>
+            <div className="friend-actions">
+              <button
+                className="primary-button"
+                onClick={() => {
+                  setAcceptingInvite(invite);
+                  setConsentChecked(false);
+                }}
+              >
+                Accept
+              </button>
+              <button
+                className="outline-button"
+                disabled={busy === `decline-invite-${invite.id}`}
+                onClick={() =>
+                  run(`decline-invite-${invite.id}`, async () => {
+                    await declineChallengeInvite(invite.id);
+                    onNotify('Challenge invitation declined.');
+                  })
+                }
+              >
+                Decline
+              </button>
+            </div>
+          </div>
+        ))}
+        {invitesOut.map((invite) => (
+          <div className="taskrow" key={invite.id}>
+            <span className="snum2">{invite.other?.initial ?? '?'}</span>
+            <div>
+              <strong>{invite.challenge?.title ?? 'A challenge'}</strong>
+              <small>Invitation sent to {invite.other?.name ?? 'them'} — waiting</small>
+            </div>
+          </div>
+        ))}
+        {acceptingInvite && (
+          <div className="friend-confirm">
+            <p>
+              Join <strong>{acceptingInvite.challenge?.title ?? 'this challenge'}</strong>?
+              The rules of the challenge apply, and your progress on it becomes visible to
+              {acceptingInvite.other?.name ? ` ${acceptingInvite.other.name}` : ' your friend'} —
+              only the challenge name, day, completed days and points.
+            </p>
+            <label className="consent-row">
+              <input
+                type="checkbox"
+                checked={consentChecked}
+                onChange={(e) => setConsentChecked(e.target.checked)}
+              />
+              <span>I understand the rules and join with my consent.</span>
+            </label>
+            <div className="friend-actions">
+              <button
+                className="primary-button"
+                disabled={!consentChecked || busy === 'accept-invite'}
+                onClick={() =>
+                  run('accept-invite', async () => {
+                    await acceptChallengeInvite(acceptingInvite.id);
+                    setAcceptingInvite(null);
+                    onNotify(`You joined "${acceptingInvite.challenge?.title ?? 'the challenge'}".`);
+                  })
+                }
+              >
+                Join challenge
+              </button>
+              <button className="outline-button" onClick={() => setAcceptingInvite(null)}>
+                Not now
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {selectedFriend && (
-        <section className="panel">
-          <h3>Shared progress with {selectedFriend.name}</h3>
-          <p className="onboarding-help">
+        <div className="acard-l">
+          <h5>Shared progress with {selectedFriend.name}</h5>
+          <p className="mut">
             Only challenges you both take part in are shown, and only these fields: challenge
             name, current day, completed days, progress and points earned. Nothing else about
             either of you is shared.
           </p>
-          {sharedLoading && <p className="onboarding-help">Loading shared progress…</p>}
+          {sharedLoading && <p className="mut">Loading shared progress…</p>}
           {!sharedLoading && shared.length === 0 && (
-            <p className="onboarding-help">
+            <p className="mut">
               No shared challenges yet. Invite {selectedFriend.name} to one of your challenges.
             </p>
           )}
@@ -533,9 +533,15 @@ export default function Friends({
           <button className="outline-button" onClick={() => setSelectedFriend(null)}>
             Close shared view
           </button>
-        </section>
+        </div>
       )}
-    </>
+
+      <div className="acard-l sc-privacy">
+        <p>
+          🔒 <b>Privacy pakki:</b> dost sirf challenge ka naam, din, progress aur points dekhte hain. Tumhare tasks, neend, profile ya namaz ki tafseel private rehti hai.
+        </p>
+      </div>
+    </section>
   );
 }
 

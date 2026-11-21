@@ -1,4 +1,8 @@
 import SalahTracker from './components/SalahTracker';
+import Tasbeeh from './components/Tasbeeh';
+import NotificationsScreen from './components/NotificationsScreen';
+import Sleep from './components/Sleep';
+import HomeScreen, { NextPrayerBanner } from './components/Home';
 import Friends from './components/Friends';
 import NotificationSettingsPanel from './components/NotificationSettings';
 import CuratedDuas from './components/QuranDuas';
@@ -8,12 +12,8 @@ import MosqueFinder from './components/MosqueFinder';
 import SecuritySettings from './components/SecuritySettings';
 import { connectSocket, disconnectSocket } from './lib/socket';
 import {
-  deleteNotification,
-  clearAllNotifications,
   fetchNotifications,
   fetchUnreadCount,
-  markAllNotificationsRead,
-  markNotificationRead,
   type AppNotification,
 } from './lib/notificationsApi';
 import FeedbackForm from './components/FeedbackForm';
@@ -82,11 +82,11 @@ import {
 import { apiFetch, clearCsrfToken, isCsrfError, refreshCsrfToken } from './lib/http.js';
 import type { CSSProperties, ReactNode, FormEvent } from 'react';
 import {
-  Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpen, BookMarked,
-  CalendarDays, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3,
-  Compass, Eye, EyeOff, Flame, Footprints, GraduationCap, Heart, Home, Languages, LayoutDashboard, Lock,
-  LockKeyhole, LogOut, Menu, Moon, MoreHorizontal, Plus, Search, Settings, Shield,
-  ShieldCheck, Sparkles, Sun, Target, Timer, Trophy, UserRound, Users, X, Zap,
+  Activity, ArrowRight, ArrowUpRight, Bell, BookOpen, BookMarked,
+  CalendarDays, Check, CheckCheck, ChevronLeft, ChevronRight, Clock3,
+  Compass, Eye, EyeOff, Flame, GraduationCap, Heart, Home, Lock,
+  Moon, Pause, Play, Plus, Shield,
+  ShieldCheck, Sparkles, Square, Sun, Target, Timer, Trophy, UserRound, Users, X, Zap,
 } from 'lucide-react';
 
 
@@ -117,24 +117,12 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<A
   return data as ApiResponse<T>;
 }
 
-type Page = 'dashboard' | 'deen' | 'study' | 'challenges' | 'friends' | 'guidance' | 'focus' | 'analytics' | 'profile';
+export type Page = 'home' | 'dashboard' | 'deen' | 'study' | 'challenges' | 'friends' | 'guidance' | 'focus' | 'analytics' | 'profile' | 'tasbeeh' | 'sleep' | 'notifications' | 'salah-calendar';
 
 type GuidanceTab = 'quran' | 'duas' | 'hijri' | 'mosques';
 type IconType = typeof Home;
 
 
-
-const navItems: { id: Page; label: string; icon: IconType; group: string }[] = [
-  { id: 'dashboard', label: 'Overview', icon: LayoutDashboard, group: 'Workspace' },
-  { id: 'deen', label: 'Deen & Salah', icon: Compass, group: 'Workspace' },
-  { id: 'study', label: 'Study planner', icon: GraduationCap, group: 'Workspace' },
-  { id: 'challenges', label: 'Challenges', icon: Trophy, group: 'Community' },
-  { id: 'friends', label: 'Friends', icon: Users, group: 'Community' },
-  { id: 'guidance', label: 'Quranic guidance', icon: BookOpen, group: 'Community' },
-  { id: 'focus', label: 'Focus & sleep', icon: LockKeyhole, group: 'Tools' },
-  { id: 'analytics', label: 'My progress', icon: Activity, group: 'Tools' },
-  { id: 'profile', label: 'Profile & settings', icon: UserRound, group: 'Tools' },
-];
 
 const prayerNames = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 
@@ -147,7 +135,7 @@ function todayKey(): string {
   ].join('-');
 }
 
-function formatTime12h(hhmm: string): string {
+export function formatTime12h(hhmm: string): string {
   const [h, m] = hhmm.split(':').map(Number);
   if (!Number.isFinite(h) || !Number.isFinite(m)) return hhmm;
   const period = h >= 12 ? 'PM' : 'AM';
@@ -155,7 +143,7 @@ function formatTime12h(hhmm: string): string {
   return `${hour12}:${String(m).padStart(2, '0')} ${period}`;
 }
 
-function countdownTo(time: string, now: Date): string {
+export function countdownTo(time: string, now: Date): string {
   const [h, m] = time.split(':').map(Number);
   if (!Number.isFinite(h) || !Number.isFinite(m)) return '';
   const target = new Date(now);
@@ -195,14 +183,11 @@ function App() {
   // the session itself is established by handleLogin/handleSignup.
   const [authSuccess, setAuthSuccess] = useState(false);
   const [guestMode, setGuestMode] = useState(false);
-  const [page, setPage] = useState<Page>('dashboard');
+  const [page, setPage] = useState<Page>('home');
   const [guidanceTab, setGuidanceTab] = useState<GuidanceTab>('quran');
   const [guidanceSurah, setGuidanceSurah] = useState<number | null>(null);
   const [newUser, setNewUser] = useState<UserProfile>(() => emptyProfile());
   const [profileName, setProfileName] = useState('');
-  const [mobileNav, setMobileNav] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [query, setQuery] = useState('');
   const [toast, setToast] = useState('');
   const [prayerTimes, setPrayerTimes] = useState<PrayerTimesResponse | null>(null);
   const [prayerStatus, setPrayerStatus] = useState<'idle' | 'loading' | 'loaded' | 'error' | 'no-city'>('idle');
@@ -224,8 +209,6 @@ function App() {
   const [challengeError, setChallengeError] = useState('');
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [notifOpen, setNotifOpen] = useState(false);
-  const [confirmClearNotif, setConfirmClearNotif] = useState(false);
   const [friendsRefreshKey, setFriendsRefreshKey] = useState(0);
   // false = profile exists but onboarding was skipped / never finished.
   // null = not known yet (before the first profile load).
@@ -241,9 +224,6 @@ function App() {
   // Reset on logout / account deletion (see handleLogout).
   const [studyLoaded, setStudyLoaded] = useState(false);
   const [salahLoaded, setSalahLoaded] = useState(false);
-  // P7: mark-all-read / clear-all took ~1–2 min to reflect live, with
-  // no feedback while pending. One in-flight action at a time.
-  const [notifBusy, setNotifBusy] = useState<'read-all' | 'clear-all' | null>(null);
   // Honest signup notice from the server (POST /api/auth/signup returns
   // verificationEmailSent + notice). Shown in the verify banner when the
   // verification email could not be sent — never claim it was sent.
@@ -442,14 +422,17 @@ function App() {
 
   // Keep today's Salah completion fresh when the dashboard is shown.
   useEffect(() => {
-    if (screen === 'app' && authUser && !guestMode && page === 'dashboard') {
+    if (screen === 'app' && authUser && !guestMode && (page === 'dashboard' || page === 'deen' || page === 'salah-calendar')) {
       refreshSalahToday();
     }
-    if (screen === 'app' && authUser && !guestMode && (page === 'dashboard' || page === 'study' || page === 'analytics')) {
+    if (screen === 'app' && authUser && !guestMode && (page === 'dashboard' || page === 'study' || page === 'analytics' || page === 'focus' || page === 'sleep')) {
       refreshStudy();
     }
     if (screen === 'app' && authUser && !guestMode && (page === 'dashboard' || page === 'challenges' || page === 'analytics')) {
       refreshChallenges();
+    }
+    if (screen === 'app' && authUser && !guestMode && page === 'notifications') {
+      refreshNotifications();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
@@ -587,16 +570,9 @@ function App() {
     if (screen === 'login') setAuthSuccess(false);
   }, [screen]);
 
-  const filteredNav = useMemo(() => {
-    if (!query.trim()) return navItems;
-    return navItems.filter((item) => item.label.toLowerCase().includes(query.toLowerCase()));
-  }, [query]);
-
   const goTo = (next: Page) => {
     setPage(next);
     setScreen('app');
-    setMobileNav(false);
-    setSearchOpen(false);
   };
 
   const goToGuidance = (tab: GuidanceTab, surahNumber?: number) => {
@@ -707,7 +683,7 @@ function App() {
       setPrayerTimes(null);
       setEditingProfile(false);
       setScreen('app');
-      setPage('dashboard');
+      setPage('home');
       notify('Theek hai — jo bhara tha wo save ho gaya. Baad me Profile se poora kar lena.');
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Skip nahi ho paya. Dobara try karo.');
@@ -829,11 +805,10 @@ function App() {
     setChallengeError('');
     setNotifications([]);
     setUnreadCount(0);
-    setNotifOpen(false);
     setFriendsRefreshKey(0);
     disconnectSocket();
     setScreen('welcome');
-    setPage('dashboard');
+    setPage('home');
   }
 
   function handleAccountDeleted() {
@@ -851,7 +826,7 @@ function App() {
     setStudyLoaded(false);
     setSalahLoaded(false);
     setScreen('welcome');
-    setPage('dashboard');
+    setPage('home');
     notify('Your account and all its data were deleted.');
   }
 
@@ -887,9 +862,6 @@ function App() {
     }
   }
 
-  const displayName = authUser?.name || profileName || 'Guest';
-  const initials = displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0].toUpperCase()).join('') || 'AH';
-
   if (screen === 'checking') {
     return <div className="auth-screen"><div className="auth-card"><div className="auth-brand"><AhdoraLogo size={42} /><span>AHDORA</span></div><p>Checking your secure session...</p></div></div>;
   }
@@ -914,46 +886,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      <aside className={`sidebar ${mobileNav ? 'sidebar-open' : ''}`}>
-        <div className="brand-lockup"><AhdoraLogo size={38} alt="AHDORA logo" /><div><strong>AHDORA</strong><span>DEEN · ILM · DISCIPLINE</span></div><button className="icon-button mobile-close" onClick={() => setMobileNav(false)} aria-label="Close menu"><X size={18} /></button></div>
-        <div className="workspace-switch"><span className="workspace-dot" /><span>Personal space</span><ChevronDown size={14} /></div>
-        {['Workspace', 'Community', 'Tools'].map((group) => <div className="nav-group" key={group}><div className="nav-caption">{group}</div>{navItems.filter((item) => item.group === group).map((item) => { const Icon = item.icon; return <button key={item.id} className={`nav-link ${page === item.id ? 'active' : ''}`} onClick={() => goTo(item.id)}><Icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.id === 'challenges' && activeChallenges.length > 0 && <span className="nav-count">{activeChallenges.length}</span>}</button>; })}</div>)}
-        <div className="sidebar-bottom"><div className="sidebar-quote"><Sparkles size={15} /><p>Small steps, sincere intentions, steady growth.</p></div><button className="profile-mini" onClick={() => goTo('profile')}><div className="avatar">{initials}</div><div><strong>{displayName}</strong><span>Personal account</span></div><MoreHorizontal size={17} /></button></div>
-      </aside>
       <main className="main-area">
-        <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20} /></button><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{navItems.find((item) => item.id === page)?.label}</strong></div><div className="topbar-actions"><span className="demo-pill"><span />{authUser ? 'SECURE SESSION' : 'GUEST PREVIEW'}</span><button className="icon-button search-trigger" onClick={() => setSearchOpen(!searchOpen)} aria-label="Search"><Search size={18} /></button><div className="notification-wrap"><button className="icon-button notification-button" onClick={() => { setNotifOpen((open) => !open); if (!notifOpen) { refreshNotifications(); setConfirmClearNotif(false); } }} aria-label="Notifications"><Bell size={18} />{unreadCount > 0 && <span className="notification-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}</button>{notifOpen && <div className="notification-panel"><div className="notification-panel-head"><strong>Notifications</strong><span style={{ display: 'flex', gap: 12 }}><span>{unreadCount > 0 && <button disabled={notifBusy !== null} onClick={async () => { if (notifBusy) return; setNotifBusy('read-all'); try { await markAllNotificationsRead(); await refreshNotifications(); } catch { notify('Could not mark all as read.'); } finally { setNotifBusy(null); } }}>{notifBusy === 'read-all' ? 'Marking…' : 'Mark all read'}</button>}</span>{notifications.length > 0 && (confirmClearNotif ? <button disabled={notifBusy === 'clear-all'} onClick={async () => { if (notifBusy) return; setNotifBusy('clear-all'); try { await clearAllNotifications(); setNotifications([]); setUnreadCount(0); setConfirmClearNotif(false); notify('Saari notifications hata di gayi.'); } catch { notify('Clear nahi ho paya. Dobara try karo.'); } finally { setNotifBusy(null); } }}>{notifBusy === 'clear-all' ? 'Clearing…' : 'Pakka saaf karein?'}</button> : <button disabled={notifBusy !== null} onClick={() => setConfirmClearNotif(true)}>Clear all</button>)}</span></div>{!authUser || guestMode ? <p className="onboarding-help">Notifications dekhne ke liye sign in karo.</p> : notifications.length === 0 ? <p className="onboarding-help">Abhi koi notification nahi hai. Namaz, padhai, neend aur challenge ki notifications yahan dikhengi.</p> : <div className="notification-list">{notifications.map((item) => (
-  <div key={item.id} className={`notification-item ${item.read ? 'notification-read' : ''}`}>
-    <button
-      type="button"
-      onClick={async () => { if (!item.read) { try { await markNotificationRead(item.id); await refreshNotifications(); } catch { notify('Could not mark as read.'); } } }}
-      style={{ flex: 1, display: 'flex', gap: 11, minWidth: 0, textAlign: 'left', background: 'none', border: 0, padding: 0, color: 'inherit', cursor: 'pointer' }}
-    >
-      <span className="notification-dot" />
-      <span><strong>{item.title}</strong><small>{item.body}</small><small>{new Date(item.createdAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></span>
-    </button>
-    <button
-      type="button"
-      className="notification-dismiss"
-      aria-label={`"${item.title}" notification hatao`}
-      title="Hatao"
-      onClick={async () => {
-        const wasUnread = !item.read;
-        setNotifications((list) => list.filter((n) => n.id !== item.id));
-        if (wasUnread) setUnreadCount((count) => Math.max(0, count - 1));
-        try {
-          await deleteNotification(item.id);
-        } catch {
-          notify('Notification delete nahi ho payi.');
-          await refreshNotifications();
-        }
-      }}
-      style={{ flexShrink: 0, background: 'none', border: 0, padding: '2px 4px', color: 'inherit', cursor: 'pointer', opacity: 0.75 }}
-    >
-      <X size={14} />
-    </button>
-  </div>
-))}</div>}</div>}</div><button className="top-avatar" onClick={() => goTo('profile')}>{initials}</button></div></header>
-        {searchOpen && <div className="search-popover"><Search size={17} /><input autoFocus placeholder="Search AHDORA pages..." value={query} onChange={(e) => setQuery(e.target.value)} /><button onClick={() => { setQuery(''); setSearchOpen(false); }}><X size={16} /></button><div className="search-results">{filteredNav.map((item) => <button key={item.id} onClick={() => goTo(item.id)}>{item.label}<ArrowUpRight size={14} /></button>)}</div></div>}
         {authUser && !authUser.emailVerified && !guestMode && (
           <div className="verify-banner">
             <Shield size={16} />
@@ -969,29 +902,41 @@ function App() {
           </div>
         )}
         <div className="page-content">
-          {page === 'dashboard' && <Dashboard userName={profileName || 'there'} onNavigate={goTo} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} onPrayerToggle={() => goTo('deen')} subjects={subjects} todayTasks={todayTasks} studyStats={studyStats} guestMode={guestMode} activeChallenges={activeChallenges} rewards={rewards} dataLoading={!guestMode && (!studyLoaded || !salahLoaded)} />}
-          {page === 'deen' && <Deen onNotify={notify} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} onOpenGuidance={goToGuidance} />}
-          {page === 'study' && <Study subjects={subjects} tasks={tasks} todayTasks={todayTasks} schedule={todaySchedule} stats={studyStats} activeSession={activePomodoro} history={pomodoroHistory} studyError={studyError} guestMode={guestMode} profile={newUser} onRefresh={refreshStudy} onNotify={notify} />}
-          {page === 'challenges' && <Challenges onNotify={notify} onRefresh={refreshChallenges} guestMode={guestMode} />}
+          {page === 'home' && <HomeScreen profile={newUser} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} guestMode={guestMode} onNavigate={goTo} onOpenGuidance={goToGuidance} />}
+          {page === 'dashboard' && <Dashboard userName={profileName || 'there'} onNavigate={goTo} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} todayTasks={todayTasks} studyStats={studyStats} guestMode={guestMode} activeChallenges={activeChallenges} rewards={rewards} dataLoading={!guestMode && (!studyLoaded || !salahLoaded)} sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} unreadCount={unreadCount} onOpenNotifications={() => goTo('notifications')} />}
+          {page === 'deen' && <Deen onNotify={notify} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} onRefreshSalah={refreshSalahToday} onOpenGuidance={goToGuidance} onBack={() => goTo('home')} profile={newUser} />}
+          {page === 'salah-calendar' && (
+            <section className="salahcal-screen">
+              <div className="apphead">
+                <button type="button" className="aback" onClick={() => goTo('home')} aria-label="Wapas jao"><ChevronLeft size={20} /></button>
+                <div><h4>Salah Calendar</h4><div className="asub">Mahine bhar ki namaz ek nazar me</div></div>
+              </div>
+              <SalahTracker onNotify={notify} />
+            </section>
+          )}
+          {page === 'tasbeeh' && <Tasbeeh userId={authUser?.id ?? ''} onBack={() => goTo('home')} />}
+          {page === 'notifications' && <NotificationsScreen onBack={() => goTo('home')} onNotify={notify} guestMode={guestMode} onChanged={refreshNotifications} />}
+          {page === 'sleep' && <Sleep sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} onSleepChange={(start, end) => setNewUser((current) => ({ ...current, sleepStartTime: start, sleepEndTime: end }))} onSaveFocus={handleSaveFocus} focusSaving={focusSaving} focusEnabled={focusEnabled} setFocusEnabled={setFocusEnabled} youtubeAllowed={youtubeAllowed} setYoutubeAllowed={setYoutubeAllowed} onNotify={notify} onBack={() => goTo('home')} onOpenGuidance={goToGuidance} guestMode={guestMode} />}
+          {page === 'study' && <Study subjects={subjects} tasks={tasks} todayTasks={todayTasks} schedule={todaySchedule} stats={studyStats} activeSession={activePomodoro} history={pomodoroHistory} studyError={studyError} guestMode={guestMode} profile={newUser} onRefresh={refreshStudy} onNotify={notify} onBack={() => goTo('home')} />}
+          {page === 'challenges' && <Challenges onNotify={notify} onRefresh={refreshChallenges} guestMode={guestMode} onBack={() => goTo('home')} />}
           {page === 'friends' && <Friends onNotify={notify} refreshKey={friendsRefreshKey} guestMode={guestMode} />}
           {page === 'guidance' && <Guidance onNotify={notify} onOpenFeedback={() => setFeedbackOpen(true)} tab={guidanceTab} onTabChange={setGuidanceTab} guestMode={guestMode} profileCity={newUser.city} initialSurah={guidanceSurah} onInitialSurahOpened={() => setGuidanceSurah(null)} onOpenSurah={(surahNumber) => goToGuidance('quran', surahNumber)} />}
-          {page === 'focus' && <Focus sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} onSleepChange={(start, end) => setNewUser((current) => ({ ...current, sleepStartTime: start, sleepEndTime: end }))} onSaveFocus={handleSaveFocus} focusSaving={focusSaving} focusEnabled={focusEnabled} setFocusEnabled={setFocusEnabled} youtubeAllowed={youtubeAllowed} setYoutubeAllowed={setYoutubeAllowed} onNotify={notify} />}
-          {page === 'analytics' && <Analytics stats={studyStats} guestMode={guestMode} rewards={rewards} activeChallenges={activeChallenges} challengeHistory={challengeHistory} focusHistory={pomodoroHistory} onNotify={notify} />}
-          {page === 'profile' && <Profile onNotify={notify} user={authUser} guestMode={guestMode} onLogout={handleLogout} onAccountDeleted={handleAccountDeleted} onboardingIncomplete={onboardingCompleted === false} onEditProfile={handleEditProfile} onboardingResumeStep={resumeStep(newUser)} onOpenFeedback={() => setFeedbackOpen(true)} onNavigate={goTo} language={language} onLanguageChange={handleLanguageChange} />}
+          {page === 'focus' && <Focus activeSession={activePomodoro} history={pomodoroHistory} stats={studyStats} tasks={tasks} onRefresh={refreshStudy} onNotify={notify} onNavigate={goTo} guestMode={guestMode} />}
+          {page === 'analytics' && <Analytics stats={studyStats} guestMode={guestMode} rewards={rewards} activeChallenges={activeChallenges} challengeHistory={challengeHistory} focusHistory={pomodoroHistory} onNotify={notify} salahToday={salahToday} sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} onBack={() => goTo('home')} />}
+          {page === 'profile' && <Profile onNotify={notify} user={authUser} guestMode={guestMode} onLogout={handleLogout} onAccountDeleted={handleAccountDeleted} onboardingIncomplete={onboardingCompleted === false} onEditProfile={handleEditProfile} onboardingResumeStep={resumeStep(newUser)} onOpenFeedback={() => setFeedbackOpen(true)} onNavigate={goTo} language={language} onLanguageChange={handleLanguageChange} rewards={rewards} studyStats={studyStats} profile={newUser} />}
         </div>
-        <footer className="app-footer"><span>© 2026 AHDORA</span><span>Built around what matters.</span><button onClick={() => setFeedbackOpen(true)}><CircleHelp size={14} /> Help & feedback</button></footer>
       </main>
-      <nav className="mobile-pillnav" aria-label="Main sections">
-        <button type="button" className={`pillnav-item ${page === 'dashboard' ? 'on' : ''}`} onClick={() => goTo('dashboard')} aria-label="Home"><Home size={21} strokeWidth={1.8} /></button>
-        <button type="button" className={`pillnav-item ${page === 'guidance' ? 'on' : ''}`} onClick={() => goTo('guidance')} aria-label="Quran"><BookOpen size={21} strokeWidth={1.8} /></button>
-        <button type="button" className={`pillnav-item ${page === 'focus' ? 'on' : ''}`} onClick={() => goTo('focus')} aria-label="Focus"><Timer size={21} strokeWidth={1.8} /></button>
+      <nav className="pillnav-bar" aria-label="Main sections">
+        <button type="button" className={`pillnav-item ${(page === 'home' || page === 'dashboard') ? 'on' : ''}`} onClick={() => goTo('home')} aria-label="Home"><Home size={21} strokeWidth={1.8} /></button>
+        <button type="button" className={`pillnav-item ${page === 'guidance' ? 'on' : ''}`} onClick={() => goToGuidance('quran')} aria-label="Quran"><BookOpen size={21} strokeWidth={1.8} /></button>
+        <button type="button" className={`pillnav-item ${page === 'focus' ? 'on' : ''}`} onClick={() => goTo('focus')} aria-label="Focus"><Target size={21} strokeWidth={1.8} /></button>
         <button type="button" className={`pillnav-item ${page === 'profile' ? 'on' : ''}`} onClick={() => goTo('profile')} aria-label="Profile"><UserRound size={21} strokeWidth={1.8} /></button>
       </nav>
-      {mobileNav && <button className="mobile-backdrop" onClick={() => setMobileNav(false)} aria-label="Close navigation" />}
       {feedbackOpen && <FeedbackForm onClose={() => setFeedbackOpen(false)} onNotify={notify} />}
       {toast && <div className="toast"><Check size={16} />{toast}</div>}
     </div>
   );
+
 }
 
 function Welcome({ onContinue, onExplore }: { onContinue: () => void; onExplore: () => void }) {
@@ -1561,63 +1506,143 @@ function Ring({ value, label, small }: { value: number; label: string; small?: b
   );
 }
 
+/** Preview #5 — prayer-times row list. Six rows (Fajr, Sunrise, Dhuhr,
+ * Asr, Maghrib, Isha); Sunrise is never prayed/missed, its pill is
+ * always '—'. Status pills come from today's real Salah record
+ * (salahToday); nothing is assumed prayed. The next prayer row gets
+ * the peach highlight. Missed prayers get a qaza card each, wired to
+ * the same PUT /api/salah/day/{date} update SalahTracker uses — a
+ * Qaza keeps the original miss in history. */
 function PrayerTimesPanel({
   prayerTimes,
   prayerStatus,
   prayerError,
+  salahToday,
+  now,
+  onQaza,
+  qazaBusy,
 }: {
   prayerTimes: PrayerTimesResponse | null;
   prayerStatus: 'idle' | 'loading' | 'loaded' | 'error' | 'no-city';
   prayerError: string;
+  salahToday: Record<string, { status: string }>;
+  now: Date;
+  onQaza: (prayer: string) => void;
+  qazaBusy: string | null;
 }) {
   if (prayerStatus === 'loading' || prayerStatus === 'idle') {
     return (
-      <section className="panel prayer-panel">
-        <div className="panel-top"><div><span className="eyebrow">DEEN &amp; SALAH</span><h3>Prayer times</h3></div></div>
-        <p className="onboarding-help">Loading prayer times…</p>
+      <section className="acard">
+        <p className="mut" style={{ margin: 0 }}>Loading prayer times…</p>
       </section>
     );
   }
   if (prayerStatus === 'no-city') {
     return (
-      <section className="panel prayer-panel">
-        <div className="panel-top"><div><span className="eyebrow">DEEN &amp; SALAH</span><h3>Prayer times</h3></div></div>
-        <p className="onboarding-help">Add your city in Profile to see prayer times.</p>
+      <section className="acard">
+        <p className="mut" style={{ margin: 0 }}>Add your city in Profile to see prayer times.</p>
       </section>
     );
   }
   if (prayerStatus === 'error' || !prayerTimes) {
     return (
-      <section className="panel prayer-panel">
-        <div className="panel-top"><div><span className="eyebrow">DEEN &amp; SALAH</span><h3>Prayer times</h3></div></div>
-        <p className="onboarding-help">{prayerError || 'Prayer times could not be loaded. Check your connection / city.'}</p>
+      <section className="acard">
+        <p className="mut" style={{ margin: 0 }}>{prayerError || 'Prayer times could not be loaded. Check your connection / city.'}</p>
       </section>
     );
   }
+  const nextName = prayerTimes.nextPrayer?.name ?? null;
+  const nextCountdown = prayerTimes.nextPrayer ? countdownTo(prayerTimes.nextPrayer.time, now) : '';
+  const missedNames = prayerNames.filter((name) => salahToday[name]?.status === 'missed');
+
+  type Row = {
+    name: string;
+    time: string;
+    sub: string;
+    pill: string;
+    pillClass: 'ok' | 'miss' | 'qaza' | 'wait';
+    highlight: boolean;
+    icon: IconType;
+  };
+  const rows: Row[] = [];
+  const order: { name: string; icon: IconType; sub: string }[] = [
+    { name: 'Fajr', icon: Moon, sub: 'Tulu-e-aftab se pehle' },
+    { name: 'Sunrise', icon: Sun, sub: 'Tulu-e-aftab' },
+    { name: 'Dhuhr', icon: Sun, sub: 'Dopeher ki namaz' },
+    { name: 'Asr', icon: Clock3, sub: 'Darmiyani namaz' },
+    { name: 'Maghrib', icon: Moon, sub: 'Suraj doobte hi' },
+    { name: 'Isha', icon: Moon, sub: 'Raat ki namaz' },
+  ];
+  for (const entry of order) {
+    if (entry.name === 'Sunrise') {
+      rows.push({
+        name: 'Sunrise',
+        time: prayerTimes.timings.Sunrise,
+        sub: 'Tulu-e-aftab',
+        pill: '—',
+        pillClass: 'wait',
+        highlight: false,
+        icon: Sun,
+      });
+      continue;
+    }
+    const status = salahToday[entry.name]?.status ?? 'pending';
+    const isNext = nextName === entry.name && status !== 'prayed' && status !== 'missed' && status !== 'qaza';
+    if (status === 'prayed') {
+      rows.push({ name: entry.name, time: prayerTimes.timings[entry.name as keyof typeof prayerTimes.timings], sub: 'Waqt par padhi', pill: 'Padhi ✓', pillClass: 'ok', highlight: false, icon: entry.icon });
+    } else if (status === 'missed') {
+      rows.push({ name: entry.name, time: prayerTimes.timings[entry.name as keyof typeof prayerTimes.timings], sub: 'Waqt khatam', pill: 'Miss', pillClass: 'miss', highlight: false, icon: entry.icon });
+    } else if (status === 'qaza') {
+      rows.push({ name: entry.name, time: prayerTimes.timings[entry.name as keyof typeof prayerTimes.timings], sub: 'Qaza padhi', pill: 'Qaza', pillClass: 'qaza', highlight: false, icon: entry.icon });
+    } else if (isNext) {
+      rows.push({ name: entry.name, time: prayerTimes.timings[entry.name as keyof typeof prayerTimes.timings], sub: nextCountdown ? `Agli namaz · ${nextCountdown} baaki` : 'Agli namaz', pill: 'Agli', pillClass: 'qaza', highlight: true, icon: entry.icon });
+    } else {
+      rows.push({ name: entry.name, time: prayerTimes.timings[entry.name as keyof typeof prayerTimes.timings], sub: 'Abhi waqt nahi aaya', pill: 'Baaki', pillClass: 'wait', highlight: false, icon: entry.icon });
+    }
+  }
+
   return (
-    <section className="panel prayer-panel">
-      <div className="panel-top">
-        <div>
-          <span className="eyebrow">DEEN &amp; SALAH</span>
-          <h3>Prayer times · {prayerTimes.city}</h3>
-        </div>
-        {prayerTimes.hijri?.date && <span className="date-chip small-date">{prayerTimes.hijri.date} {prayerTimes.hijri.month} {prayerTimes.hijri.year}</span>}
-      </div>
-      <div className="prayer-list">
-        {prayerNames.map((name) => (
-          <div className="prayer-item" key={name}>
-            <span>{name}</span>
-            <strong>{formatTime12h(prayerTimes.timings[name as keyof typeof prayerTimes.timings])}</strong>
-            {prayerTimes.perPrayer[name as keyof typeof prayerTimes.perPrayer]?.source === 'manual' && <small>Manual</small>}
-          </div>
-        ))}
-        <div className="prayer-item">
-          <span>Sunrise</span>
-          <strong>{formatTime12h(prayerTimes.timings.Sunrise)}</strong>
-        </div>
-      </div>
-      <div className="demo-caption">Source: Aladhan · {prayerTimes.method} · {prayerTimes.city}</div>
-    </section>
+    <>
+      <section className="acard deen-times-card">
+        {rows.map((row) => {
+          const Icon = row.icon;
+          return (
+            <div className={`prow ${row.highlight ? 'hl' : ''}`} key={row.name}>
+              <span className="pic"><Icon size={19} strokeWidth={1.8} /></span>
+              <div>{row.name}<small>{row.sub}</small></div>
+              <span className="pt">{formatTime12h(row.time)}</span>
+              <span className={`st ${row.pillClass}`}>{row.pill}</span>
+            </div>
+          );
+        })}
+      </section>
+
+      {missedNames.map((name) => (
+        <section className="acard deen-qaza-card" key={name}>
+          <h5>{name} ki qaza baaki hai</h5>
+          <p>
+            Aaj {name} miss ho gayi thi. Qaza padh lo to yahan mark kar do — asal miss wala
+            record history me waisa hi rahega.
+          </p>
+          <button
+            type="button"
+            className="sbtn"
+            disabled={qazaBusy !== null}
+            onClick={() => onQaza(name)}
+          >
+            {qazaBusy === name ? 'Save ho raha hai…' : 'Qaza padh li ✓'}
+          </button>
+        </section>
+      ))}
+
+      <section className="acard">
+        <p className="mut" style={{ margin: 0 }}>
+          Time tumhare city ke hisab se aata hai. Kisi namaz ka apna time set kiya ho
+          (Onboarding Step 6) to wahi dikhta hai. Source: Aladhan · {prayerTimes.method} · {prayerTimes.city}
+          {prayerTimes.perPrayer && Object.values(prayerTimes.perPrayer).some((entry) => entry.source === 'manual') ? ' · kuch time manual set hain' : ''}.
+        </p>
+      </section>
+    </>
   );
 }
 
@@ -1628,14 +1653,16 @@ function Dashboard({
   prayerStatus,
   prayerError,
   salahToday,
-  onPrayerToggle,
-  subjects,
   todayTasks,
   studyStats,
   guestMode,
   activeChallenges,
   rewards,
   dataLoading,
+  sleepStartTime,
+  sleepEndTime,
+  unreadCount,
+  onOpenNotifications,
 }: {
   userName: string;
   onNavigate: (page: Page) => void;
@@ -1643,8 +1670,6 @@ function Dashboard({
   prayerStatus: 'idle' | 'loading' | 'loaded' | 'error' | 'no-city';
   prayerError: string;
   salahToday: Record<string, { status: string }>;
-  onPrayerToggle: (name: string) => void;
-  subjects: StudySubject[];
   todayTasks: StudyTask[];
   studyStats: StudyStats | null;
   guestMode: boolean;
@@ -1654,304 +1679,195 @@ function Dashboard({
    * dashboard shows a loading state instead of "0 prayers / No
    * activity recorded yet" (those zeros are only real after load). */
   dataLoading: boolean;
+  sleepStartTime: string;
+  sleepEndTime: string;
+  unreadCount: number;
+  onOpenNotifications: () => void;
 }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 30000);
     return () => window.clearInterval(timer);
   }, []);
-  const prayedNames = prayerNames.filter((name) => salahToday[name]?.status === 'prayed');
-  const prayedCount = prayedNames.length;
-  const completionPct = Math.round((prayedCount / prayerNames.length) * 100);
-  const nextPrayer = prayerTimes?.nextPrayer ?? null;
-  const nextCountdown = nextPrayer ? countdownTo(nextPrayer.time, now) : '';
+  const prayedCount = prayerNames.filter((name) => salahToday[name]?.status === 'prayed').length;
+  const tasksCompletedToday = studyStats?.tasksCompletedToday ?? 0;
+  const todayFocusMinutes = studyStats?.todayFocusMinutes ?? 0;
+  const streak = studyStats?.streak ?? 0;
+  const hasActivity = prayedCount > 0 || tasksCompletedToday > 0 || todayFocusMinutes > 0;
   const todayLabel = new Date().toLocaleDateString('en-IN', {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
     year: 'numeric',
   });
-  const tasksCompletedToday = studyStats?.tasksCompletedToday ?? 0;
-  const todayFocusMinutes = studyStats?.todayFocusMinutes ?? 0;
-  const streak = studyStats?.streak ?? 0;
-  const hasActivity = prayedCount > 0 || tasksCompletedToday > 0 || todayFocusMinutes > 0;
-  const subjectById = new Map(subjects.map((s) => [s.id, s]));
+  const totalTasksToday = todayTasks.length;
+  // Focus bar: today's focus minutes as a proportion of one hour of
+  // focus — a display proportion only, never a claimed target.
+  const focusBarPct = Math.min(100, Math.round((todayFocusMinutes / 60) * 100));
+  const sleepLabel = sleepDurationLabel(sleepStartTime, sleepEndTime);
+  const challenge = activeChallenges[0] ?? null;
+  const challengePct = challenge && challenge.totalDays > 0
+    ? Math.round((challenge.completedDays / challenge.totalDays) * 100)
+    : 0;
 
   return (
-    <>
-      <div className="welcome-line">
+    <div className="dash-screen">
+      <header className="dash-head">
         <div>
-          <span className="eyebrow">{todayLabel.toUpperCase()}</span>
-          <h1>Assalamu alaikum, {userName} <span className="wave">✦</span></h1>
-          <p>Make today count, without rushing it.</p>
+          <h4>Assalamu Alaikum, {userName}</h4>
+          <div className="dash-sub">{todayLabel}</div>
         </div>
-        <div className="date-chip"><CalendarDays size={16} /> {todayLabel}</div>
+        <button type="button" className="dash-bell" onClick={onOpenNotifications} aria-label="Notifications">
+          <Bell size={19} strokeWidth={1.8} />
+          {unreadCount > 0 && <span className="dash-bell-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}
+        </button>
+      </header>
+
+      <div className="dash-kpis">
+        <div className="dash-kpi"><b>{rewards?.total ?? 0}</b><span>POINTS</span></div>
+        <div className="dash-kpi"><b>{streak} din</b><span>STREAK</span></div>
+        <div className="dash-kpi"><b>{rewards?.badges.length ?? 0}</b><span>BADGES</span></div>
       </div>
 
-      <div className="dashboard-grid">
-        <section className="panel hero-panel">
-          <div className="hero-panel-content">
-            <span className="eyebrow light-eyebrow"><Sparkles size={13} /> YOUR DAILY REMINDER</span>
-            <h2>Progress is built<br />one sincere step<br /><em>at a time.</em></h2>
-            <p>Keep your intentions clear and your effort consistent.</p>
-            <button className="primary-button" onClick={() => onNavigate('guidance')}>
-              Explore guidance <ArrowRight size={15} />
-            </button>
-          </div>
-          <div className="hero-panel-art">
-            <div className="tiny-crescent">☾</div>
-            <div className="arch arch-one" />
-            <div className="arch arch-two" />
-            <div className="arch arch-three" />
-            <div className="hero-horizon" />
-          </div>
-        </section>
-
-        <section className="panel daily-progress">
-          <div className="panel-top">
-            <span className="eyebrow">TODAY'S OVERVIEW</span>
-            <MoreHorizontal size={17} />
-          </div>
-          <div className="progress-main">
-            <div>
-              <strong>{dataLoading ? 'Loading today…' : hasActivity ? 'Today so far' : 'Your activity will appear here.'}</strong>
-              <span>
-                {dataLoading
-                  ? 'Aaj ka data load ho raha hai — thoda sabr karo.'
-                  : hasActivity
-                    ? `${prayedCount} of 5 prayers · ${tasksCompletedToday} task${tasksCompletedToday === 1 ? '' : 's'} completed · ${todayFocusMinutes}m focused`
-                    : 'Complete a Salah check-in or add a study task to start tracking progress.'}
-              </span>
-              <small><ArrowUpRight size={13} /> {dataLoading ? 'Loading…' : hasActivity ? (streak > 0 ? `${streak}-day streak — a day counts when a focus session finishes or a task is completed.` : 'No streak yet — finish a focus session or a task.') : 'No activity recorded yet'}</small>
-            </div>
-          </div>
-          <div className="progress-footer"><span>Keep showing up.</span><span>{dataLoading ? 'Loading…' : hasActivity ? `${completionPct}% prayers` : 'Not enough data'}</span></div>
-        </section>
-
-        <section className="panel prayer-panel">
-          <div className="panel-top">
-            <div>
-              <span className="eyebrow">DEEN & SALAH</span>
-              <h3>Prayer check-in</h3>
-            </div>
-            <button className="subtle-action" onClick={() => onNavigate('deen')}>
-              View all <ArrowUpRight size={13} />
-            </button>
-          </div>
-          <div className="prayer-summary">
-            <div className="prayer-next-icon"><Moon size={18} /></div>
-            <div>
-              <small>PRAYER TIMES</small>
-              {prayerStatus === 'loaded' && prayerTimes ? (
-                <>
-                  <strong>{nextPrayer ? `Next: ${nextPrayer.name} · ${formatTime12h(nextPrayer.time)}` : 'All prayers passed for today'}</strong>
-                  <small>{nextCountdown || `${prayedCount} of 5 prayed · ${completionPct}%`}</small>
-                </>
-              ) : prayerStatus === 'loading' || prayerStatus === 'idle' ? (
-                <>
-                  <strong>Loading prayer times…</strong>
-                  <small>Open Deen &amp; Salah to record your prayers.</small>
-                </>
-              ) : prayerStatus === 'no-city' ? (
-                <>
-                  <strong>Set up your city</strong>
-                  <small>Add your city in Profile to see prayer times.</small>
-                </>
-              ) : (
-                <>
-                  <strong>Prayer times unavailable</strong>
-                  <small>{prayerError || 'Check your connection / city.'}</small>
-                </>
-              )}
-            </div>
-            <div className="prayer-location"><Compass size={13} /> {prayerTimes?.city ?? 'Profile settings'}</div>
-          </div>
-          <div className="prayer-list">
-            {prayerNames.map((name) => (
-              <button
-                className="prayer-item"
-                key={name}
-                onClick={() => onPrayerToggle(name)}
-              >
-                <span className={`prayer-check ${prayedNames.includes(name) ? 'checked' : ''}`}>
-                  {prayedNames.includes(name) && <Check size={11} />}
-                </span>
-                <span>{name}</span>
-                <strong>{prayerStatus === 'loaded' && prayerTimes ? formatTime12h(prayerTimes.timings[name as keyof typeof prayerTimes.timings]) : 'Open tracker'}</strong>
-              </button>
-            ))}
-          </div>
-          {prayerStatus === 'loaded' && prayerTimes ? (
-            <div className="demo-caption">Source: Aladhan · {prayerTimes.method} · {prayerTimes.city} · {prayedCount} of 5 prayed</div>
-          ) : prayerStatus === 'error' ? (
-            <div className="demo-caption">{prayerError || 'Prayer times could not be loaded. Check your connection / city.'}</div>
-          ) : null}
-        </section>
-
-        <section className="panel study-panel">
-          <div className="panel-top">
-            <div>
-              <span className="eyebrow">ILM · STUDY</span>
-              <h3>Today's focus</h3>
-            </div>
-            <button className="subtle-action" onClick={() => onNavigate('study')}>
-              Open planner <ArrowUpRight size={13} />
-            </button>
-          </div>
-          {guestMode ? (
-            <p className="onboarding-help">Sign in to track your study tasks and focus time.</p>
-          ) : (
-            <>
-              <div className="study-stat-row">
-                <div><strong>{dataLoading ? '–' : tasksCompletedToday}</strong><span>Completed today</span></div>
-                <div className="study-stat-divider" />
-                <div><strong>{dataLoading ? '–' : `${todayFocusMinutes}m`}</strong><span>Focused today</span></div>
-                <div className="study-stat-divider" />
-                <div><strong>{dataLoading ? '–' : `${streak}d`}</strong><span>Day streak</span></div>
-              </div>
-              <div className="task-list compact">
-                {dataLoading ? (
-                  <p className="onboarding-help">Aaj ke tasks load ho rahe hain…</p>
-                ) : todayTasks.length === 0 ? (
-                  <p className="onboarding-help">No tasks for today yet. Add one from the Study planner.</p>
-                ) : null}
-                {todayTasks.slice(0, 3).map((task) => (
-                  <div className="task-row" key={task.id}>
-                    <span className={`task-dot ${subjectById.get(task.subjectId ?? '')?.colour ?? 'mint'}`} />
-                    <div><strong>{task.title}</strong><small>{task.startTime ? formatTime12h(task.startTime) : 'Not scheduled'}{task.subjectId ? ` · ${subjectById.get(task.subjectId)?.name ?? 'No subject'}` : ''}</small></div>
-                    <span className={`status-tag ${task.status === 'Completed' ? 'status-done' : task.status === 'In Progress' ? 'status-live' : ''}`}>
-                      {task.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </section>
-
-        <section className="panel habits-panel">
-          <div className="panel-top">
-            <div>
-              <span className="eyebrow">DISCIPLINE</span>
-              <h3>Daily intentions</h3>
-            </div>
-            <button className="subtle-action" onClick={() => onNavigate('analytics')}>
-              See progress <ArrowUpRight size={13} />
-            </button>
-          </div>
-          <div className="habit-list"><p className="onboarding-help">Habit tracking is not enabled yet. No check-ins are shown.</p></div>
-          <div className="habit-bottom">
-            <Flame size={15} />
-            <span>Saved activity will appear as you build your rhythm.</span>
-          </div>
-        </section>
-
-        <section className="panel challenge-teaser">
-          <div className="challenge-bg-shape" />
-          <div className="panel-top">
-            <span className="eyebrow">CHALLENGES · POINTS</span>
-            <Trophy size={18} />
-          </div>
-          <div className="challenge-teaser-copy">
-            <h3>{activeChallenges[0] ? activeChallenges[0].challenge.title : 'Grow better, together.'}</h3>
-            <p>
-              {activeChallenges[0]
-                ? `Day ${activeChallenges[0].currentDay} of ${activeChallenges[0].totalDays} · ${activeChallenges[0].completedDays} day${activeChallenges[0].completedDays === 1 ? '' : 's'} done · ${activeChallenges[0].pointsEarned} pts from this challenge`
-                : 'Choose a healthy challenge and keep yourself accountable.'}
-            </p>
-            {rewards && (
-              <p className="challenge-points-line">
-                <Zap size={13} /> {rewards.total} points earned
-                {rewards.badges.length > 0 && ` · ${rewards.badges.length} badge${rewards.badges.length === 1 ? '' : 's'}: ${rewards.badges.map((b) => b.title).join(', ')}`}
-              </p>
+      <section className="dash-card">
+        <h5>Aaj ki progress</h5>
+        {dataLoading ? (
+          <p className="dash-empty">Aaj ka data load ho raha hai…</p>
+        ) : (
+          <>
+            {!hasActivity && !guestMode && (
+              <p className="dash-empty">Aaj abhi kuch nahi kiya — pehli namaz ya ek task se shuru karo. Yahan sirf asal progress dikhegi.</p>
             )}
-            <button className="outline-button" onClick={() => onNavigate('challenges')}>
-              {activeChallenges.length > 0 ? 'View my challenges' : 'Explore challenges'} <ArrowRight size={14} />
-            </button>
-          </div>
-          <div className="challenge-avatars"><span>{activeChallenges.length > 0 ? `${activeChallenges.length} active challenge${activeChallenges.length === 1 ? '' : 's'}` : 'Private until you invite someone.'}</span></div>
-        </section>
-      </div>
-    </>
-  );
-}
+            {guestMode && (
+              <p className="dash-empty">Guest preview — apni progress dekhne ke liye sign in karo.</p>
+            )}
+            <div className="dash-statrow"><span>Namaz</span><span>{prayedCount} / 5 padhi</span></div>
+            <div className="dash-prog"><i style={{ width: `${(prayedCount / 5) * 100}%` }} /></div>
+            <div className="dash-statrow"><span>Padhai</span><span>{totalTasksToday === 0 ? 'Aaj koi task nahi' : `${tasksCompletedToday} / ${totalTasksToday} task poore`}</span></div>
+            <div className="dash-prog"><i style={{ width: totalTasksToday === 0 ? '0%' : `${Math.min(100, (tasksCompletedToday / totalTasksToday) * 100)}%` }} /></div>
+            <div className="dash-statrow"><span>Focus</span><span>{todayFocusMinutes} minute</span></div>
+            <div className="dash-prog"><i style={{ width: `${focusBarPct}%` }} /></div>
+            <div className="dash-statrow"><span>Neend ka schedule</span><span>{guestMode ? 'Sign in karke schedule banao' : `${formatTime12h(sleepStartTime)} – ${formatTime12h(sleepEndTime)}${sleepLabel ? ` · ${sleepLabel}` : ''}`}</span></div>
+            <div className="dash-prog dash-prog-peach"><i style={{ width: guestMode ? '0%' : '100%' }} /></div>
+            {!guestMode && <p className="dash-note">Neend ka time schedule hai — asal neend nahi.</p>}
+          </>
+        )}
+      </section>
 
-function HabitItem({ icon: Icon, title, meta, done }: { icon: IconType; title: string; meta: string; done?: boolean }) {
-  return (
-    <div className="habit-row">
-      <div className="habit-icon"><Icon size={16} /></div>
-      <div className="habit-copy"><strong>{title}</strong><small>{meta}</small></div>
-      <span className={`habit-tick ${done ? 'is-done' : ''}`}>{done && <Check size={12} />}</span>
+      <NextPrayerBanner prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} now={now} />
+
+      <section className="dash-card">
+        {challenge ? (
+          <>
+            <h5>Challenge — Day {challenge.currentDay}</h5>
+            <p className="dash-challenge-text">{challenge.challenge.title} · {challenge.completedDays} / {challenge.totalDays} din poore · {challenge.pointsEarned} points mile</p>
+            <div className="dash-prog dash-prog-peach"><i style={{ width: `${challengePct}%` }} /></div>
+            <div className="dash-statrow"><span>{challenge.completedDays} / {challenge.totalDays} din</span><span>{challenge.streak > 0 ? `Streak ${challenge.streak} din 🔥` : 'Streak abhi nahi'}</span></div>
+            <button type="button" className="dash-challenge-btn" onClick={() => onNavigate('challenges')}>Aaj ka din dekho</button>
+          </>
+        ) : (
+          <>
+            <h5>Challenge</h5>
+            <p className="dash-empty">Koi challenge active nahi hai. Ek challenge join karo aur roz thoda-thoda aage badho.</p>
+            <button type="button" className="dash-challenge-btn" onClick={() => onNavigate('challenges')}>Challenge join karo</button>
+          </>
+        )}
+      </section>
     </div>
   );
 }
 
-function QuranDuas() {
-  return (
-    <section className="panel quran-duas-card">
-      <div className="panel-top">
-        <div>
-          <span className="eyebrow">QURANIC GUIDANCE</span>
-          <h3>A dua for today</h3>
-        </div>
-        <BookOpen size={18} />
-      </div>
-      <p className="dua-text">“My Lord, increase me in knowledge.”</p>
-      <span className="dua-reference">Surah Ta-Ha · 20:114</span>
-    </section>
-  );
-}
-
-function Deen({ onNotify, prayerTimes, prayerStatus, prayerError, onOpenGuidance }: {
+/** Preview #5 — Deen & Salah. Dark screen: apphead, next-prayer
+ * banner, the 6-row prayer list (PrayerTimesPanel), qaza cards, and
+ * the 3 quick tiles. The monthly calendar lives on its own
+ * 'salah-calendar' route now, the reflection quote card is gone (not
+ * in the preview), and the static "dua for today" card is gone — its
+ * content is covered by Guidance / Duas. */
+function Deen({ onNotify, prayerTimes, prayerStatus, prayerError, salahToday, onRefreshSalah, onOpenGuidance, onBack, profile }: {
   onNotify: (message: string) => void;
   prayerTimes: PrayerTimesResponse | null;
   prayerStatus: 'idle' | 'loading' | 'loaded' | 'error' | 'no-city';
   prayerError: string;
+  salahToday: Record<string, { status: string }>;
+  onRefreshSalah: () => Promise<void>;
   onOpenGuidance: (tab: GuidanceTab, surahNumber?: number) => void;
+  onBack: () => void;
+  profile: UserProfile;
 }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const [qazaBusy, setQazaBusy] = useState<string | null>(null);
+
+  // Mark one missed prayer as Qaza — the same endpoint SalahTracker
+  // uses (PUT /api/salah/day/{date}); the server keeps the original
+  // miss in history. Refreshes today's record so the pill flips.
+  async function handleQaza(prayer: string) {
+    if (qazaBusy) return;
+    setQazaBusy(prayer);
+    try {
+      const response = await apiFetch(`/api/salah/day/${todayKey()}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prayer, status: 'qaza' }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Qaza save nahi ho payi.');
+      await onRefreshSalah();
+      onNotify(`${prayer} ki qaza mark ho gayi.`);
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : 'Qaza save nahi ho payi.');
+    } finally {
+      setQazaBusy(null);
+    }
+  }
+
+  const city = prayerTimes?.city || profile.city || '';
+  const methodLine = profile.asrMethod ? `${profile.asrMethod} tareeqa` : (prayerTimes?.method ?? '');
+  const sub = [city, methodLine].filter(Boolean).join(' · ') || 'Namaz ke time';
+
   return (
-    <>
-      <PageHeading
-        eyebrow="DEEN · DAILY PRACTICE"
-        title="Make room for what matters."
-        text="Your personal Salah record and Qur'anic supplications."
-      />
-
-      <PrayerTimesPanel prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} />
-
-      <SalahTracker onNotify={onNotify} />
-
-      <QuranDuas />
-
-      <div className="deen-grid">
-        <section className="panel deen-quick-card">
-          <SectionTitle title="Your daily practice" />
-          <div className="quick-grid">
-            <QuickTile icon={BookMarked} title="Duas" text="Verified supplications" onClick={() => onOpenGuidance('duas')} />
-            <QuickTile icon={CalendarDays} title="Islamic calendar" text="Dates & occasions" onClick={() => onOpenGuidance('hijri')} />
-            <QuickTile icon={Compass} title="Find a masjid" text="Nearby places" onClick={() => onOpenGuidance('mosques')} />
-          </div>
-        </section>
-
-        <section className="panel deen-reflection">
-          <span className="eyebrow">A MOMENT TO REFLECT</span>
-          <div className="reflection-mark">“</div>
-          <h3>Consistency is not about never missing a day. It is about returning with sincerity.</h3>
-          <p>AHDORA reflection · Original reminder, not a Quranic quotation.</p>
-        </section>
+    <section className="deen-screen">
+      <div className="apphead">
+        <button type="button" className="aback" onClick={onBack} aria-label="Wapas jao">
+          <ChevronLeft size={20} />
+        </button>
+        <div>
+          <h4>Namaz ke Time</h4>
+          <div className="asub">{sub}</div>
+        </div>
+        <div className="aright">
+          <button type="button" className="sbtn gh" onClick={() => onOpenGuidance('hijri')}>
+            <CalendarDays size={13} /> Islamic calendar
+          </button>
+        </div>
       </div>
-    </>
-  );
-}
 
-function QuickTile({ icon: Icon, title, text, onClick }: { icon: IconType; title: string; text: string; onClick: () => void }) {
-  return (
-    <button className="quick-tile" onClick={onClick}>
-      <div><Icon size={18} /></div>
-      <strong>{title}</strong>
-      <span>{text}</span>
-      <ArrowUpRight size={13} className="quick-arrow" />
-    </button>
+      <NextPrayerBanner prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} now={now} />
+
+      <PrayerTimesPanel prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} now={now} onQaza={handleQaza} qazaBusy={qazaBusy} />
+
+      <section className="acard">
+        <h5>Apni daily practice</h5>
+        <div className="prow prow-link" role="button" tabIndex={0} onClick={() => onOpenGuidance('duas')} onKeyDown={(e) => { if (e.key === 'Enter') onOpenGuidance('duas'); }}>
+          <span className="pic"><BookMarked size={19} strokeWidth={1.8} /></span>
+          <div>Duas<small>Verified supplications</small></div>
+          <ChevronRight size={17} className="prow-chev" />
+        </div>
+        <div className="prow prow-link" role="button" tabIndex={0} onClick={() => onOpenGuidance('hijri')} onKeyDown={(e) => { if (e.key === 'Enter') onOpenGuidance('hijri'); }}>
+          <span className="pic"><CalendarDays size={19} strokeWidth={1.8} /></span>
+          <div>Islamic calendar<small>Dates &amp; occasions</small></div>
+          <ChevronRight size={17} className="prow-chev" />
+        </div>
+        <div className="prow prow-link" role="button" tabIndex={0} onClick={() => onOpenGuidance('mosques')} onKeyDown={(e) => { if (e.key === 'Enter') onOpenGuidance('mosques'); }}>
+          <span className="pic"><Compass size={19} strokeWidth={1.8} /></span>
+          <div>Find a masjid<small>Nearby places</small></div>
+          <ChevronRight size={17} className="prow-chev" />
+        </div>
+      </section>
+    </section>
   );
 }
 
@@ -1988,6 +1904,7 @@ function Study({
   profile,
   onRefresh,
   onNotify,
+  onBack,
 }: {
   subjects: StudySubject[];
   tasks: StudyTask[];
@@ -2001,6 +1918,7 @@ function Study({
   profile: UserProfile;
   onRefresh: () => Promise<void>;
   onNotify: (message: string) => void;
+  onBack: () => void;
 }) {
   const subjectById = new Map(subjects.map((s) => [s.id, s]));
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -2324,14 +2242,37 @@ function Study({
 
   const breakPresets = Array.from(new Set([breakDefault, 5, 10, 15])).sort((a, b) => a - b);
 
+  // Preview #12 header: weekday + date + real daily target from the
+  // saved profile (dailyStudyTarget / dailyStudyHours). No target
+  // saved → the sub-line just says the date.
+  const todayDate = new Date();
+  const studySub = [
+    todayDate.toLocaleDateString('en-IN', { weekday: 'long' }),
+    todayDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
+    schedule?.dailyStudyTarget ? `Target ${schedule.dailyStudyTarget}` : (schedule?.dailyStudyHours ? `Target ${schedule.dailyStudyHours} ghante` : ''),
+  ].filter(Boolean).join(' · ');
+  // Aaj ka target bar: today's real focus minutes against the saved
+  // daily study hours (parsed from the profile). No saved target →
+  // no bar, never a guessed one.
+  const targetHours = Number.parseFloat(schedule?.dailyStudyHours ?? profile.dailyStudyHours ?? '');
+  const targetMinutes = Number.isFinite(targetHours) && targetHours > 0 ? Math.round(targetHours * 60) : null;
+  const todayFocusMinutes = stats?.todayFocusMinutes ?? 0;
+  const targetPct = targetMinutes ? Math.min(100, Math.round((todayFocusMinutes / targetMinutes) * 100)) : null;
+
   return (
-    <>
-      <PageHeading
-        eyebrow="ILM · LEARNING SYSTEM"
-        title="Make your focus count."
-        text="Plan your study sessions, protect your attention and keep your learning visible."
-        action={<button className="primary-button" onClick={() => openTaskModal()}><Plus size={16} /> Add study task</button>}
-      />
+    <section className="study-screen">
+      <div className="apphead">
+        <button type="button" className="aback" onClick={onBack} aria-label="Wapas jao">
+          <ChevronLeft size={20} />
+        </button>
+        <div>
+          <h4>Study Planner</h4>
+          <div className="asub">{studySub}</div>
+        </div>
+        <div className="aright">
+          <button type="button" className="sbtn" onClick={() => openTaskModal()}>+ Task</button>
+        </div>
+      </div>
 
       {studyError && (
         <section className="panel" style={{ padding: 16, marginBottom: 15 }}>
@@ -2344,7 +2285,7 @@ function Study({
           <div className="panel-top">
             <div>
               <span className="eyebrow">YOUR SCHEDULE</span>
-              <h3>Today's study plan</h3>
+              <h3>Aaj ke tasks</h3>
             </div>
             <div className="date-chip small-date"><CalendarDays size={14} /> Today</div>
           </div>
@@ -2355,6 +2296,13 @@ function Study({
             </div>
           ) : (
             <p className="onboarding-help">No college or study schedule saved yet. Add it during onboarding or in Profile to see it here.</p>
+          )}
+
+          {targetMinutes !== null && targetPct !== null && (
+            <>
+              <div className="statrow">Aaj ka target <span>{`${(todayFocusMinutes / 60).toFixed(1)} / ${targetHours} ghante ho gaya`}</span></div>
+              <div className="prog"><i style={{ width: `${targetPct}%` }} /></div>
+            </>
           )}
 
           <div className="task-list full-task-list">
@@ -2368,6 +2316,15 @@ function Study({
               const rowPending = statusPending?.id === task.id;
               return (
                 <div className="task-row large-task" key={task.id}>
+                  <button
+                    type="button"
+                    className={`tick ${task.status === 'Completed' ? 'done' : ''}`}
+                    disabled={rowPending}
+                    onClick={() => changeStatus(task, task.status === 'Completed' ? 'Pending' : 'Completed')}
+                    aria-label={task.status === 'Completed' ? `${task.title} dobara kholo` : `${task.title} poora mark karo`}
+                  >
+                    {task.status === 'Completed' ? '✓' : ''}
+                  </button>
                   <span className={`task-dot ${subject?.colour ?? 'mint'}`} />
                   <div>
                     <strong>{task.title}</strong>
@@ -2423,6 +2380,89 @@ function Study({
 
           <button className="add-row" onClick={() => openTaskModal()}><Plus size={15} /> Add another session</button>
           <p className="modal-note">Streak rule: a day counts when a focus session finishes or a task is completed.</p>
+        </section>
+
+        <section className="panel subjects-card">
+          <div className="panel-top">
+            <div>
+              <span className="eyebrow">YOUR SUBJECTS</span>
+              <h3>Your subjects</h3>
+            </div>
+            <button className="subtle-action" onClick={() => setShowSubjects(!showSubjects)}>
+              {showSubjects ? 'Done' : 'Manage subjects'} <ArrowUpRight size={13} />
+            </button>
+          </div>
+          <div className="chiprow study-subject-chips">
+            {subjects.map((subject) => (
+              <button
+                key={subject.id}
+                type="button"
+                className="mchip"
+                onClick={() => { setSubjectForm({ id: subject.id, name: subject.name, label: subject.label, colour: subject.colour }); setShowSubjects(true); }}
+              >
+                {subject.name}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="mchip mchip-add"
+              onClick={() => { setSubjectForm({ id: null, name: '', label: '', colour: 'mint' }); setShowSubjects(true); }}
+            >
+              + Naya subject
+            </button>
+          </div>
+          {showSubjects && (
+            <div className="subject-form">
+              <label className="field-label">Subject name</label>
+              <input className="form-input" value={subjectForm.name} onChange={(e) => setSubjectForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Applied Mathematics" />
+              <label className="field-label">Label / code (optional)</label>
+              <input className="form-input" value={subjectForm.label} onChange={(e) => setSubjectForm((f) => ({ ...f, label: e.target.value }))} placeholder="e.g. 312301" />
+              <label className="field-label">Colour</label>
+              <div className="colour-picker">
+                {subjectColours.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={`colour-dot colour-${c} ${subjectForm.colour === c ? 'selected' : ''}`}
+                    onClick={() => setSubjectForm((f) => ({ ...f, colour: c }))}
+                    aria-label={c}
+                  />
+                ))}
+              </div>
+              <button className="primary-button" disabled={busy} onClick={saveSubject}>
+                {pendingAction === 'save-subject' ? 'Saving…' : subjectForm.id ? 'Save subject' : 'Add subject'}
+              </button>
+              {subjectForm.id && (
+                <button className="text-button" onClick={() => setSubjectForm({ id: null, name: '', label: '', colour: 'mint' })}>
+                  Cancel edit
+                </button>
+              )}
+              <p className="modal-note">Deleting a subject keeps its tasks — they become “No subject”.</p>
+            </div>
+          )}
+          <div className="subject-list">
+            {subjects.length === 0 && (
+              <p className="onboarding-help">No subjects yet. Add your first subject to organise tasks and focus time.</p>
+            )}
+            {subjects.map((subject) => {
+              const row = subjectStats(subject);
+              return (
+                <div key={subject.id}>
+                  <SubjectRow name={subject.name} label={subject.label} tasksDone={row.tasksDone} tasksTotal={row.tasksTotal} focusMinutes={row.focusMinutesWeek} colour={subject.colour} />
+                  {showSubjects && (
+                    <div className="subject-actions">
+                      <button onClick={() => setSubjectForm({ id: subject.id, name: subject.name, label: subject.label, colour: subject.colour })}>Edit</button>
+                      {confirmDeleteSubjectId === subject.id ? (
+                        <button onClick={() => removeSubject(subject)}>Confirm delete?</button>
+                      ) : (
+                        <button onClick={() => setConfirmDeleteSubjectId(subject.id)}>Delete</button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </section>
 
         <section className="panel timer-card">
@@ -2510,70 +2550,6 @@ function Study({
           <small className="muted-footnote">The server stores the start time, so refreshing, logging out, or switching devices keeps the timer running.</small>
         </section>
 
-        <section className="panel subjects-card">
-          <div className="panel-top">
-            <div>
-              <span className="eyebrow">YOUR SUBJECTS</span>
-              <h3>Your subjects</h3>
-            </div>
-            <button className="subtle-action" onClick={() => setShowSubjects(!showSubjects)}>
-              {showSubjects ? 'Done' : 'Manage subjects'} <ArrowUpRight size={13} />
-            </button>
-          </div>
-          {showSubjects && (
-            <div className="subject-form">
-              <label className="field-label">Subject name</label>
-              <input className="form-input" value={subjectForm.name} onChange={(e) => setSubjectForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Applied Mathematics" />
-              <label className="field-label">Label / code (optional)</label>
-              <input className="form-input" value={subjectForm.label} onChange={(e) => setSubjectForm((f) => ({ ...f, label: e.target.value }))} placeholder="e.g. 312301" />
-              <label className="field-label">Colour</label>
-              <div className="colour-picker">
-                {subjectColours.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    className={`colour-dot colour-${c} ${subjectForm.colour === c ? 'selected' : ''}`}
-                    onClick={() => setSubjectForm((f) => ({ ...f, colour: c }))}
-                    aria-label={c}
-                  />
-                ))}
-              </div>
-              <button className="primary-button" disabled={busy} onClick={saveSubject}>
-                {pendingAction === 'save-subject' ? 'Saving…' : subjectForm.id ? 'Save subject' : 'Add subject'}
-              </button>
-              {subjectForm.id && (
-                <button className="text-button" onClick={() => setSubjectForm({ id: null, name: '', label: '', colour: 'mint' })}>
-                  Cancel edit
-                </button>
-              )}
-              <p className="modal-note">Deleting a subject keeps its tasks — they become “No subject”.</p>
-            </div>
-          )}
-          <div className="subject-list">
-            {subjects.length === 0 && (
-              <p className="onboarding-help">No subjects yet. Add your first subject to organise tasks and focus time.</p>
-            )}
-            {subjects.map((subject) => {
-              const row = subjectStats(subject);
-              return (
-                <div key={subject.id}>
-                  <SubjectRow name={subject.name} label={subject.label} tasksDone={row.tasksDone} tasksTotal={row.tasksTotal} focusMinutes={row.focusMinutesWeek} colour={subject.colour} />
-                  {showSubjects && (
-                    <div className="subject-actions">
-                      <button onClick={() => setSubjectForm({ id: subject.id, name: subject.name, label: subject.label, colour: subject.colour })}>Edit</button>
-                      {confirmDeleteSubjectId === subject.id ? (
-                        <button onClick={() => removeSubject(subject)}>Confirm delete?</button>
-                      ) : (
-                        <button onClick={() => setConfirmDeleteSubjectId(subject.id)}>Delete</button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
         <section className="panel history-card">
           <SectionTitle title="Focus history" />
           {history.length === 0 ? (
@@ -2657,7 +2633,7 @@ function Study({
           </div>
         </div>
       )}
-    </>
+    </section>
   );
 }
 
@@ -2736,10 +2712,12 @@ function Challenges({
   onNotify,
   onRefresh,
   guestMode,
+  onBack,
 }: {
   onNotify: (message: string) => void;
   onRefresh: () => void;
   guestMode: boolean;
+  onBack: () => void;
 }) {
   const [tab, setTab] = useState<'explore' | 'mine' | 'history'>('explore');
   const [templates, setTemplates] = useState<ChallengeTemplate[]>([]);
@@ -2755,6 +2733,7 @@ function Challenges({
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [busy, setBusy] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [heroShowRules, setHeroShowRules] = useState(false);
   const [createTitle, setCreateTitle] = useState('');
   const [createDescription, setCreateDescription] = useState('');
   const [createCategory, setCreateCategory] = useState<ChallengeCategory>('study');
@@ -2948,13 +2927,16 @@ function Challenges({
     const auto = isAutoCategory(challenge.category);
     const completed = participation?.status === 'completed';
     return (
-      <>
-        <PageHeading
-          eyebrow="CHALLENGE · DETAIL"
-          title={challenge.title}
-          text={challenge.description || 'A challenge you joined.'}
-          action={<button className="outline-button" onClick={() => setDetail(null)}>← All challenges</button>}
-        />
+      <section className="challenges-screen">
+        <div className="apphead">
+          <button type="button" className="aback" onClick={() => setDetail(null)} aria-label="Saare challenges dekho">
+            <ChevronLeft size={20} />
+          </button>
+          <div>
+            <h4>{challenge.title}</h4>
+            <div className="asub">{CHALLENGE_CATEGORY_LABELS[challenge.category]} · {challenge.durationDays} din · {challenge.kind === 'template' ? 'Template' : 'Apna challenge'}</div>
+          </div>
+        </div>
         {detailLoading && <p className="onboarding-help">Loading challenge details…</p>}
 
         {completed && participation && (
@@ -3076,44 +3058,71 @@ function Challenges({
             <span>Your prayer history and private activity are never shared. Challenges here are solo — friends and invites come in a later phase.</span>
           </div>
         </div>
-      </>
+      </section>
     );
   }
 
   /* ---------------- List view ---------------- */
 
+  const hero = myActive[0] ?? null;
+
   return (
-    <>
-      <PageHeading
-        eyebrow="COMMUNITY · ACCOUNTABILITY"
-        title="Progress feels better together."
-        text="Choose a healthy goal, keep yourself accountable, and earn points from real activity — never from invented progress."
-        action={
-          <button className="primary-button" onClick={() => setShowCreate(true)}>
-            <Plus size={16} /> Create challenge
-          </button>
-        }
-      />
+    <section className="challenges-screen">
+      <div className="apphead">
+        <button type="button" className="aback" onClick={onBack} aria-label="Wapas jao">
+          <ChevronLeft size={20} />
+        </button>
+        <div>
+          <h4>Challenges</h4>
+          <div className="asub">Roz thoda, lambay samay tak</div>
+        </div>
+        <div className="aright">
+          <button type="button" className="sbtn" onClick={() => setShowCreate(true)}>+ Banao</button>
+        </div>
+      </div>
 
       {error && <p className="salah-error">{error}</p>}
       {loading && <p className="onboarding-help">Loading challenges…</p>}
 
-      <div className="challenge-highlight panel">
-        <div>
-          <span className="eyebrow">A HEALTHY KIND OF COMPETITION</span>
-          <h2>Compete with your past self.<br /><em>Support each other.</em></h2>
-          <p>Keep worship personal. Points come from real activity — finished focus sessions, completed tasks and challenge days — never per prayer.</p>
-          <button className="primary-button" onClick={() => setTab('explore')}>
-            Start a challenge <ArrowRight size={15} />
-          </button>
+      {hero ? (
+        <div className="acard-l ch-hero">
+          <div className="ch-hero-top">
+            <span className="mchip">CHAL RAHA HAI</span>
+            <span className="ch-hero-streak">🔥 {hero.streak} din streak</span>
+          </div>
+          <div className="ch-hero-title">{hero.challenge.title}</div>
+          <p className="ch-hero-rules-line">
+            {hero.challenge.rules.slice(0, 3).join(' · ')}
+            {hero.challenge.rules.length > 3 ? ' · …' : ''}
+          </p>
+          <div className="prog pk"><i style={{ width: `${hero.totalDays > 0 ? Math.round((hero.completedDays / hero.totalDays) * 100) : 0}%` }} /></div>
+          <div className="ch-hero-meta"><span>Day {hero.currentDay} / {hero.totalDays}</span><span>{hero.pointsEarned} points mile</span></div>
+          <div className="btnrow">
+            <button type="button" className="sbtn pk" onClick={() => openDetail(hero.challengeId)}>Aaj ka din dekho</button>
+            <button type="button" className="sbtn gh" onClick={() => setHeroShowRules((v) => !v)}>Rules</button>
+          </div>
+          {heroShowRules && (
+            <div className="challenge-rules-box ch-hero-rules">
+              <strong>Rules — read before joining</strong>
+              <ul className="challenge-rules">
+                {hero.challenge.rules.map((rule, index) => <li key={index}>{rule}</li>)}
+              </ul>
+              <p className="onboarding-help">What completes a day: {requirementFor(hero.challenge.category)}.</p>
+            </div>
+          )}
         </div>
-        <div className="challenge-highlight-art">
-          <div className="trophy-orbit"><Trophy size={54} /></div>
-          <span className="orbit-dot dot-a" />
-          <span className="orbit-dot dot-b" />
-          <span className="orbit-dot dot-c" />
-        </div>
-      </div>
+      ) : (
+        !loading && (
+          <div className="acard-l">
+            <h5>Koi challenge active nahi hai</h5>
+            <p className="onboarding-help">
+              Neeche se ek ready-made challenge join karo ya apna banao — roz thoda-thoda,
+              points sirf asal activity se milenge.
+            </p>
+            <button type="button" className="sbtn pk" onClick={() => setTab('explore')}>Challenge join karo</button>
+          </div>
+        )
+      )}
 
       <div className="challenge-controls">
         <div className="segmented">
@@ -3125,25 +3134,34 @@ function Challenges({
       </div>
 
       {tab === 'explore' && (
-        <div className="challenge-cards">
+        <div className="acard-l">
+          <h5>Ready-made challenges</h5>
           {templates.length === 0 && !loading && (
             <p className="onboarding-help">No templates available right now. Create your own challenge instead.</p>
           )}
           {templates.map((template) => {
-            const Icon = CHALLENGE_CATEGORY_ICONS[template.category];
             const joined = participationForTemplate(template.id);
             const expanded = expandedTemplate === template.id;
             return (
-              <div className="panel challenge-card" key={template.id}>
-                <div className="challenge-card-icon"><Icon size={21} /></div>
-                <span className="eyebrow">{CHALLENGE_CATEGORY_LABELS[template.category].toUpperCase()} · {template.durationDays} DAYS</span>
-                <h3>{template.title}</h3>
-                <p>{template.description}</p>
-                <div className="challenge-meta">
-                  <span><CalendarDays size={14} /> {template.durationDays} days</span>
-                  <span><Target size={14} /> {template.requirement}</span>
+              <div key={template.id}>
+                <div className="taskrow">
+                  <span className="snum2">{template.durationDays}</span>
+                  <div>{template.title}<small>{template.description || `${CHALLENGE_CATEGORY_LABELS[template.category]} · ${template.requirement}`}</small></div>
+                  {joined ? (
+                    <button type="button" className="sbtn" style={{ marginLeft: 'auto' }} onClick={() => openDetail(joined.challengeId)}>
+                      Day {joined.currentDay} — View
+                    </button>
+                  ) : expanded ? (
+                    <button type="button" className="sbtn gh" style={{ marginLeft: 'auto' }} onClick={() => { setExpandedTemplate(null); setTemplateConsent(false); }}>
+                      Close
+                    </button>
+                  ) : (
+                    <button type="button" className="sbtn" style={{ marginLeft: 'auto' }} onClick={() => { setExpandedTemplate(template.id); setTemplateConsent(false); }}>
+                      Join
+                    </button>
+                  )}
                 </div>
-                {expanded && (
+                {expanded && !joined && (
                   <div className="challenge-rules-box">
                     <strong>Rules — read before joining</strong>
                     <ul className="challenge-rules">
@@ -3153,27 +3171,19 @@ function Challenges({
                       <input type="checkbox" checked={templateConsent} onChange={(e) => setTemplateConsent(e.target.checked)} />
                       <span>I have read the rules and I join this challenge willingly.</span>
                     </label>
-                  </div>
-                )}
-                {joined ? (
-                  <button className="primary-button full-width" onClick={() => openDetail(joined.challengeId)}>
-                    Joined · Day {joined.currentDay} of {joined.totalDays} — View <ArrowRight size={15} />
-                  </button>
-                ) : expanded ? (
-                  <div className="challenge-card-actions">
-                    <button className="primary-button full-width" disabled={!templateConsent || busy} onClick={() => handleJoinTemplate(template)}>
+                    <button type="button" className="primary-button full-width" disabled={!templateConsent || busy} onClick={() => handleJoinTemplate(template)}>
                       Join this challenge
                     </button>
-                    <button className="outline-button full-width" onClick={() => { setExpandedTemplate(null); setTemplateConsent(false); }}>Close rules</button>
                   </div>
-                ) : (
-                  <button className="outline-button full-width" onClick={() => { setExpandedTemplate(template.id); setTemplateConsent(false); }}>
-                    View rules &amp; join <ArrowRight size={15} />
-                  </button>
                 )}
               </div>
             );
           })}
+          <div className="taskrow">
+            <span className="snum2 snum2-peach">+</span>
+            <div>Apna challenge banao<small>Apne din, apna target, apne rules</small></div>
+            <button type="button" className="sbtn pk" style={{ marginLeft: 'auto' }} onClick={() => setShowCreate(true)}>Banao</button>
+          </div>
         </div>
       )}
 
@@ -3230,6 +3240,14 @@ function Challenges({
         </div>
       )}
 
+      <div className="acard-l">
+        <p className="mut" style={{ margin: 0 }}>
+          <b>Join se pehle rules:</b> ek challenge ek hi baar join hoga, beech me chhod sakte ho
+          (history rehti hai), points server par bante hain — haath se badle nahi ja sakte.
+          Poora karne par badge milega.
+        </p>
+      </div>
+
       <div className="privacy-callout">
         <Lock size={16} />
         <div>
@@ -3277,7 +3295,7 @@ function Challenges({
           </div>
         </div>
       )}
-    </>
+    </section>
   );
 }
 
@@ -3412,200 +3430,239 @@ function Guidance({ onNotify, onOpenFeedback, tab, onTabChange, guestMode, profi
   );
 }
 
+/** Preview #13 — Focus timer screen (dark). The sleep-window /
+ * app-selection UI moved to the Sleep screen; this page is the live
+ * Pomodoro timer: big ring countdown from the existing server-side
+ * session state (activePomodoro, already loaded in App), Pause /
+ * Finish wired to pausePomodoro / completePomodoro, KPIs from
+ * studyStats / pomodoroHistory, and the session-history list. No
+ * points are shown per session — the session record carries no points
+ * award, so none is invented. The honesty note stays: web cannot
+ * block other apps, so there is no fake blocking toggle. */
 function Focus({
-  sleepStartTime,
-  sleepEndTime,
-  onSleepChange,
-  onSaveFocus,
-  focusSaving,
-  focusEnabled,
-  setFocusEnabled,
-  youtubeAllowed,
-  setYoutubeAllowed,
+  activeSession,
+  history,
+  stats,
+  tasks,
+  onRefresh,
   onNotify,
+  onNavigate,
+  guestMode,
 }: {
-  sleepStartTime: string;
-  sleepEndTime: string;
-  /** Edit the sleep window; saved to MongoDB by onSaveFocus. */
-  onSleepChange: (start: string, end: string) => void;
-  /** Saves the sleep window; true when it landed (P15). */
-  onSaveFocus: () => Promise<boolean>;
-  focusSaving: boolean;
-  focusEnabled: boolean;
-  setFocusEnabled: (value: boolean) => void;
-  youtubeAllowed: boolean;
-  setYoutubeAllowed: (value: boolean) => void;
+  activeSession: PomodoroSession | null;
+  history: PomodoroSession[];
+  stats: StudyStats | null;
+  tasks: StudyTask[];
+  onRefresh: () => Promise<void>;
   onNotify: (message: string) => void;
+  onNavigate: (page: Page) => void;
+  guestMode: boolean;
 }) {
-  const sleepStart = formatTime12h(sleepStartTime || '22:00');
-  const sleepEnd = formatTime12h(sleepEndTime || '04:00');
-  const sleepDuration = sleepDurationLabel(sleepStartTime || '22:00', sleepEndTime || '04:00');
-  const [socialApps, setSocialApps] = useState(['Instagram', 'Facebook', 'Snapchat', 'WhatsApp', 'Telegram', 'X']);
-  // P15: the toast alone was missed whenever the save was slow, so the
-  // result also stays on screen under the button until the user edits
-  // the sleep window again. 'idle' = nothing to report yet.
-  const [saveResult, setSaveResult] = useState<'idle' | 'saved' | 'error'>('idle');
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [busy, setBusy] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const completingRef = useRef(false);
 
-  async function handleSaveClick() {
-    const ok = await onSaveFocus();
-    setSaveResult(ok ? 'saved' : 'error');
+  const remainingMs = activeSession ? remainingForSession(activeSession, nowMs) : null;
+
+  // Tick the countdown once a second while a session is live.
+  useEffect(() => {
+    if (!activeSession) return;
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [activeSession]);
+
+  // When a running session reaches zero, complete it on the server once.
+  useEffect(() => {
+    if (!activeSession || activeSession.status !== 'active' || remainingMs === null || remainingMs > 0) return;
+    if (completingRef.current) return;
+    completingRef.current = true;
+    completePomodoro(activeSession.id)
+      .then(async () => {
+        onNotify(activeSession.mode === 'focus' ? 'Focus session complete. Well done.' : 'Break complete.');
+        await onRefresh();
+      })
+      .catch((error) => onNotify(error instanceof Error ? error.message : 'Session could not be completed.'))
+      .finally(() => { completingRef.current = false; });
+  }, [activeSession, remainingMs, onNotify, onRefresh]);
+
+  async function handlePauseTimer() {
+    if (!activeSession || busy) return;
+    setBusy(true);
+    setPendingAction('pause');
+    try {
+      await pausePomodoro(activeSession.id);
+      await onRefresh();
+      onNotify('Session paused.');
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : 'Session pause nahi ho paya.');
+    } finally {
+      setBusy(false);
+      setPendingAction(null);
+    }
   }
 
-  function handleSleepChange(start: string, end: string) {
-    // A new edit makes the old confirmation stale — clear it.
-    setSaveResult('idle');
-    onSleepChange(start, end);
+  async function handleResumeTimer() {
+    if (!activeSession || busy) return;
+    setBusy(true);
+    setPendingAction('resume');
+    try {
+      await resumePomodoro(activeSession.id);
+      await onRefresh();
+      onNotify('Session resumed.');
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : 'Session resume nahi ho paya.');
+    } finally {
+      setBusy(false);
+      setPendingAction(null);
+    }
   }
+
+  async function handleCompleteTimer() {
+    if (!activeSession || busy || completingRef.current) return;
+    setBusy(true);
+    setPendingAction('complete');
+    try {
+      await completePomodoro(activeSession.id);
+      await onRefresh();
+      onNotify('Session finished.');
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : 'Session complete nahi ho paya.');
+    } finally {
+      setBusy(false);
+      setPendingAction(null);
+    }
+  }
+
+  function formatMinutes(total: number): string {
+    if (total >= 60) {
+      const hours = total / 60;
+      return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} gh`;
+    }
+    return `${total} min`;
+  }
+
+  const todayMinutes = stats?.todayFocusMinutes ?? 0;
+  const weekMinutes = stats?.weekFocusMinutes ?? 0;
+  const completedFocusSessions = history.filter((s) => s.mode === 'focus' && s.status === 'completed');
+  const activeTaskTitle = activeSession?.taskId
+    ? tasks.find((t) => t.id === activeSession.taskId)?.title ?? ''
+    : '';
+  const ringLabel = activeSession
+    ? (activeTaskTitle ? `${activeTaskTitle.toUpperCase()} CHAL RAHA HAI` : activeSession.mode === 'focus' ? 'FOCUS CHAL RAHA HAI' : 'BREAK CHAL RAHA HAI')
+    : 'KOI SESSION NAHI';
+  const ringPct = activeSession && activeSession.plannedMinutes > 0
+    ? Math.max(0, Math.min(100, Math.round(((remainingMs ?? 0) / (activeSession.plannedMinutes * 60_000)) * 100)))
+    : 0;
 
   return (
-    <>
-      <PageHeading
-        eyebrow="DISCIPLINE · DIGITAL WELLBEING"
-        title="Make space for deep rest."
-        text="Plan a sleep window and decide which apps should stay out of reach."
-        action={<span className="native-badge"><Lock size={13} /> Native Android feature planned</span>}
-      />
+    <section className="focus-screen">
+      <div className="apphead">
+        <button type="button" className="aback" onClick={() => onNavigate('home')} aria-label="Wapas jao">
+          <ChevronLeft size={20} />
+        </button>
+        <div>
+          <h4>Focus</h4>
+          <div className="asub">Bina rukawat padhai</div>
+        </div>
+      </div>
 
-      <div className="focus-layout">
-        <section className="panel focus-main">
-          <div className="focus-title-row">
-            <div>
-              <span className="eyebrow">SLEEP FOCUS</span>
-              <h2>Protect your sleep window.</h2>
-              <p>During this schedule, selected distracting apps are planned to be restricted.</p>
-            </div>
-            <button
-              className={`toggle ${focusEnabled ? 'toggle-on' : ''}`}
-              aria-label="Toggle focus"
-              onClick={() => setFocusEnabled(!focusEnabled)}
+      {guestMode ? (
+        <div className="acard">
+          <p className="mut" style={{ margin: 0 }}>
+            Focus sessions tumhare account me save hote hain. Guest preview me timer nahi
+            chalega — sign in karke apna pehla focus session shuru karo.
+          </p>
+          <button type="button" className="sbtn pk" style={{ marginTop: 12 }} onClick={() => onNavigate('study')}>
+            Study planner dekho
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="ringwrap">
+            <div
+              className="focus-ring"
+              style={{ background: `conic-gradient(var(--peach-deep) ${(100 - ringPct)}%, rgba(255,223,201,.22) ${(100 - ringPct)}%)` }}
             >
-              <i />
-            </button>
-          </div>
-
-          <div className="sleep-window">
-            <div className="sleep-time">
-              <Moon size={19} />
-              <span>START</span>
-              <strong>{sleepStart}</strong>
-            </div>
-            <div className="sleep-duration">
-              <div className="sleep-line" />
-              <span>{sleepDuration ? `${sleepDuration} protected` : 'Protected'}</span>
-              <div className="sleep-line" />
-            </div>
-            <div className="sleep-time">
-              <Sun size={19} />
-              <span>END</span>
-              <strong>{sleepEnd}</strong>
-            </div>
-          </div>
-
-          <div className="onboarding-two-col" style={{ marginTop: 14 }}>
-            <div>
-              <label className="field-label">Neend ka time (start)</label>
-              <input className="form-input" type="time" value={sleepStartTime || '22:00'} onChange={(e) => handleSleepChange(e.target.value, sleepEndTime || '04:00')} />
-            </div>
-            <div>
-              <label className="field-label">Uthne ka time (end)</label>
-              <input className="form-input" type="time" value={sleepEndTime || '04:00'} onChange={(e) => handleSleepChange(sleepStartTime || '22:00', e.target.value)} />
-            </div>
-          </div>
-
-          <div className="focus-settings">
-            <div className="focus-setting-head">
-              <div>
-                <strong>Apps to restrict</strong>
-                <small>Choose the apps you want out of reach.</small>
+              <div className="focus-ring-inner">
+                <b>{activeSession ? formatCountdown(remainingMs ?? 0) : '00:00'}</b>
+                <span>{activeSession && activeSession.status === 'paused' ? 'PAUSED' : ringLabel}</span>
               </div>
-              {/* P12: one template string, so the space between the
-                  count and the word can never be dropped by JSX
-                  whitespace handling — it rendered as "6selected". */}
-              <span>{`${socialApps.length} selected`}</span>
             </div>
+          </div>
 
-            <div className="app-chip-list">
-              {['Instagram', 'Facebook', 'Snapchat', 'WhatsApp', 'Telegram', 'X'].map((app) => (
-                <button
-                  key={app}
-                  className={socialApps.includes(app) ? 'app-chip blocked' : 'app-chip'}
-                  onClick={() => setSocialApps((prev) => prev.includes(app) ? prev.filter((a) => a !== app) : [...prev, app])}
-                >
-                  <span className="app-chip-dot" />
-                  {app}
-                  {socialApps.includes(app) && <Check size={12} />}
+          {activeSession ? (
+            <div className="btnrow focus-actions">
+              {activeSession.status === 'active' ? (
+                <button type="button" className="sbtn" disabled={busy} onClick={() => void handlePauseTimer()}>
+                  <Pause size={15} /> {pendingAction === 'pause' ? 'Pausing…' : 'Pause'}
                 </button>
-              ))}
-            </div>
-
-            <div className="focus-setting-row">
-              <div>
-                <strong>YouTube</strong>
-                <small>Keep YouTube available during sleep focus.</small>
-              </div>
-              <button
-                className={`toggle ${youtubeAllowed ? 'toggle-on' : ''}`}
-                onClick={() => setYoutubeAllowed(!youtubeAllowed)}
-                aria-label="Allow YouTube"
-              >
-                <i />
+              ) : (
+                <button type="button" className="sbtn" disabled={busy} onClick={() => void handleResumeTimer()}>
+                  <Play size={15} /> {pendingAction === 'resume' ? 'Resuming…' : 'Resume'}
+                </button>
+              )}
+              <button type="button" className="sbtn gh" disabled={busy} onClick={() => void handleCompleteTimer()}>
+                <Square size={14} /> {pendingAction === 'complete' ? 'Finishing…' : 'Khatam'}
               </button>
             </div>
-
-            <div className="focus-setting-row">
-              <div>
-                <strong>Cellular calls & emergency access</strong>
-                <small>Always remain available.</small>
-              </div>
-              <span className="always-allowed"><ShieldCheck size={13} /> Allowed</span>
+          ) : (
+            <div className="btnrow focus-actions">
+              <button type="button" className="sbtn pk" onClick={() => onNavigate('study')}>
+                Study me session shuru karo
+              </button>
             </div>
-          </div>
-
-          <button className="primary-button" disabled={focusSaving} onClick={() => void handleSaveClick()}>
-            {focusSaving ? 'Save ho raha hai…' : 'Save focus schedule'} <ArrowRight size={15} />
-          </button>
-          {/* P15: persistent confirmation — the toast alone was missed
-              whenever the save was slow. Stays until the sleep window
-              is edited again. */}
-          {saveResult === 'saved' && (
-            <p className="onboarding-help" role="status">✓ Save ho gaya — neend ka time ({sleepStart} – {sleepEnd}) aapke account me save hai.</p>
           )}
-          {saveResult === 'error' && (
-            <p className="salah-error" role="status">Save nahi ho paya. Dobara try karo.</p>
+          {activeSession && (
+            <p className="mut focus-session-note">
+              {activeSession.mode === 'focus' ? `${activeSession.plannedMinutes}-minute focus` : `${activeSession.plannedMinutes}-minute break`}
+              {activeTaskTitle ? ` · ${activeTaskTitle}` : ''}
+              {' · '}Server par save hai — refresh ya device badalne par bhi timer chalta rahega.
+            </p>
           )}
-          <p className="onboarding-help">Neend ka time aapke account me save hota hai. App restrictions Android-only hain — web par ye sirf preview hai.</p>
-        </section>
 
-        <aside className="focus-side">
-          <div className="panel focus-status">
-            <div className="focus-lock-icon"><LockKeyhole size={28} /></div>
-            <span className="eyebrow">YOUR CURRENT PLAN</span>
-            <h3>{focusEnabled ? 'Sleep focus is planned' : 'Sleep focus is paused'}</h3>
-            <p>{focusEnabled ? 'Your selected schedule is ready for native Android integration.' : 'Turn it on when you are ready to protect your rest.'}</p>
-            <div className="status-line">
-              <span className={focusEnabled ? 'status-light' : 'status-light off'} />
-              {focusEnabled ? 'Enabled in preview' : 'Paused'}
-            </div>
+          <div className="kpis">
+            <div className="kpi"><b>{formatMinutes(todayMinutes)}</b><span>AAJ</span></div>
+            <div className="kpi"><b>{formatMinutes(weekMinutes)}</b><span>IS HAFTE</span></div>
+            <div className="kpi"><b>{completedFocusSessions.length}</b><span>SESSIONS</span></div>
+          </div>
+          <p className="mut focus-kpi-note">Sessions ki ginti pichhle 20 loaded sessions me se hai.</p>
+
+          <div className="acard">
+            <h5>Pichhle sessions</h5>
+            {history.length === 0 ? (
+              <p className="mut" style={{ margin: '8px 0 0' }}>
+                Abhi koi focus session nahi hai. Study planner se pehla session shuru karo —
+                poora hone par wo yahan dikhega.
+              </p>
+            ) : (
+              history.slice(0, 10).map((session) => {
+                const title = session.taskId
+                  ? tasks.find((t) => t.id === session.taskId)?.title ?? (session.mode === 'focus' ? 'Focus session' : 'Break')
+                  : (session.mode === 'focus' ? 'Focus session' : 'Break');
+                const when = new Date(session.completedAt ?? session.startedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+                return (
+                  <div className="srow" key={session.id}>
+                    <span className="snum2">📚</span>
+                    <div>{title}<small>{when}</small></div>
+                    <b className="srow-right">{session.status === 'completed' ? `${session.focusMinutesEarned} min` : 'Abandoned · 0 min'}</b>
+                  </div>
+                );
+              })
+            )}
           </div>
 
-          <div className="panel focus-safety">
-            <ShieldCheck size={18} />
-            <strong>Safety stays in your hands.</strong>
-            <p>Calls and emergency access remain available. No forced uninstall lock or irreversible restriction will be implemented.</p>
+          <div className="acard">
+            <p className="mut" style={{ margin: 0 }}>
+              Sach ye hai: web wala version doosri apps ko block nahi kar sakta — isliye yahan
+              koi nakli "app block" button nahi hai. Asal app-blocking sirf Android version me
+              hoga, wo bhi tumhari marzi se.
+            </p>
           </div>
-
-          <div className="implementation-note">
-            <InfoIcon />
-            <span>A website cannot block other Android apps. Real restrictions require native Android APIs, permissions, device testing and Play policy review.</span>
-          </div>
-        </aside>
-      </div>
-    </>
+        </>
+      )}
+    </section>
   );
-}
-
-function InfoIcon() {
-  return <span className="info-icon">i</span>;
 }
 
 function Analytics({
@@ -3616,6 +3673,10 @@ function Analytics({
   challengeHistory,
   focusHistory,
   onNotify,
+  salahToday,
+  sleepStartTime,
+  sleepEndTime,
+  onBack,
 }: {
   stats: StudyStats | null;
   guestMode: boolean;
@@ -3625,6 +3686,10 @@ function Analytics({
   /** Finished/abandoned focus sessions, loaded at app level (latest 20). */
   focusHistory: PomodoroSession[];
   onNotify: (message: string) => void;
+  salahToday: Record<string, { status: string }>;
+  sleepStartTime: string;
+  sleepEndTime: string;
+  onBack: () => void;
 }) {
   // P5: the "Activity history" pill used to be a dead <div>. It is now a
   // real button that opens the history panel below, built only from real
@@ -3634,6 +3699,14 @@ function Analytics({
   const [pointsHistoryTotal, setPointsHistoryTotal] = useState(0);
   const [pointsHistoryLoading, setPointsHistoryLoading] = useState(false);
   const [pointsHistoryError, setPointsHistoryError] = useState('');
+  // Preview #17 period switcher. Din / Hafta / Mahina are each built
+  // from real per-period data — never the same numbers relabelled.
+  // Din: today's completed focus sessions, grouped into 4 time buckets.
+  // Hafta: this week's completed focus sessions, grouped by weekday.
+  // Mahina: this month's completed focus sessions, grouped by week of
+  // month — from the latest 20 loaded sessions only, so the month total
+  // is labelled as a lower bound, never as the full month.
+  const [period, setPeriod] = useState<'day' | 'week' | 'month'>('week');
 
   async function toggleHistory() {
     const next = !showHistory;
@@ -3736,15 +3809,32 @@ function Analytics({
     </section>
   );
 
+  const apphead = (
+    <div className="apphead">
+      <button type="button" className="aback" onClick={onBack} aria-label="Wapas jao">
+        <ChevronLeft size={20} />
+      </button>
+      <div>
+        <h4>Analytics</h4>
+        <div className="asub">Tumhari mehnat, gin kar</div>
+      </div>
+      <div className="aright">
+        <button
+          type="button"
+          className="sbtn gh"
+          aria-expanded={showHistory}
+          onClick={() => void toggleHistory()}
+        >
+          <CalendarDays size={13} /> Activity history
+        </button>
+      </div>
+    </div>
+  );
+
   if (guestMode) {
     return (
-      <>
-        <PageHeading
-          eyebrow="DISCIPLINE · REFLECTION"
-          title="Notice the progress you're making."
-          text="Look at patterns, celebrate consistency and find where a small adjustment could help."
-          action={<button type="button" className="date-chip" onClick={() => onNotify('Sign in to see your activity history.')}><CalendarDays size={15} /> Activity history</button>}
-        />
+      <section className="analytics-screen">
+        {apphead}
         <section className="panel" style={{ padding: 28 }}>
           <span className="eyebrow">SIGN IN TO TRACK</span>
           <h3>Your progress lives in your account</h3>
@@ -3752,24 +3842,19 @@ function Analytics({
             Sign in to see analytics from your saved study activity. Nothing is tracked in guest preview.
           </p>
         </section>
-      </>
+      </section>
     );
   }
 
   if (!stats) {
     return (
-      <>
-        <PageHeading
-          eyebrow="DISCIPLINE · REFLECTION"
-          title="Notice the progress you're making."
-          text="Look at patterns, celebrate consistency and find where a small adjustment could help."
-          action={<button type="button" className="date-chip" onClick={() => onNotify('Your progress is still loading…')}><CalendarDays size={15} /> Activity history</button>}
-        />
+      <section className="analytics-screen">
+        {apphead}
         <section className="panel" style={{ padding: 28 }}>
           <span className="eyebrow">PRIVATE ACTIVITY DATA</span>
           <h3>Loading your progress…</h3>
         </section>
-      </>
+      </section>
     );
   }
 
@@ -3784,25 +3869,86 @@ function Analytics({
 
   const completedChallenges = challengeHistory.filter((c) => c.status === 'completed').length;
 
+  // ---- Real per-period focus bars (completed focus sessions only) ----
+  function formatHours(totalMinutes: number): string {
+    if (totalMinutes < 60) return `${totalMinutes} min`;
+    return `${parseFloat((totalMinutes / 60).toFixed(1))} gh`;
+  }
+
+  const completedFocus = focusHistory.filter((s) => s.mode === 'focus' && s.status === 'completed');
+  const now = new Date();
+  const todayKeyStr = todayKey();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  monday.setHours(0, 0, 0, 0);
+
+  type Bar = { label: string; value: number | null; future: boolean };
+  let bars: Bar[] = [];
+  let barsTitle = '';
+  if (period === 'day') {
+    const buckets = [
+      { label: 'Subah', test: (h: number) => h >= 5 && h < 11 },
+      { label: 'Dopeher', test: (h: number) => h >= 11 && h < 16 },
+      { label: 'Shaam', test: (h: number) => h >= 16 && h < 21 },
+      { label: 'Raat', test: (h: number) => h >= 21 || h < 5 },
+    ];
+    bars = buckets.map((bucket) => ({
+      label: bucket.label,
+      value: completedFocus
+        .filter((s) => (s.completedAt ?? s.startedAt).slice(0, 10) === todayKeyStr)
+        .filter((s) => bucket.test(new Date(s.completedAt ?? s.startedAt).getHours()))
+        .reduce((sum, s) => sum + s.focusMinutesEarned, 0),
+      future: false,
+    }));
+    barsTitle = 'Focus — aaj (minute)';
+  } else if (period === 'week') {
+    const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    bars = labels.map((label, index) => {
+      const day = new Date(monday);
+      day.setDate(monday.getDate() + index);
+      const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+      return {
+        label,
+        value: completedFocus
+          .filter((s) => (s.completedAt ?? s.startedAt).slice(0, 10) === key)
+          .reduce((sum, s) => sum + s.focusMinutesEarned, 0),
+        future: day > now,
+      };
+    });
+    barsTitle = 'Padhai — is hafte (ghante)';
+  } else {
+    const buckets = [
+      { label: 'Week 1', test: (d: number) => d >= 1 && d <= 7 },
+      { label: 'Week 2', test: (d: number) => d >= 8 && d <= 14 },
+      { label: 'Week 3', test: (d: number) => d >= 15 && d <= 21 },
+      { label: 'Week 4', test: (d: number) => d >= 22 && d <= 28 },
+      { label: 'Week 5', test: (d: number) => d >= 29 },
+    ];
+    const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    bars = buckets.map((bucket) => ({
+      label: bucket.label,
+      value: completedFocus
+        .filter((s) => (s.completedAt ?? s.startedAt).startsWith(monthPrefix))
+        .filter((s) => bucket.test(new Date(s.completedAt ?? s.startedAt).getDate()))
+        .reduce((sum, s) => sum + s.focusMinutesEarned, 0),
+      future: false,
+    }));
+    barsTitle = 'Focus — is mahine (ghante)';
+  }
+  const barsTotal = bars.reduce((sum, bar) => sum + (bar.value ?? 0), 0);
+  const barsMax = Math.max(0, ...bars.map((bar) => bar.value ?? 0));
+  const bestBar = barsTotal > 0 ? bars.reduce((best, bar) => (bar.value ?? 0) > (best.value ?? 0) ? bar : best, bars[0]) : null;
+
+  const prayedToday = prayerNames.filter((name) => salahToday[name]?.status === 'prayed').length;
+  const firstChallenge = activeChallenges[0] ?? null;
+  const challengePct = firstChallenge && firstChallenge.totalDays > 0
+    ? Math.round((firstChallenge.completedDays / firstChallenge.totalDays) * 100)
+    : null;
+  const sleepLabel = sleepDurationLabel(sleepStartTime, sleepEndTime);
+
   return (
-    <>
-      <PageHeading
-        eyebrow="DISCIPLINE · REFLECTION"
-        title="Notice the progress you're making."
-        text="Look at patterns, celebrate consistency and find where a small adjustment could help."
-        action={(
-          <button
-            type="button"
-            className="date-chip"
-            aria-expanded={showHistory}
-            aria-label="Activity history"
-            onClick={() => void toggleHistory()}
-            style={showHistory ? { borderColor: 'var(--teal-2)', color: 'var(--teal-2)', background: 'rgba(15,118,110,.06)' } : undefined}
-          >
-            <CalendarDays size={15} /> Activity history
-          </button>
-        )}
-      />
+    <section className="analytics-screen">
+      {apphead}
       {showHistory && historyPanel}
       {!hasActivity ? (
         <section className="panel" style={{ padding: 28 }}>
@@ -3815,28 +3961,62 @@ function Analytics({
         </section>
       ) : (
         <>
-          <div className="analytics-grid">
-            <div className="panel metric-card">
-              <span className="eyebrow">FOCUSED TODAY</span>
-              <strong>{stats.todayFocusMinutes}<small> min</small></strong>
-              <span className="metric-trend"><Clock3 size={13} /> From finished focus sessions</span>
-            </div>
-            <div className="panel metric-card">
-              <span className="eyebrow">FOCUSED THIS WEEK</span>
-              <strong>{stats.weekFocusMinutes}<small> min</small></strong>
-              <span className="metric-trend"><Clock3 size={13} /> Last 7 days, finished sessions only</span>
-            </div>
-            <div className="panel metric-card">
-              <span className="eyebrow">TASKS COMPLETED TODAY</span>
-              <strong>{stats.tasksCompletedToday}</strong>
-              <span className="metric-trend"><Check size={13} /> From your saved tasks</span>
-            </div>
-            <div className="panel metric-card">
-              <span className="eyebrow">DAY STREAK</span>
-              <strong>{stats.streak}<small> day{stats.streak === 1 ? '' : 's'}</small></strong>
-              <span className="metric-trend"><Flame size={13} /> A day counts when a focus session finishes or a task is completed</span>
-            </div>
+          <div className="analytics-period">
+            {([
+              ['day', 'Din'],
+              ['week', 'Hafta'],
+              ['month', 'Mahina'],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={`sbtn ${period === value ? '' : 'gh'}`}
+                aria-pressed={period === value}
+                onClick={() => setPeriod(value)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
+
+          <div className="acard-l">
+            <h5>{barsTitle}</h5>
+            {barsTotal === 0 ? (
+              <p className="onboarding-help">
+                Is {period === 'day' ? 'din' : period === 'week' ? 'hafte' : 'mahine'} ka koi finished
+                focus session nahi hai — graph khali hai, andaza nahi lagaya gaya.
+              </p>
+            ) : (
+              <>
+                <div className="wbars">
+                  {bars.map((bar) => (
+                    <div className="wb" key={bar.label}>
+                      <em>{bar.future || bar.value === null ? '—' : period === 'day' ? `${bar.value}m` : formatHours(bar.value)}</em>
+                      <i
+                        className={bar.future ? 'wb-future' : bar.value === barsMax && barsMax > 0 ? 'wb-best' : ''}
+                        style={{ height: `${bar.future || barsMax === 0 ? 6 : Math.max(8, Math.round(((bar.value ?? 0) / barsMax) * 100))}%` }}
+                      />
+                      <span>{bar.label}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="mut" style={{ margin: '8px 0 0' }}>
+                  Kul: <b>{formatHours(barsTotal)}</b>
+                  {bestBar ? ` · sabse achha: ${bestBar.label}` : ''}
+                  {period === 'month' ? ' · sirf pichhle 20 loaded sessions se (kam se kam)' : ''}
+                </p>
+              </>
+            )}
+          </div>
+
+          <div className="acard-l analytics-summary">
+            <div className="setrow"><div>🕌 Namaz<small>Aaj {prayedToday} / 5 padhi</small></div><b>{prayedToday}/5</b></div>
+            <div className="setrow"><div>📚 Padhai<small>Aaj {stats.tasksCompletedToday} task poore · {formatHours(stats.todayFocusMinutes)} focus</small></div><b>{formatHours(stats.todayFocusMinutes)}</b></div>
+            <div className="setrow"><div>🎯 Focus<small>Is hafte {completedFocus.length} finished sessions (loaded)</small></div><b>{formatHours(stats.weekFocusMinutes)}</b></div>
+            <div className="setrow"><div>🌙 Neend ka schedule<small>{formatTime12h(sleepStartTime)} – {formatTime12h(sleepEndTime)}{sleepLabel ? ` · ${sleepLabel}` : ''} · schedule, asal neend nahi</small></div><b>Schedule</b></div>
+            <div className="setrow"><div>🏆 Challenge<small>{firstChallenge ? `${firstChallenge.challenge.title} · Day ${firstChallenge.currentDay}` : 'Koi challenge active nahi'}</small></div><b>{challengePct === null ? '—' : `${challengePct}%`}</b></div>
+          </div>
+
           <section className="panel progress-breakdown" style={{ marginTop: 14 }}>
             <SectionTitle title="Subjects this week" />
             {stats.subjectBreakdown.length === 0 ? (
@@ -3891,11 +4071,12 @@ function Analytics({
           <p className="analytics-footnote">
             Study analytics are calculated only from your saved tasks and finished focus sessions.
             Challenge and points analytics come only from your saved activity and server-side awards.
-            Salah and habit analytics are not connected yet — no scores are invented for them.
+            Salah analytics here show only today's count — weekly Salah reports are not connected yet,
+            so no weekly percentage is invented.
           </p>
         </>
       )}
-    </>
+    </section>
   );
 }
 
@@ -3912,6 +4093,9 @@ function Profile({
   onNavigate,
   language,
   onLanguageChange,
+  rewards,
+  studyStats,
+  profile,
 }: {
   onNotify: (message: string) => void;
   user: AuthUser | null;
@@ -3928,6 +4112,9 @@ function Profile({
   onNavigate: (page: Page) => void;
   language: AppLanguage;
   onLanguageChange: (language: AppLanguage) => void;
+  rewards: RewardsSummary | null;
+  studyStats: StudyStats | null;
+  profile: UserProfile;
 }) {
   const displayName = user?.name || (guestMode ? 'Guest preview' : 'Your account');
   const initials = displayName
@@ -3938,114 +4125,123 @@ function Profile({
     .join('') || 'AH';
   const [showNotifSettings, setShowNotifSettings] = useState(false);
   const [showSecurity, setShowSecurity] = useState(false);
+  const [deleteHint, setDeleteHint] = useState(false);
+
+  // Preview #19 college line, from the real saved profile.
+  const collegeLine = [profile.collegeName, profile.course, profile.semester ? `Sem ${profile.semester}` : '']
+    .filter(Boolean)
+    .join(' · ') || (user?.email ?? 'Preview without an account');
+  const streak = studyStats?.streak ?? 0;
+
+  // Settings rows in EXACTLY the preview's order. Sleep schedule is
+  // kept as an extra row after Notifications (it existed before and
+  // now points at the standalone Sleep screen, not Focus).
+  const rows: { icon: string; title: string; detail: string; onClick: () => void; disabled?: boolean }[] = [
+    { icon: '✏️', title: 'Apni details badlo', detail: 'Naam, course, college — onboarding wali details', onClick: () => onEditProfile(0), disabled: guestMode },
+    { icon: '🕌', title: 'Namaz settings', detail: 'City, tareeqa (Hanafi), apne set time', onClick: () => onEditProfile(4), disabled: guestMode },
+    { icon: '🔔', title: 'Notifications', detail: 'Categories aur quiet hours', onClick: () => setShowNotifSettings((open) => !open) },
+    { icon: '🔑', title: 'Password badlo', detail: 'Email verification ke saath', onClick: () => setShowSecurity((open) => !open), disabled: guestMode },
+    { icon: '🌙', title: 'Sleep schedule', detail: 'Neend ka time aur sleep focus', onClick: () => onNavigate('sleep') },
+    { icon: '💬', title: 'Feedback / Shikayat', detail: 'Koi dikkat ho to seedha likho', onClick: onOpenFeedback },
+    { icon: '↩', title: 'Onboarding dobara', detail: 'Details wapas step-by-step bharo', onClick: () => onEditProfile(0), disabled: guestMode },
+  ];
 
   return (
-    <>
-      <PageHeading
-        eyebrow="ACCOUNT · PREFERENCES"
-        title="Your space, your settings."
-        text="Manage how AHDORA fits around your routines and personal preferences."
-      />
-
-      <div className="profile-layout">
-        <section className="panel profile-card">
-          <div className="profile-cover" />
-          <div className="profile-details">
-            <div className="profile-avatar-large">{initials}</div>
-            <h2>{displayName}</h2>
-            <p>{user?.email || 'Preview without an account'}</p>
-            <span className="account-status">
-              <span />
-              {user ? 'Authenticated account · Session active' : 'Guest preview · Not signed in'}
-            </span>
-            {onboardingIncomplete && !guestMode && (
-              <button className="primary-button" onClick={() => onEditProfile(onboardingResumeStep)}>
-                <UserRound size={15} /> Profile poora karo
-              </button>
-            )}
-            <button className="outline-button" onClick={() => onEditProfile(0)} disabled={guestMode}>
-              <UserRound size={15} /> Edit profile
-            </button>
-            {guestMode && <p className="onboarding-help">Sign in to edit your profile details.</p>}
-            <button className="outline-button" onClick={onLogout}>
-              <LogOut size={15} /> {user ? 'Log out' : 'Exit preview'}
-            </button>
-          </div>
-        </section>
-
-        <section className="panel settings-card">
-          <SectionTitle title="Preferences" />
-          <div className="setting-row-static">
-            <div className="setting-icon"><Languages size={17} /></div>
-            <div><strong>Language · Bhasha</strong><span>Login aur onboarding ki bhasha</span></div>
-            <div className="lang-switch" role="group" aria-label="Language">
-              <button type="button" className={language === 'en' ? 'selected' : ''} onClick={() => onLanguageChange('en')}>English</button>
-              <button type="button" className={language === 'hi' ? 'selected' : ''} onClick={() => onLanguageChange('hi')}>Hinglish</button>
-            </div>
-          </div>
-          <SettingRow
-            icon={Bell}
-            title="Notifications"
-            detail="Categories, quiet hours and live alerts"
-            onClick={() => setShowNotifSettings((open) => !open)}
-          />
-          {showNotifSettings && !guestMode && <NotificationSettingsPanel onNotify={onNotify} />}
-          {showNotifSettings && guestMode && (
-            <p className="onboarding-help">Sign in to change notification preferences.</p>
-          )}
-          <SettingRow
-            icon={Compass}
-            title="Prayer calculation"
-            detail="Location, method and Asr school"
-            onClick={() => onEditProfile(4)}
-          />
-          <SettingRow
-            icon={Moon}
-            title="Sleep schedule"
-            detail="Your focus window and allowed apps"
-            onClick={() => onNavigate('focus')}
-          />
-          <SettingRow
-            icon={Shield}
-            title="Privacy & security"
-            detail="Password, sessions, data export and account deletion"
-            onClick={() => setShowSecurity((open) => !open)}
-          />
-          {showSecurity && !guestMode && user && (
-            <SecuritySettings onNotify={onNotify} emailVerified={user.emailVerified} onAccountDeleted={onAccountDeleted} />
-          )}
-          {showSecurity && guestMode && (
-            <p className="onboarding-help">Sign in to change security settings.</p>
-          )}
-          <SettingRow
-            icon={CircleHelp}
-            title="Help & support"
-            detail="Get help or share feedback"
-            onClick={onOpenFeedback}
-          />
-        </section>
+    <section className="profile-screen">
+      <div className="apphead">
+        <button type="button" className="aback" onClick={() => onNavigate('home')} aria-label="Wapas jao">
+          <ChevronLeft size={20} />
+        </button>
+        <div>
+          <h4>Profile</h4>
+          <div className="asub">Tumhara account, tumhare control me</div>
+        </div>
       </div>
-    </>
-  );
-}
 
-function SettingRow({
-  icon: Icon,
-  title,
-  detail,
-  onClick,
-}: {
-  icon: IconType;
-  title: string;
-  detail: string;
-  onClick: () => void;
-}) {
-  return (
-    <button className="setting-row" onClick={onClick}>
-      <div className="setting-icon"><Icon size={17} /></div>
-      <div><strong>{title}</strong><span>{detail}</span></div>
-      <ChevronRight size={17} />
-    </button>
+      <div className="profile-avatar">{initials}</div>
+      <div className="profile-name">{displayName}</div>
+      <div className="mut profile-college">{collegeLine}</div>
+      <div className="profile-status">
+        {user ? 'Authenticated account · Session active' : 'Guest preview · Not signed in'}
+      </div>
+
+      <div className="kpis">
+        <div className="kpi"><b>{rewards?.total ?? 0}</b><span>POINTS</span></div>
+        <div className="kpi"><b>{streak} din</b><span>STREAK</span></div>
+        <div className="kpi"><b>{rewards?.badges.length ?? 0}</b><span>BADGES</span></div>
+      </div>
+
+      {onboardingIncomplete && !guestMode && (
+        <button type="button" className="sbtn pk profile-complete-btn" onClick={() => onEditProfile(onboardingResumeStep)}>
+          <UserRound size={15} /> Profile poora karo
+        </button>
+      )}
+
+      <div className="acard">
+        {rows.map((row) => (
+          <button
+            key={row.title}
+            type="button"
+            className="setrow"
+            disabled={row.disabled}
+            onClick={row.onClick}
+          >
+            <div>{row.icon} {row.title}<small>{row.detail}</small></div>
+            <span className="chev">›</span>
+          </button>
+        ))}
+        <div className="setrow setrow-static">
+          <div>🌐 Language · Bhasha<small>Login aur onboarding ki bhasha</small></div>
+          <div className="lang-switch" role="group" aria-label="Language">
+            <button type="button" className={language === 'en' ? 'selected' : ''} onClick={() => onLanguageChange('en')}>English</button>
+            <button type="button" className={language === 'hi' ? 'selected' : ''} onClick={() => onLanguageChange('hi')}>Hinglish</button>
+          </div>
+        </div>
+        {showNotifSettings && (
+          <div className="profile-panel">
+            {guestMode ? (
+              <p className="onboarding-help">Sign in to change notification preferences.</p>
+            ) : (
+              <NotificationSettingsPanel onNotify={onNotify} />
+            )}
+          </div>
+        )}
+        {showSecurity && (
+          <div className="profile-panel">
+            {guestMode || !user ? (
+              <p className="onboarding-help">Sign in to change security settings.</p>
+            ) : (
+              <SecuritySettings onNotify={onNotify} emailVerified={user.emailVerified} onAccountDeleted={onAccountDeleted} />
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="acard">
+        <button type="button" className="setrow" onClick={onLogout}>
+          <div>🚪 Logout</div>
+          <span className="chev">›</span>
+        </button>
+        <button
+          type="button"
+          className="setrow danger"
+          disabled={guestMode}
+          onClick={() => { setShowSecurity(true); setDeleteHint(true); }}
+        >
+          <div>🗑 Account delete karo<small>Saara data hamesha ke liye mit jayega</small></div>
+          <span className="chev">›</span>
+        </button>
+        {deleteHint && !guestMode && (
+          <p className="onboarding-help profile-delete-hint">
+            Account delete karne ke liye upar khule Security panel me password daalo aur confirm
+            karo — wahi purana confirm flow hai, yahan se seedha delete nahi hota.
+          </p>
+        )}
+        {guestMode && (
+          <p className="onboarding-help">Guest preview me account delete nahi hota — sign in karo.</p>
+        )}
+      </div>
+    </section>
   );
 }
 

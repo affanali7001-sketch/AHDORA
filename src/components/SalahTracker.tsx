@@ -272,6 +272,19 @@ export default function SalahTracker({ onNotify }: Props) {
     'en-IN', { month: 'long', year: 'numeric' },
   );
 
+  // Month-summary card (preview #6 "Is mahine ka haal"): on-time %
+  // is prayed-on-time out of all recorded prayers; qaza counts as
+  // recorded but not on time. Nothing is shown until a prayer is
+  // actually recorded — never a fake %.
+  const recorded = totals.prayed + totals.qaza + totals.missed;
+  const onTimePct = recorded > 0 ? Math.round((totals.prayed / recorded) * 100) : null;
+  const monthShort = new Date(year, monthNumber - 1, 1).toLocaleDateString(
+    'en-IN', { month: 'short' },
+  );
+  const summaryRange = month === today.slice(0, 7)
+    ? `1 – ${Number(today.slice(8, 10))} ${monthShort}`
+    : `1 – ${daysInMonth} ${monthShort}`;
+
   function moveMonth(direction: number) {
     const next = new Date(year, monthNumber - 1 + direction, 1);
     const nextMonth = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`;
@@ -280,227 +293,241 @@ export default function SalahTracker({ onNotify }: Props) {
   }
 
   return (
-    <section className="panel salah-tracker">
-      <div className="salah-head">
-        <div>
-          <span className="eyebrow">PRIVATE WORSHIP RECORD</span>
-          <h3>Your Salah calendar</h3>
-          <p>Track each prayer honestly. Only your account can access these records.</p>
-        </div>
-        <span className="salah-sync account"><ShieldCheck size={13} /> {monthTitle} · this month</span>
-      </div>
-
-      <div className="salah-summary">
-        {(['prayed', 'qaza', 'missed', 'pending'] as Status[]).map(status => (
-          <div className="salah-stat" key={status}>
-            <strong>{totals[status]}</strong>
-            <span>{status[0].toUpperCase() + status.slice(1)}</span>
-          </div>
-        ))}
+    <section className="sc-salah">
+      <div className="sc-head">
+        <span className="eyebrow">PRIVATE WORSHIP RECORD</span>
+        <h3>Your Salah calendar</h3>
+        <p>Track each prayer honestly. Only your account can access these records.</p>
+        <span className="salah-sync"><ShieldCheck size={13} /> {monthTitle} · this month</span>
       </div>
 
       {error && <p className="salah-error">{error}</p>}
       {loading && <p className="salah-loading">Loading your saved prayer records...</p>}
 
-      <div className="salah-layout">
-        <div className="salah-calendar-wrap">
-          <div className="salah-month">
-            <button onClick={() => moveMonth(-1)} aria-label="Previous month">
-              <ChevronLeft size={17} />
-            </button>
-            <strong>{monthTitle}</strong>
-            <button
-              onClick={() => moveMonth(1)}
-              disabled={`${year}-${String(monthNumber).padStart(2, '0')}` >= today.slice(0, 7)}
-              aria-label="Next month"
-            >
-              <ChevronRight size={17} />
-            </button>
-          </div>
-
-          <div className="salah-calendar">
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-              <span className="weekday" key={day}>{day}</span>
-            ))}
-
-            {calendarCells.map((day, index) => {
-              if (!day) return <span key={`blank-${index}`} />;
-
-              const key = `${month}-${String(day).padStart(2, '0')}`;
-              const record = records[key] ?? emptyRecord;
-              const values = prayerNames.map(name => record[name].status);
-              const allPrayed = values.every(value => value === 'prayed');
-              const hasMissed = values.includes('missed');
-              const hasQaza = values.includes('qaza');
-              const hasPrayed = values.includes('prayed');
-
-              return (
-                <button
-                  key={key}
-                  className={`salah-day ${selectedDate === key ? 'selected' : ''} ${key === today ? 'today' : ''}`}
-                  onClick={() => setSelectedDate(key)}
-                  disabled={key > today}
-                  aria-label={`${key}: ${values.join(', ')}`}
-                >
-                  <b>{day}</b>
-                  <i className={
-                    hasMissed ? 'has-missed'
-                    : hasQaza ? 'has-qaza'
-                    : allPrayed ? 'all-prayed'
-                    : hasPrayed ? 'some-prayed'
-                    : ''
-                  } />
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="salah-legend">
-            <span><i className="all-prayed" /> Prayed</span>
-            <span><i className="has-qaza" /> Qaza</span>
-            <span><i className="has-missed" /> Missed</span>
-          </div>
+      <div className="acard-l">
+        <div className="salah-month">
+          <button className="sbtn gh" onClick={() => moveMonth(-1)} aria-label="Previous month">
+            <ChevronLeft size={17} />
+          </button>
+          <strong>{monthTitle}</strong>
+          <button
+            className="sbtn gh"
+            onClick={() => moveMonth(1)}
+            disabled={`${year}-${String(monthNumber).padStart(2, '0')}` >= today.slice(0, 7)}
+            aria-label="Next month"
+          >
+            <ChevronRight size={17} />
+          </button>
         </div>
 
-        <div className="salah-day-detail">
-          <div className="salah-detail-title">
-            <div>
-              <span className="eyebrow">SELECTED DATE</span>
-              <h4>{new Date(`${selectedDate}T12:00:00`).toLocaleDateString(
-                'en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' },
-              )}</h4>
-            </div>
-            <span>{prayerNames.filter(name => selected[name].status === 'prayed').length}/5 prayed</span>
-          </div>
-
-          {prayerNames.map(prayer => (
-            <div className="salah-prayer-row" key={prayer}>
-              <div>
-                <strong>{prayer}</strong>
-                {selectedDate === today && times && (
-                  <small>
-                    {times.perPrayer[prayer].source === 'unavailable'
-                      ? 'Time set nahi hai — neeche manual time set karo'
-                      : (
-                        <>
-                          {times.perPrayer[prayer].time}
-                          {' · '}
-                          {times.perPrayer[prayer].source === 'manual' ? 'Manual time' : 'Calculated time'}
-                          {times.perPrayer[prayer].deadline && (
-                            <>
-                              {' · deadline '}
-                              {times.perPrayer[prayer].deadline}
-                            </>
-                          )}
-                        </>
-                      )}
-                  </small>
-                )}
-                <small>{statusLabel(selected[prayer])}</small>
-              </div>
-              <select
-                value={selected[prayer].status}
-                disabled={saving !== null || selectedDate > today || loading}
-                onChange={event => updateStatus(prayer, event.target.value as Status)}
-                aria-label={`${prayer} status`}
-              >
-                <option value="pending">Not recorded</option>
-                <option value="prayed">Prayed on time</option>
-                <option value="qaza">Prayed Qaza</option>
-                <option value="missed">Missed</option>
-              </select>
-            </div>
+        <div className="cal">
+          {['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'].map(day => (
+            <span className="dow" key={day}>{day}</span>
           ))}
 
-          {selectedDate === today && timesNote && (
-            <p className="salah-loading">{timesNote}</p>
-          )}
+          {calendarCells.map((day, index) => {
+            if (!day) return <span key={`blank-${index}`} />;
 
-          <div className="salah-time-editor">
-            <button className="text-button" type="button" onClick={openTimeEditor} disabled={settingsLoading}>
-              {showTimeEditor ? 'Time editor band karo' : 'Apni namaz ka time khud set karo'}
-            </button>
-            {showTimeEditor && (
-              <div>
-                <p className="salah-private-note">
-                  Har namaz ka time khud set kar sakte ho — jo time yahan save karoge,
-                  wahi tracker me aur reminders me use hoga. Khali chhodo to Aladhan ka
-                  calculated time use hoga. Deadline khali ho to agle namaz ka time
-                  deadline hota hai (Isha ke liye 23:59).
-                </p>
-                {settingsLoading && <p className="salah-loading">Prayer settings load ho rahe hain...</p>}
-                {draftSettings && prayerNames.map(prayer => (
-                  <div className="salah-prayer-row" key={`edit-${prayer}`}>
-                    <div>
-                      <strong>{prayer}</strong>
-                      <label className="field-label">
-                        <input
-                          type="checkbox"
-                          checked={draftSettings[prayer].reminder}
-                          onChange={event => setDraftSettings(previous => previous && ({
-                            ...previous,
-                            [prayer]: { ...previous[prayer], reminder: event.target.checked },
-                          }))}
-                        />
-                        {' '}Reminder
-                      </label>
-                    </div>
-                    <div>
-                      <label className="field-label">Time
-                        <input
-                          className="form-input"
-                          type="time"
-                          value={draftSettings[prayer].timeOverride}
-                          onChange={event => setDraftSettings(previous => previous && ({
-                            ...previous,
-                            [prayer]: { ...previous[prayer], timeOverride: event.target.value },
-                          }))}
-                          aria-label={`${prayer} manual time`}
-                        />
-                      </label>
-                      <label className="field-label">Deadline
-                        <input
-                          className="form-input"
-                          type="time"
-                          value={draftSettings[prayer].endTime}
-                          onChange={event => setDraftSettings(previous => previous && ({
-                            ...previous,
-                            [prayer]: { ...previous[prayer], endTime: event.target.value },
-                          }))}
-                          aria-label={`${prayer} deadline`}
-                        />
-                      </label>
-                    </div>
-                  </div>
-                ))}
-                {timesMessage && <p className="salah-loading">{timesMessage}</p>}
-                {draftSettings && (
-                  <div>
-                    <button className="primary-button" type="button" onClick={saveTimes} disabled={savingTimes}>
-                      {savingTimes ? 'Save ho raha hai...' : 'Namaz ke time save karo'}
-                    </button>
-                    {' '}
-                    <button
-                      className="text-button"
-                      type="button"
-                      onClick={() => setDraftSettings(emptyPrayerSettings())}
-                      disabled={savingTimes}
-                    >
-                      Sab calculated time par wapas
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+            const key = `${month}-${String(day).padStart(2, '0')}`;
+            const record = records[key] ?? emptyRecord;
+            const values = prayerNames.map(name => record[name].status);
+            const allPrayed = values.every(value => value === 'prayed');
+            const missedCount = values.filter(value => value === 'missed').length;
+            const qazaCount = values.filter(value => value === 'qaza').length;
+            // Preview legend: teal = sab padhi, peach-deep = kuch
+            // miss / qaza, red = zyada miss (3 ya zyada).
+            const dotClass = allPrayed
+              ? 'dt-teal'
+              : missedCount >= 3
+                ? 'dt-red'
+                : missedCount > 0 || qazaCount > 0
+                  ? 'dt-peach'
+                  : '';
 
-          <p className="salah-private-note">
-            Your worship history is private. A status changes when you select and save it — except a prayer
-            left unrecorded past its deadline plus 5 minutes, which is marked missed automatically and can
-            still be corrected to Qaza afterwards. A Qaza keeps its original miss visible.
-          </p>
+            return (
+              <button
+                key={key}
+                className={`d ${selectedDate === key ? 'selected' : ''} ${key === today ? 'today' : ''} ${key > today ? 'fut' : ''}`}
+                onClick={() => setSelectedDate(key)}
+                disabled={key > today}
+                aria-label={`${key}: ${values.join(', ')}`}
+              >
+                {day}
+                {dotClass && <i className={`dt ${dotClass}`} />}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="legend">
+          <span><i className="lg-teal" /> Sab padhi</span>
+          <span><i className="lg-peach" /> Kuch miss / qaza</span>
+          <span><i className="lg-red" /> Zyada miss</span>
         </div>
       </div>
+
+      <div className="acard-l">
+        <h5>Is mahine ka haal ({summaryRange})</h5>
+        {onTimePct === null ? (
+          <p className="mut">Abhi is mahine ka koi record nahi hai — kisi din par tap karke status mark karo.</p>
+        ) : (
+          <>
+            <div className="statrow">Waqt par padhi <span>{onTimePct}%</span></div>
+            <div className="prog"><i style={{ width: `${onTimePct}%` }} /></div>
+          </>
+        )}
+        <div className="kpis">
+          <div className="kpi"><b>{recorded}</b><span>KUL NAMAZ</span></div>
+          <div className="kpi"><b className="kpi-red">{totals.missed}</b><span>MISS</span></div>
+          <div className="kpi"><b>{totals.qaza}</b><span>QAZA PADHI</span></div>
+        </div>
+        <p className="mut">Kisi din par tap karo — us din ki har namaz ka haal khul jayega.</p>
+      </div>
+
+      <div className="acard-l">
+        <div className="salah-detail-title">
+          <div>
+            <span className="eyebrow">SELECTED DATE</span>
+            <h4>{new Date(`${selectedDate}T12:00:00`).toLocaleDateString(
+              'en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' },
+            )}</h4>
+          </div>
+          <span>{prayerNames.filter(name => selected[name].status === 'prayed').length}/5 prayed</span>
+        </div>
+
+        {prayerNames.map(prayer => (
+          <div className="salah-prayer-row" key={prayer}>
+            <div>
+              <strong>{prayer}</strong>
+              {selectedDate === today && times && (
+                <small>
+                  {times.perPrayer[prayer].source === 'unavailable'
+                    ? 'Time set nahi hai — neeche manual time set karo'
+                    : (
+                      <>
+                        {times.perPrayer[prayer].time}
+                        {' · '}
+                        {times.perPrayer[prayer].source === 'manual' ? 'Manual time' : 'Calculated time'}
+                        {times.perPrayer[prayer].deadline && (
+                          <>
+                            {' · deadline '}
+                            {times.perPrayer[prayer].deadline}
+                          </>
+                        )}
+                      </>
+                    )}
+                </small>
+              )}
+              <small>{statusLabel(selected[prayer])}</small>
+            </div>
+            <select
+              className="form-input"
+              value={selected[prayer].status}
+              disabled={saving !== null || selectedDate > today || loading}
+              onChange={event => updateStatus(prayer, event.target.value as Status)}
+              aria-label={`${prayer} status`}
+            >
+              <option value="pending">Not recorded</option>
+              <option value="prayed">Prayed on time</option>
+              <option value="qaza">Prayed Qaza</option>
+              <option value="missed">Missed</option>
+            </select>
+          </div>
+        ))}
+
+        {selectedDate === today && timesNote && (
+          <p className="salah-loading">{timesNote}</p>
+        )}
+
+        <div className="salah-time-editor">
+          <button className="text-button" type="button" onClick={openTimeEditor} disabled={settingsLoading}>
+            {showTimeEditor ? 'Time editor band karo' : 'Apni namaz ka time khud set karo'}
+          </button>
+          {showTimeEditor && (
+            <div>
+              <p className="salah-private-note">
+                Har namaz ka time khud set kar sakte ho — jo time yahan save karoge,
+                wahi tracker me aur reminders me use hoga. Khali chhodo to Aladhan ka
+                calculated time use hoga. Deadline khali ho to agle namaz ka time
+                deadline hota hai (Isha ke liye 23:59).
+              </p>
+              {settingsLoading && <p className="salah-loading">Prayer settings load ho rahe hain...</p>}
+              {draftSettings && prayerNames.map(prayer => (
+                <div className="salah-prayer-row" key={`edit-${prayer}`}>
+                  <div>
+                    <strong>{prayer}</strong>
+                    <label className="field-label">
+                      <input
+                        type="checkbox"
+                        checked={draftSettings[prayer].reminder}
+                        onChange={event => setDraftSettings(previous => previous && ({
+                          ...previous,
+                          [prayer]: { ...previous[prayer], reminder: event.target.checked },
+                        }))}
+                      />
+                      {' '}Reminder
+                    </label>
+                  </div>
+                  <div>
+                    <label className="field-label">Time
+                      <input
+                        className="form-input"
+                        type="time"
+                        value={draftSettings[prayer].timeOverride}
+                        onChange={event => setDraftSettings(previous => previous && ({
+                          ...previous,
+                          [prayer]: { ...previous[prayer], timeOverride: event.target.value },
+                        }))}
+                        aria-label={`${prayer} manual time`}
+                      />
+                    </label>
+                    <label className="field-label">Deadline
+                      <input
+                        className="form-input"
+                        type="time"
+                        value={draftSettings[prayer].endTime}
+                        onChange={event => setDraftSettings(previous => previous && ({
+                          ...previous,
+                          [prayer]: { ...previous[prayer], endTime: event.target.value },
+                        }))}
+                        aria-label={`${prayer} deadline`}
+                      />
+                    </label>
+                  </div>
+                </div>
+              ))}
+              {timesMessage && <p className="salah-loading">{timesMessage}</p>}
+              {draftSettings && (
+                <div>
+                  <button className="primary-button" type="button" onClick={saveTimes} disabled={savingTimes}>
+                    {savingTimes ? 'Save ho raha hai...' : 'Namaz ke time save karo'}
+                  </button>
+                  {' '}
+                  <button
+                    className="text-button"
+                    type="button"
+                    onClick={() => setDraftSettings(emptyPrayerSettings())}
+                    disabled={savingTimes}
+                  >
+                    Sab calculated time par wapas
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <p className="salah-private-note">
+          Your worship history is private. A status changes when you select and save it — except a prayer
+          left unrecorded past its deadline plus 5 minutes, which is marked missed automatically and can
+          still be corrected to Qaza afterwards. A Qaza keeps its original miss visible.
+        </p>
+      </div>
+
+      <p className="salah-private-note">
+        <CalendarDays size={13} /> Calendar sirf tumhare saved record se banta hai — koi
+        namaz pehle se padhi hui nahi maani jati.
+      </p>
     </section>
   );
 }

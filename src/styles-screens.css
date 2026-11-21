@@ -1,0 +1,1438 @@
+/* ---- Phase 14 component screens (styles-screens.css) ----
+   Layout for the six component-owned screens: Salah calendar,
+   Quran, Duas, Mosque finder, Hijri calendar, Friends.
+   Every rule is scoped under a .sc-* root so nothing here leaks
+   into the shell (App.tsx / styles.css, owned by another agent)
+   or into other screens. Tokens come from styles.css :root
+   (Ice White / Deep Teal / Soft Peach). Palette has no metallic yellow.
+   Preview atoms (.srow, .acard, .partlab, .cal, .hcal, .sbtn,
+   .chiprow, .mchip, .arab, .en-tr, .legend, .prog, .kpi, ...)
+   are ported from ahdora-new-ui-preview.html. */
+
+.sc-quran,
+.sc-duas,
+.sc-mosque,
+.sc-hijri {
+  background: linear-gradient(180deg, #0b3531, #082723 60%, #071f1d);
+  color: #eff8f5;
+  border-radius: 24px;
+  padding: 8px 16px 24px;
+}
+
+.sc-salah,
+.sc-friends {
+  color: var(--ink);
+  padding: 2px 0 28px;
+}
+
+/* ---------- shared screen head ---------- */
+.sc-salah .sc-head,
+.sc-quran .sc-head,
+.sc-duas .sc-head,
+.sc-mosque .sc-head,
+.sc-hijri .sc-head,
+.sc-friends .sc-head {
+  margin: 8px 0 2px;
+}
+
+.sc-salah .sc-head h3,
+.sc-quran .sc-head h3,
+.sc-duas .sc-head h3,
+.sc-mosque .sc-head h3,
+.sc-hijri .sc-head h3,
+.sc-friends .sc-head h3 {
+  margin: 4px 0 2px;
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.sc-salah .sc-head p,
+.sc-friends .sc-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.sc-quran .sc-head p,
+.sc-duas .sc-head p,
+.sc-mosque .sc-head p,
+.sc-hijri .sc-head p {
+  margin: 0;
+  color: #a9cfc4;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.sc-quran .quran-browser-head,
+.sc-mosque .quran-browser-head,
+.sc-hijri .quran-browser-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0 2px;
+}
+
+.sc-quran .quran-browser-head h3,
+.sc-mosque .quran-browser-head h3,
+.sc-hijri .quran-browser-head h3 {
+  margin: 4px 0 2px;
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.sc-quran .quran-browser-head p,
+.sc-mosque .quran-browser-head p,
+.sc-hijri .quran-browser-head p {
+  margin: 0;
+  color: #a9cfc4;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+/* Header icon button (preview .iconbtn) — dark screens */
+.sc-quran .iconbtn,
+.sc-mosque .iconbtn,
+.sc-hijri .iconbtn {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.09);
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #eaf6f2;
+}
+
+/* ---------- cards ---------- */
+.sc-quran .acard,
+.sc-duas .acard,
+.sc-mosque .acard,
+.sc-hijri .acard {
+  margin: 12px 0 0;
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 18px;
+  padding: 14px 15px;
+}
+
+.sc-salah .acard-l,
+.sc-friends .acard-l {
+  margin: 12px 0 0;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 14px 15px;
+}
+
+.sc-quran .acard h5,
+.sc-duas .acard h5,
+.sc-mosque .acard h5,
+.sc-hijri .acard h5,
+.sc-salah .acard-l h5,
+.sc-friends .acard-l h5 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.sc-quran .acard h4,
+.sc-duas .acard h4,
+.sc-mosque .acard h4,
+.sc-hijri .acard h4 {
+  margin: 12px 0 4px;
+  font-size: 14px;
+  font-weight: 800;
+  color: #ffdfc9;
+}
+
+/* ---------- muted text / source lines ---------- */
+.sc-salah .mut,
+.sc-friends .mut {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--muted);
+  margin: 11px 0 0;
+}
+
+.sc-quran .mut,
+.sc-duas .mut,
+.sc-mosque .mut,
+.sc-hijri .mut {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #a9cfc4;
+  margin: 6px 0 0;
+}
+
+.sc-quran .quran-source-line,
+.sc-duas .quran-source-line,
+.sc-mosque .quran-source-line,
+.sc-hijri .quran-source-line,
+.sc-salah .quran-source-line {
+  font-size: 12px;
+  line-height: 1.55;
+  color: #a9cfc4;
+  margin: 8px 0 0;
+}
+
+.sc-salah .quran-source-line {
+  color: var(--muted);
+}
+
+/* ---------- buttons (preview .sbtn) ---------- */
+.sc-salah .sbtn,
+.sc-quran .sbtn,
+.sc-duas .sbtn,
+.sc-mosque .sbtn,
+.sc-hijri .sbtn,
+.sc-friends .sbtn {
+  border: 0;
+  border-radius: 999px;
+  background: var(--teal-600);
+  color: #fff;
+  font-weight: 800;
+  font-size: 12.5px;
+  padding: 8px 14px;
+  cursor: pointer;
+  flex: none;
+}
+
+.sc-salah .sbtn.pk,
+.sc-quran .sbtn.pk,
+.sc-duas .sbtn.pk,
+.sc-mosque .sbtn.pk,
+.sc-hijri .sbtn.pk,
+.sc-friends .sbtn.pk {
+  background: var(--peach);
+  color: #7a4416;
+}
+
+.sc-salah .sbtn.gh,
+.sc-quran .sbtn.gh,
+.sc-duas .sbtn.gh,
+.sc-mosque .sbtn.gh,
+.sc-hijri .sbtn.gh,
+.sc-friends .sbtn.gh {
+  background: transparent;
+  border: 1.5px solid var(--line);
+  color: inherit;
+}
+
+.sc-quran .sbtn.gh,
+.sc-duas .sbtn.gh,
+.sc-mosque .sbtn.gh,
+.sc-hijri .sbtn.gh {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+/* ---------- list rows (preview .srow) ---------- */
+.sc-salah .srow,
+.sc-quran .srow,
+.sc-duas .srow,
+.sc-mosque .srow,
+.sc-hijri .srow,
+.sc-friends .srow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 2px;
+  border: 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.1);
+  background: none;
+  font: inherit;
+  font-size: 14.5px;
+  text-align: left;
+  color: inherit;
+}
+
+.sc-salah .srow,
+.sc-friends .srow {
+  border-bottom-color: var(--line);
+}
+
+.sc-salah .srow:last-child,
+.sc-quran .srow:last-child,
+.sc-duas .srow:last-child,
+.sc-mosque .srow:last-child,
+.sc-hijri .srow:last-child,
+.sc-friends .srow:last-child {
+  border-bottom: 0;
+}
+
+.sc-salah .srow small,
+.sc-quran .srow small,
+.sc-duas .srow small,
+.sc-mosque .srow small,
+.sc-hijri .srow small,
+.sc-friends .srow small {
+  display: block;
+  font-size: 11.5px;
+  opacity: 0.65;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.sc-salah .srow > div,
+.sc-quran .srow > div,
+.sc-duas .srow > div,
+.sc-mosque .srow > div,
+.sc-hijri .srow > div,
+.sc-friends .srow > div {
+  min-width: 0;
+}
+
+.sc-quran .srow .sar,
+.sc-duas .srow .sar,
+.sc-mosque .srow .sar,
+.sc-hijri .srow .sar {
+  margin-left: auto;
+  font-family: "Amiri", serif;
+  font-size: 19px;
+  color: #cdeae1;
+  flex: none;
+}
+
+.sc-salah .snum2,
+.sc-quran .snum2,
+.sc-duas .snum2,
+.sc-mosque .snum2,
+.sc-hijri .snum2,
+.sc-friends .snum2 {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.07);
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 13px;
+  color: #ffdfc9;
+}
+
+.sc-salah .snum2,
+.sc-friends .snum2 {
+  background: var(--teal-100);
+  color: var(--teal-800);
+}
+
+.sc-friends .snum2.av-peach {
+  background: var(--peach);
+  color: #7a4416;
+}
+
+/* ---------- task rows (Friends) ---------- */
+.sc-friends .taskrow {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 2px;
+  border-bottom: 1px dashed var(--line);
+  font-size: 14px;
+}
+
+.sc-friends .taskrow:last-child {
+  border-bottom: 0;
+}
+
+.sc-friends .taskrow small {
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.sc-friends .taskrow > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.sc-friends .friend-actions {
+  display: flex;
+  gap: 7px;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.sc-friends .friend-confirm {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1.5px dashed var(--line);
+  border-radius: 14px;
+  background: var(--ice);
+}
+
+.sc-friends .friend-confirm p {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.sc-friends .friend-confirm .friend-actions {
+  margin-top: 10px;
+}
+
+.sc-friends .friend-confirm select {
+  width: 100%;
+  margin-bottom: 4px;
+}
+
+.sc-friends .consent-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 10px 0 4px;
+}
+
+/* ---------- search bars (preview .searchbar) ---------- */
+.sc-quran .searchbar,
+.sc-duas .searchbar,
+.sc-mosque .searchbar {
+  margin: 12px 0 0;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-size: 14px;
+  color: #a9cfc4;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+
+.sc-quran .searchbar input,
+.sc-duas .searchbar input,
+.sc-mosque .searchbar input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #eff8f5;
+  font-size: 14px;
+  outline: none;
+  padding: 0;
+}
+
+.sc-quran .searchbar input::placeholder,
+.sc-duas .searchbar input::placeholder,
+.sc-mosque .searchbar input::placeholder {
+  color: #8fb5ab;
+}
+
+.sc-quran .searchbar svg,
+.sc-duas .searchbar svg,
+.sc-mosque .searchbar svg {
+  flex: none;
+  color: #8fb5ab;
+}
+
+/* Friends search form (input + button row, light) */
+.sc-friends .friend-search {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.sc-friends .friend-search svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.sc-friends .friend-search input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------- progress bars / KPIs / stat rows ---------- */
+.sc-salah .prog,
+.sc-quran .prog,
+.sc-duas .prog,
+.sc-mosque .prog,
+.sc-hijri .prog,
+.sc-friends .prog {
+  height: 9px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.13);
+  overflow: hidden;
+  margin-top: 7px;
+}
+
+.sc-salah .prog,
+.sc-friends .prog {
+  background: var(--ice2);
+}
+
+.sc-salah .prog i,
+.sc-quran .prog i,
+.sc-duas .prog i,
+.sc-mosque .prog i,
+.sc-hijri .prog i,
+.sc-friends .prog i {
+  display: block;
+  height: 100%;
+  background: var(--teal-500);
+  border-radius: 99px;
+}
+
+.sc-salah .prog.pk i,
+.sc-friends .prog.pk i {
+  background: var(--peach-deep);
+}
+
+.sc-salah .kpis,
+.sc-friends .kpis {
+  display: flex;
+  gap: 9px;
+  margin-top: 13px;
+}
+
+.sc-salah .kpi,
+.sc-friends .kpi {
+  flex: 1;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 11px 6px;
+  text-align: center;
+}
+
+.sc-salah .kpi b,
+.sc-friends .kpi b {
+  display: block;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.sc-salah .kpi span,
+.sc-friends .kpi span {
+  font-size: 11px;
+  opacity: 0.65;
+  font-weight: 700;
+}
+
+.sc-salah .kpi b.kpi-red,
+.sc-friends .kpi b.kpi-red {
+  color: var(--red);
+}
+
+.sc-salah .statrow,
+.sc-friends .statrow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 13.5px;
+  font-weight: 700;
+  margin-top: 11px;
+}
+
+.sc-salah .statrow span,
+.sc-friends .statrow span {
+  opacity: 0.7;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+/* ---------- chips ---------- */
+.sc-quran .chiprow,
+.sc-duas .chiprow,
+.sc-mosque .chiprow,
+.sc-hijri .chiprow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.sc-quran .mchip,
+.sc-duas .mchip,
+.sc-mosque .mchip,
+.sc-hijri .mchip {
+  font-size: 11px;
+  font-weight: 800;
+  background: rgba(255, 223, 201, 0.16);
+  color: #ffdfc9;
+  padding: 5px 9px;
+  border-radius: 999px;
+}
+
+/* ---------- Arabic + English translation lines ---------- */
+.sc-quran .arab,
+.sc-duas .arab {
+  font-family: "Amiri", serif;
+  font-size: 20px;
+  text-align: right;
+  line-height: 1.9;
+  color: #cdeae1;
+  margin: 8px 0 0;
+}
+
+.sc-quran .en-tr,
+.sc-duas .en-tr {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #cdeae1;
+}
+
+.sc-quran .en-tr b,
+.sc-duas .en-tr b {
+  display: inline-block;
+  background: rgba(255, 223, 201, 0.18);
+  color: #ffdfc9;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  margin-right: 6px;
+  letter-spacing: 0.05em;
+}
+
+.sc-duas .sc-meaning {
+  margin: 7px 0 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #eff8f5;
+}
+
+/* ---------- part / category dividers (Duas) ---------- */
+.sc-duas .partlab {
+  margin: 18px 0 0;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #ffdfc9;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sc-duas .partlab::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.sc-duas .catlab {
+  margin: 20px 0 0;
+  font-size: 16.5px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.sc-duas .catlab span {
+  font-size: 12.5px;
+  color: #a9cfc4;
+  font-weight: 700;
+}
+
+/* Dua expand toggle (kept behaviour, preview-styled) */
+.sc-duas .dua-card-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+}
+
+.sc-duas .dua-card-toggle h3 {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.sc-duas .dua-card-toggle p {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: #a9cfc4;
+}
+
+.sc-duas .dua-card-toggle svg {
+  flex: none;
+  color: #8fb5ab;
+}
+
+.sc-duas .dua-content {
+  margin-top: 10px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.12);
+  padding-top: 10px;
+}
+
+.sc-duas .dua-reference {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 12.5px;
+  margin-bottom: 10px;
+}
+
+.sc-duas .dua-reference span {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: #ffdfc9;
+  text-transform: uppercase;
+}
+
+.sc-duas .dua-reference strong {
+  font-size: 13.5px;
+}
+
+.sc-duas .dua-reference small {
+  color: #a9cfc4;
+}
+
+.sc-duas .dua-transliteration {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #a9cfc4;
+  font-style: italic;
+}
+
+.sc-duas .dua-meaning {
+  margin: 7px 0 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #eff8f5;
+}
+
+.sc-duas .dua-disclaimer {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #a9cfc4;
+}
+
+/* Duas topic tabs + toolbar */
+.sc-duas .sc-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.sc-duas .sc-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sc-duas .sc-tab {
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: #cdeae1;
+  border-radius: 999px;
+  padding: 7px 13px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.sc-duas .sc-tab.selected {
+  background: var(--teal-600);
+  border-color: var(--teal-600);
+  color: #fff;
+}
+
+.sc-duas .sc-toolbar .searchbar {
+  margin: 0;
+}
+
+/* ---------- Salah calendar (light, preview #6) ---------- */
+.sc-salah .salah-month {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sc-salah .salah-month strong {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.sc-salah .cal {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.sc-salah .cal .dow {
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+  color: var(--muted);
+  padding: 2px 0;
+}
+
+.sc-salah .cal .d {
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 11px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  background: #f0f5f3;
+  color: var(--ink);
+  padding: 0;
+}
+
+.sc-salah .cal .d .dt {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-top: 3px;
+}
+
+.sc-salah .cal .d .dt-teal {
+  background: var(--teal-500);
+}
+
+.sc-salah .cal .d .dt-peach {
+  background: var(--peach-deep);
+}
+
+.sc-salah .cal .d .dt-red {
+  background: var(--red);
+}
+
+.sc-salah .cal .d.today {
+  outline: 2.5px solid var(--teal-600);
+  outline-offset: -1px;
+  background: #fff;
+}
+
+.sc-salah .cal .d.selected {
+  outline: 2.5px solid var(--peach-deep);
+  outline-offset: -1px;
+}
+
+.sc-salah .cal .d.today.selected {
+  outline: 2.5px solid var(--teal-600);
+  box-shadow: inset 0 0 0 2px var(--peach-deep);
+}
+
+.sc-salah .cal .d.fut {
+  opacity: 0.4;
+}
+
+.sc-salah .legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.sc-salah .legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 5px;
+}
+
+.sc-salah .legend .lg-teal {
+  background: var(--teal-500);
+}
+
+.sc-salah .legend .lg-peach {
+  background: var(--peach-deep);
+}
+
+.sc-salah .legend .lg-red {
+  background: var(--red);
+}
+
+.sc-salah .salah-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--teal-800);
+  background: var(--teal-100);
+  border-radius: 999px;
+  padding: 5px 10px;
+}
+
+/* Day detail + prayer rows + time editor (behaviour unchanged) */
+.sc-salah .salah-detail-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sc-salah .salah-detail-title h4 {
+  margin: 2px 0 0;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.sc-salah .salah-detail-title > span {
+  flex: none;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--teal-800);
+  background: var(--teal-100);
+  border-radius: 999px;
+  padding: 5px 10px;
+}
+
+.sc-salah .salah-prayer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 2px;
+  border-bottom: 1px dashed var(--line);
+  font-size: 14px;
+}
+
+.sc-salah .salah-prayer-row:last-child {
+  border-bottom: 0;
+}
+
+.sc-salah .salah-prayer-row > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sc-salah .salah-prayer-row small {
+  display: block;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.sc-salah .salah-prayer-row select {
+  flex: none;
+  max-width: 170px;
+}
+
+.sc-salah .salah-time-editor {
+  margin-top: 12px;
+  border-top: 1px dashed var(--line);
+  padding-top: 12px;
+}
+
+.sc-salah .salah-time-editor .salah-prayer-row > div:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sc-salah .salah-private-note {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  margin: 12px 0 0;
+}
+
+.sc-salah .salah-error {
+  color: var(--red);
+  font-size: 13px;
+  font-weight: 700;
+  margin: 12px 0 0;
+}
+
+.sc-salah .salah-loading {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 12px 0 0;
+}
+
+/* ---------- Quran browser (dark, preview #8) ---------- */
+.sc-quran .sc-continue {
+  background: linear-gradient(135deg, #0e4f4a, #0b3b39);
+}
+
+.sc-quran .sc-eyebrow-peach {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #ffdfc9;
+  letter-spacing: 0.05em;
+}
+
+.sc-quran .sc-continue-title {
+  font-size: 18px;
+  font-weight: 800;
+  margin-top: 4px;
+}
+
+.sc-quran .sc-continue .sbtn {
+  margin-top: 11px;
+}
+
+.sc-quran .quran-progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+
+.sc-quran .quran-progress h4 {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.sc-quran .quran-target-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.sc-quran .quran-target-row input {
+  width: 90px;
+}
+
+.sc-quran .quran-search-results ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.sc-quran .quran-search-results li p {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: #cdeae1;
+  line-height: 1.55;
+}
+
+.sc-quran .quran-bookmarks ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.sc-quran .quran-bookmarks li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13.5px;
+}
+
+.sc-quran .danger-text {
+  color: #ffb4b4;
+}
+
+.sc-quran .sc-surah-list {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+.sc-quran .quran-reader-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-top: 10px;
+}
+
+.sc-quran .quran-reader-head h3 {
+  margin: 2px 0 0;
+  font-size: 19px;
+  font-weight: 800;
+}
+
+.sc-quran .quran-reader-head p {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: #a9cfc4;
+}
+
+.sc-quran .quran-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.sc-quran .ayah-card {
+  margin: 12px 0 0;
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 18px;
+  padding: 14px 15px;
+}
+
+.sc-quran .quran-ayah-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sc-quran .quran-ayah-number {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #ffdfc9;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.sc-quran .quran-ayah-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.sc-quran .quran-ayah-actions .icon-button {
+  color: #cdeae1;
+}
+
+.sc-quran .quran-arabic {
+  font-family: "Amiri", serif;
+  font-size: 21px;
+  text-align: right;
+  line-height: 1.9;
+  color: #eaf6f2;
+  margin: 10px 0 0;
+}
+
+.sc-quran .quran-transliteration {
+  margin: 8px 0 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #a9cfc4;
+  font-style: italic;
+}
+
+.sc-quran .quran-translation {
+  margin: 7px 0 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #eff8f5;
+}
+
+.sc-quran .quran-sajda {
+  display: inline-block;
+  margin-top: 9px;
+  font-size: 11px;
+  font-weight: 800;
+  background: rgba(255, 223, 201, 0.16);
+  color: #ffdfc9;
+  padding: 5px 9px;
+  border-radius: 999px;
+}
+
+/* ---------- Mosque finder (dark, preview #11) ---------- */
+.sc-mosque .mosque-controls {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.sc-mosque .mosque-controls .searchbar {
+  margin: 0;
+}
+
+.sc-mosque .sc-controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.sc-mosque .sc-controls-row .field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #a9cfc4;
+}
+
+.sc-mosque .sc-controls-row .field-label select {
+  min-width: 90px;
+}
+
+.sc-mosque .sc-mosque-right {
+  margin-left: auto;
+  text-align: right;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.sc-mosque .sc-mosque-right b {
+  font-size: 13.5px;
+}
+
+.sc-mosque .sc-mosque-right .sbtn {
+  margin-top: 2px;
+}
+
+.sc-mosque .mosque-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* ---------- Hijri calendar (dark, preview #7) ---------- */
+.sc-hijri .sc-today-card {
+  text-align: center;
+  padding: 20px 15px;
+}
+
+.sc-hijri .sc-today-label {
+  font-size: 13px;
+  font-weight: 800;
+  color: #ffdfc9;
+  letter-spacing: 0.06em;
+}
+
+.sc-hijri .sc-today-date {
+  font-size: 27px;
+  font-weight: 800;
+  margin-top: 6px;
+  line-height: 1.25;
+}
+
+.sc-hijri .sc-today-card .mut {
+  margin-top: 5px;
+}
+
+.sc-hijri .hijri-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.sc-hijri .hijri-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sc-hijri .hijri-nav strong {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.sc-hijri .hijri-nav .icon-button {
+  color: #cdeae1;
+}
+
+.sc-hijri .hijri-controls .field-label,
+.sc-hijri .acard > .field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #a9cfc4;
+}
+
+.sc-hijri .hijri-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.sc-hijri .hijri-weekday {
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+  color: #8fb5ab;
+  padding: 2px 0;
+}
+
+.sc-hijri .hijri-cell {
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 6px 2px;
+  text-align: center;
+  font-size: 12.5px;
+  font-weight: 800;
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+
+.sc-hijri .hijri-cell span {
+  display: block;
+  font-size: 8.5px;
+  font-weight: 600;
+  opacity: 0.55;
+}
+
+.sc-hijri .hijri-cell small {
+  display: block;
+  font-size: 8px;
+  font-weight: 700;
+  color: #ffdfc9;
+  line-height: 1.3;
+  padding: 0 2px;
+}
+
+.sc-hijri .hijri-cell.is-today {
+  background: var(--peach);
+  color: #4a2c14;
+}
+
+.sc-hijri .hijri-cell.is-today span {
+  opacity: 0.7;
+}
+
+.sc-hijri .hijri-cell.is-today small {
+  color: #7a4416;
+}
+
+.sc-hijri .hijri-cell.blank {
+  background: transparent;
+}
+
+.sc-hijri .sc-occasion-right {
+  margin-left: auto;
+  font-size: 13.5px;
+  flex: none;
+}
+
+/* ---------- Friends (light, preview #16) ---------- */
+.sc-friends .page-heading h1 {
+  margin: 4px 0 2px;
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.sc-friends .page-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.sc-friends .sc-privacy {
+  background: var(--peach-soft);
+  border-color: var(--peach);
+}
+
+.sc-friends .sc-privacy p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #7a4a28;
+}
+
+.sc-friends .sc-friend-right {
+  margin-left: auto;
+  text-align: right;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.sc-friends .sc-friend-right b {
+  font-size: 13px;
+}
+
+.sc-friends .sc-friend-right .prog {
+  width: 74px;
+  margin-top: 0;
+}
+
+.sc-friends .shared-challenge {
+  margin-top: 12px;
+  border-top: 1px dashed var(--line);
+  padding-top: 10px;
+}
+
+.sc-friends .shared-challenge:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 8px;
+}
+
+.sc-friends .shared-challenge-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13.5px;
+}
+
+.sc-friends .shared-challenge-head span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sc-friends .shared-progress-row {
+  margin-top: 10px;
+}
+
+.sc-friends .shared-progress-label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 13px;
+}
+
+.sc-friends .shared-progress-label span {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.sc-friends .shared-progress-bar {
+  height: 9px;
+  border-radius: 99px;
+  background: var(--ice2);
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.sc-friends .shared-progress-bar span {
+  display: block;
+  height: 100%;
+  background: var(--teal-500);
+  border-radius: 99px;
+}

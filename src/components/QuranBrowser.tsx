@@ -3,7 +3,6 @@ import {
   ArrowLeft,
   Bookmark,
   BookmarkCheck,
-  BookOpen,
   Pause,
   Play,
   Search,
@@ -30,10 +29,15 @@ import {
 /**
  * Quran browser. Arabic (Tanzil Uthmani), transliteration and the
  * Saheeh International translation come from the verified upstream
- * via the backend — the source is shown on every view. Audio
+ * via the backend — the source is shown on every ayah card. Audio
  * streams from EveryAyah with the reciter credited. Bookmarks,
  * history and the daily target are per-user; guests can read but
  * are told to sign in to track.
+ *
+ * Layout (preview #8, dark): single-column .srow surah list,
+ * "PADHNA JAARI RAKHO" continue-reading card on top fed ONLY by
+ * the existing reading-history state — hidden when there is no
+ * history, never filled with an invented last-read position.
  */
 export default function QuranBrowser({
   onNotify,
@@ -238,6 +242,14 @@ export default function QuranBrowser({
     }
   }
 
+  function toggleBookmarksPanel() {
+    if (guestMode) {
+      onNotify('Sign in to save bookmarks.');
+      return;
+    }
+    setShowBookmarks((value) => !value);
+  }
+
   async function saveTarget() {
     const value = Number(targetInput);
     if (!Number.isInteger(value) || value < 0 || value > 500) {
@@ -270,7 +282,7 @@ export default function QuranBrowser({
         (item) => item.surahNumber === selected.surah.number && item.ayahNumber === ayahNumber,
       );
     return (
-      <section className="panel quran-reader">
+      <section className="sc-quran">
         <button
           className="text-button"
           onClick={() => {
@@ -358,9 +370,9 @@ export default function QuranBrowser({
           isliye baaki aayaton par sirf transliteration + English tarjuma hai.
         </p>
 
-        <div className="quran-ayah-list">
+        <div>
           {selected.surah.ayahs.map((ayah) => (
-            <article className="quran-ayah" key={ayah.numberInSurah}>
+            <article className="ayah-card" key={ayah.numberInSurah}>
               <div className="quran-ayah-top">
                 <span className="quran-ayah-number">{ayah.numberInSurah}</span>
                 <div className="quran-ayah-actions">
@@ -413,6 +425,9 @@ export default function QuranBrowser({
                   ) : null;
                 })()}
               {ayah.sajda && <span className="quran-sajda">Sajda ayah · Sajda wali ayat</span>}
+              <div className="chiprow">
+                <span className="mchip">Source: {selected.source}</span>
+              </div>
             </article>
           ))}
         </div>
@@ -420,8 +435,21 @@ export default function QuranBrowser({
     );
   }
 
+  // Continue-reading card: fed ONLY by the existing reading-history
+  // state. No history (guest, or nothing read yet) → the card is
+  // hidden entirely, never filled with an invented surah/ayah.
+  const lastRead = !guestMode && history && history.history.length > 0
+    ? history.history[0]
+    : null;
+  const lastReadMeta = lastRead
+    ? surahs.find((surah) => surah.number === lastRead.surahNumber)
+    : undefined;
+  const lastReadPct = lastRead && lastReadMeta
+    ? Math.min(100, Math.round((lastRead.lastAyahNumber / lastReadMeta.numberOfAyahs) * 100))
+    : null;
+
   return (
-    <section className="quran-browser">
+    <section className="sc-quran">
       <div className="quran-browser-head">
         <div>
           <span className="eyebrow">QUR'AN · VERIFIED TEXT</span>
@@ -429,37 +457,53 @@ export default function QuranBrowser({
           <p>Arabic ke saath Hinglish transliteration aur English tarjuma — verified source se, kuch bhi banaya hua nahi.</p>
           {source && <p className="quran-source-line">Source: {source}</p>}
         </div>
-        <BookOpen size={22} />
+        <button
+          className="iconbtn"
+          aria-label="Bookmarks"
+          aria-pressed={showBookmarks}
+          onClick={toggleBookmarksPanel}
+        >
+          <Bookmark size={18} />
+        </button>
       </div>
 
       {error && <p className="form-error">{error}</p>}
 
-      <div className="quran-toolbar">
-        <label className="quran-search">
-          <Search size={16} />
-          <input
-            className="form-input"
-            value={query}
-            onChange={(event) => runSearch(event.target.value)}
-            placeholder="Surah ka naam ya number khojein, ya ayah ka text…"
-          />
-        </label>
-        <button
-          className="outline-button"
-          onClick={() => setShowBookmarks((value) => !value)}
-          disabled={guestMode}
-        >
-          <Bookmark size={15} /> Bookmarks · Saved ({guestMode ? 'sign in' : bookmarks.length})
-        </button>
-      </div>
+      <label className="searchbar">
+        <Search size={16} />
+        <input
+          value={query}
+          onChange={(event) => runSearch(event.target.value)}
+          placeholder="Surah dhoondo — naam ya number…"
+          aria-label="Search surahs"
+        />
+      </label>
+
+      {lastRead && (
+        <div className="acard sc-continue">
+          <div className="sc-eyebrow-peach">PADHNA JAARI RAKHO</div>
+          <div className="sc-continue-title">
+            Surah {lastReadMeta ? lastReadMeta.englishName : lastRead.surahNumber}
+          </div>
+          <p className="mut">
+            Ayah {lastRead.lastAyahNumber} par ruke the · aaj {history?.ayahsOpenedToday ?? 0} / {history?.dailyTarget ?? 0} ayahs
+          </p>
+          {lastReadPct !== null && (
+            <div className="prog"><i style={{ width: `${lastReadPct}%` }} /></div>
+          )}
+          <button className="sbtn pk" onClick={() => openSurah(lastRead.surahNumber)}>
+            Aage padho →
+          </button>
+        </div>
+      )}
 
       {showBookmarks && !guestMode && (
-        <div className="panel quran-bookmarks">
-          <h4>Your bookmarks</h4>
+        <div className="acard quran-bookmarks">
+          <h4>Your bookmarks ({bookmarks.length})</h4>
           {bookmarks.length === 0 ? (
             <p className="empty-note">No bookmarks yet. Open a surah and tap the bookmark icon on any ayah.</p>
           ) : (
-            <ul className="quran-bookmark-list">
+            <ul>
               {bookmarks.map((item) => (
                 <li key={item.id}>
                   <button
@@ -483,13 +527,13 @@ export default function QuranBrowser({
       )}
 
       {!guestMode && history && (
-        <div className="panel quran-progress">
+        <div className="acard quran-progress">
           <div>
             <span className="eyebrow">READING TODAY · AAJ KI READING · {history.date}</span>
             <h4>
               {history.ayahsOpenedToday} of {history.dailyTarget} ayahs opened
             </h4>
-            <p>
+            <p className="mut">
               {history.history.length === 0
                 ? 'No reading recorded yet today.'
                 : `Last read: Surah ${history.history[0]?.surahNumber}, Ayah ${history.history[0]?.lastAyahNumber}.`}
@@ -518,7 +562,7 @@ export default function QuranBrowser({
       {searching && <p className="empty-note">Searching…</p>}
       {ayahSearchError && <p className="form-error">{ayahSearchError}</p>}
       {ayahMatches.length > 0 && (
-        <div className="panel quran-search-results">
+        <div className="acard quran-search-results">
           <h4>Ayah matches · Tarjume mein mile</h4>
           <ul>
             {ayahMatches.slice(0, 10).map((match) => (
@@ -540,21 +584,33 @@ export default function QuranBrowser({
           {query.trim() ? 'No surah matches that search.' : 'No surahs could be loaded.'}
         </p>
       ) : (
-        <div className="quran-surah-grid">
+        <div className="acard sc-surah-list">
           {filteredSurahs.map((surah) => (
-            <button key={surah.number} className="panel quran-surah-card" onClick={() => openSurah(surah.number)}>
-              <span className="quran-surah-number">{surah.number}</span>
-              <span className="quran-surah-names">
-                <strong>{surah.englishName}</strong>
-                <span>{surah.name}</span>
+            <button key={surah.number} className="srow" onClick={() => openSurah(surah.number)}>
+              <span className="snum2">{surah.number}</span>
+              <div>
+                {surah.englishName}
                 <small>
-                  {surah.englishNameTranslation} · {surah.numberOfAyahs} ayahs · {surah.revelationType}
+                  {surah.revelationType === 'Meccan'
+                    ? 'Makki'
+                    : surah.revelationType === 'Medinan'
+                      ? 'Madani'
+                      : surah.revelationType}
+                  {' · '}
+                  {surah.numberOfAyahs} Aayaat
                 </small>
-              </span>
+              </div>
+              <span className="sar">{surah.name}</span>
             </button>
           ))}
         </div>
       )}
+
+      <div className="acard">
+        <p className="mut">
+          Har surah khulne par Arabic text ke saath Hinglish transliteration, <b style={{ color: '#fff' }}>Hinglish tarjuma aur English translation — dono</b>, aur audio (EveryAyah) milega — source hamesha dikhega. Quran ke tarjume hamesha dono bhashaon me hain; baaki jagah ke tarjume sirf Hinglish me.
+        </p>
+      </div>
     </section>
   );
 }
