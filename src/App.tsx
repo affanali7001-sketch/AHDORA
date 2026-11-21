@@ -811,12 +811,16 @@ function App() {
   }
 
   async function handleLogout() {
-    try {
-      if (authUser) await apiRequest<null>('/api/auth/logout', { method: 'POST' });
-    } catch (error) {
-      notify(error instanceof Error ? error.message : s.app.logoutFailed);
-      return;
-    }
+    // Phase 16, defect #6: the old flow awaited the server logout
+    // FIRST and returned early on any failure — so when the POST
+    // failed (e.g. 401 "Authentication required" on an already
+    // expired session, or a hung request: web fetch has no timeout)
+    // the local session was never cleared and setScreen('welcome')
+    // never ran. The user stayed on the logged-in Profile screen
+    // with no navigation, and even a successful logout showed no
+    // toast at all. Now the local session clears FIRST and the user
+    // is navigated + told at once; the server logout is best-effort
+    // afterwards and can never leave the user stuck logged in.
     clearCsrfToken();
     setAuthUser(null);
     setGuestMode(false);
@@ -851,6 +855,19 @@ function App() {
     disconnectSocket();
     setScreen('welcome');
     setPage('home');
+    notify(s.app.loggedOut);
+    // Best-effort server-side session destroy. The browser still
+    // sends the HttpOnly session cookie with this request
+    // (credentials: 'include'), so the server can destroy the
+    // session; apiFetch re-fetches a fresh CSRF token since the
+    // cached one was just cleared. If the call fails or hangs, the
+    // user is already logged out locally and on the Welcome screen,
+    // so a failure toast here would wrongly claim logout failed.
+    try {
+      if (authUser) await apiRequest<null>('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // Deliberately ignored: local logout already completed.
+    }
   }
 
   function handleAccountDeleted() {
@@ -911,7 +928,16 @@ function App() {
     return <LanguageSelector onConfirm={handleLanguageConfirm} />;
   }
   if (screen === 'welcome') {
-    return <Welcome onContinue={() => setScreen('login')} onExplore={() => { setGuestMode(true); setProfileName('Guest'); setScreen('app'); }} />;
+    // Phase 16, defect #6: the toast element only existed inside the
+    // logged-in app shell, so a "Logged out" toast set by handleLogout
+    // would never render on this screen. Render it here too — the
+    // .toast class is position:fixed, so it overlays any screen.
+    return (
+      <>
+        <Welcome onContinue={() => setScreen('login')} onExplore={() => { setGuestMode(true); setProfileName('Guest'); setScreen('app'); }} />
+        {toast && <div className="toast"><Check size={16} />{toast}</div>}
+      </>
+    );
   }
   if (screen === 'login') {
     return <Login onBack={() => setScreen('welcome')} onLogin={handleLogin} onSignup={handleSignup} onForgot={() => setScreen('forgot')} authSuccess={authSuccess} language={language} onLanguageChange={handleLanguageChange} />;
@@ -946,7 +972,7 @@ function App() {
         <div className="page-content">
           {page === 'home' && <HomeScreen profile={newUser} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} guestMode={guestMode} onNavigate={goTo} onOpenGuidance={goToGuidance} language={language} />}
           {page === 'dashboard' && <Dashboard userName={profileName || 'there'} onNavigate={goTo} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} todayTasks={todayTasks} studyStats={studyStats} guestMode={guestMode} activeChallenges={activeChallenges} rewards={rewards} dataLoading={!guestMode && (!studyLoaded || !salahLoaded)} sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} unreadCount={unreadCount} onOpenNotifications={() => goTo('notifications')} language={language} />}
-          {page === 'deen' && <Deen onNotify={notify} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} onRefreshSalah={refreshSalahToday} onOpenGuidance={goToGuidance} onBack={() => goTo('home')} profile={newUser} language={language} />}
+          {page === 'deen' && <Deen onNotify={notify} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} onRefreshSalah={refreshSalahToday} onOpenGuidance={goToGuidance} onOpenSalahCalendar={() => goTo('salah-calendar')} onBack={() => goTo('home')} profile={newUser} language={language} />}
           {page === 'salah-calendar' && (
             <section className="salahcal-screen">
               <div className="apphead">
@@ -1842,7 +1868,7 @@ function Dashboard({
  * 'salah-calendar' route now, the reflection quote card is gone (not
  * in the preview), and the static "dua for today" card is gone — its
  * content is covered by Guidance / Duas. */
-function Deen({ onNotify, prayerTimes, prayerStatus, prayerError, salahToday, onRefreshSalah, onOpenGuidance, onBack, profile, language }: {
+function Deen({ onNotify, prayerTimes, prayerStatus, prayerError, salahToday, onRefreshSalah, onOpenGuidance, onOpenSalahCalendar, onBack, profile, language }: {
   onNotify: (message: string) => void;
   prayerTimes: PrayerTimesResponse | null;
   prayerStatus: 'idle' | 'loading' | 'loaded' | 'error' | 'no-city';
@@ -1850,6 +1876,7 @@ function Deen({ onNotify, prayerTimes, prayerStatus, prayerError, salahToday, on
   salahToday: Record<string, { status: string }>;
   onRefreshSalah: () => Promise<void>;
   onOpenGuidance: (tab: GuidanceTab, surahNumber?: number) => void;
+  onOpenSalahCalendar: () => void;
   onBack: () => void;
   profile: UserProfile;
   language: AppLanguage;
@@ -1900,6 +1927,9 @@ function Deen({ onNotify, prayerTimes, prayerStatus, prayerError, salahToday, on
           <div className="asub">{sub}</div>
         </div>
         <div className="aright">
+          <button type="button" className="sbtn gh" onClick={onOpenSalahCalendar}>
+            <CalendarDays size={13} /> {s.salahCalendar.title}
+          </button>
           <button type="button" className="sbtn gh" onClick={() => onOpenGuidance('hijri')}>
             <CalendarDays size={13} /> {s.deen.islamicCalendar}
           </button>

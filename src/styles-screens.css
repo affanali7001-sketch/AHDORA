@@ -84,6 +84,16 @@
   letter-spacing: -0.01em;
 }
 
+/* Phase 16 — Hijri dark-card contrast: the global
+   `.quran-browser-head h3 { color: var(--ink) }` (styles.css)
+   beat inheritance from the dark `.sc-hijri` root, so the
+   "Islami taarikhein" heading rendered near-black (#10201E,
+   1.26:1) on dark teal. Scoped light colour wins on
+   specificity (0,2,1) over the global (0,1,1). */
+.sc-hijri .quran-browser-head h3 {
+  color: #ffffff;
+}
+
 .sc-quran .quran-browser-head p,
 .sc-mosque .quran-browser-head p,
 .sc-hijri .quran-browser-head p {
@@ -1217,6 +1227,27 @@
 }
 
 /* ---------- Hijri calendar (dark, preview #7) ---------- */
+
+/* Phase 16 — Hijri dark-card contrast audit: the remaining
+   text on the dark teal card that still inherited a dark
+   global colour. `.eyebrow` / `.empty-note` used
+   var(--muted) #5C7370 (2.64:1 on #0B3531) and `.form-error`
+   used var(--red) #D64545 (3.06:1) — all below WCAG AA 4.5:1.
+   Light replacements match the legacy `.hijri-calendar`
+   values and the already-light `.quran-source-line` (#A9CFC4,
+   7.91:1). Every other text element in this card already
+   passes: root #EFF8F5 (12.38:1), today label #FFDFC9
+   (10.62:1), weekday #8FB5AB (5.97:1), nav strong inherits
+   #EFF8F5, cell small #FFDFC9, field-label #A9CFC4. */
+.sc-hijri .eyebrow,
+.sc-hijri .empty-note {
+  color: #a9cfc4;
+}
+
+.sc-hijri .form-error {
+  color: #ffb4b4;
+}
+
 .sc-hijri .sc-today-card {
   text-align: center;
   padding: 20px 15px;

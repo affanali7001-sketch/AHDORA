@@ -202,7 +202,6 @@ export default function HijriCalendar({
     ? todayGregorian.toLocaleDateString('en-IN', { weekday: 'long' })
     : '';
 
-  const hijriYear = month?.days[0]?.hijri.year ?? '';
   const monthRange = month && month.days.length > 0
     ? (() => {
         const first = new Date(`${month.days[0].gregorian.date}T12:00:00`);
@@ -253,7 +252,7 @@ export default function HijriCalendar({
               <ChevronLeft size={18} />
             </button>
             <strong>
-              {month?.hijriMonths.join(' / ') ?? ''}{hijriYear ? ` ${hijriYear}` : ''}
+              {month?.hijriMonths.join(' / ') ?? ''}
             </strong>
             <button className="icon-button" aria-label={s.hijri.nextMonth} onClick={() => shiftMonth(1)}>
               <ChevronRight size={18} />

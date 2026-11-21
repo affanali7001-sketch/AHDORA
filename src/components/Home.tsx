@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
+  BarChart3,
   BedDouble,
   BookOpen,
   ChevronRight,
@@ -16,7 +17,8 @@ import type { Page } from '../App';
 import { countdownTo, formatTime12h } from '../App';
 import type { PrayerTimesResponse } from '../lib/prayerApi';
 import type { UserProfile } from '../types/profile';
-import type { AppLanguage } from '../lib/language';
+import type { AppLanguage, BilingualText } from '../lib/language';
+import { pickText } from '../lib/language';
 import { stringsFor } from '../lib/strings';
 
 /**
@@ -24,11 +26,37 @@ import { stringsFor } from '../lib/strings';
  * from the pill nav Home button. The post-login landing is the
  * Dashboard (preview #4, Phase 15); this grid is the second stop.
  * Dark teal gradient, location row, date card (tap → Dashboard),
- * next-prayer banner, 10-tile feature grid, Ar-Ra'd 13:28 ayah card.
+ * next-prayer banner, 11-tile feature grid, Ar-Ra'd 13:28 ayah card.
  * All data is live: prayer times from fetchPrayerTimes, location from
  * the user's profile. No status bar (the preview's 9:30 is decorative
  * — a fake live clock is never shown).
+ *
+ * Phase 16:
+ * - The Salah tile opens the monthly Salah calendar
+ *   ('salah-calendar' route): that route had NO entry point anywhere
+ *   in the app — no goTo('salah-calendar') call existed — so the
+ *   calendar was unreachable at every width, not hidden by a
+ *   responsive rule (see the tile comment below). The Prayer times
+ *   tile still opens the daily Prayer Times screen ('deen').
+ * - The Analytics tile opens the real Analytics screen (preview #17,
+ *   inline in App.tsx, Din/Hafta/Mahina on real per-period data).
+ * - The ayah card shows both translations, primary following the
+ *   selected language via pickText (language.ts).
  */
+
+/** Ar-Ra'd 13:28 — the two meanings the Home ayah card has shown
+ * since Phase 14, byte-for-byte (Hinglish short line as approved in
+ * preview #1; English line as already shown with the "EN:" tag).
+ * They are card copy, not a new translation: the verified full
+ * Hinglish meaning lives untouched in
+ * src/lib/curatedQuranMeanings.ts (13:28) — "Jo log imaan laaye aur
+ * jinke dil Allah ke zikr se sukoon paate hain. Sun lo, Allah ke zikr
+ * hi se dilon ko sukoon milta hai." Nothing here is invented.
+ * pickText makes the primary line follow the selected language. */
+const AYAH_MEANING: BilingualText = {
+  hi: 'Sun lo, Allah ke zikr hi se dilon ko sukoon milta hai.',
+  en: 'Verily, in the remembrance of Allah do hearts find rest.',
+};
 
 export function NextPrayerBanner({
   prayerTimes,
@@ -111,6 +139,10 @@ export default function Home({
   language: AppLanguage;
 }) {
   const s = stringsFor(language);
+  // Phase 16 (#4): the ayah's primary translation follows the
+  // selected language; the other language stays as the secondary
+  // line. Arabic is untouched.
+  const ayah = pickText(AYAH_MEANING, language);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 30000);
@@ -144,13 +176,24 @@ export default function Home({
     { label: s.home.tiles.quran, icon: <BookOpen size={25} strokeWidth={1.8} />, onClick: () => onOpenGuidance('quran') },
     { label: s.home.tiles.duas, icon: <Heart size={25} strokeWidth={1.8} />, onClick: () => onOpenGuidance('duas') },
     { label: s.home.tiles.study, icon: <GraduationCap size={25} strokeWidth={1.8} />, onClick: () => onNavigate('study') },
-    { label: s.home.tiles.salah, icon: <Moon size={25} strokeWidth={1.8} />, onClick: () => onNavigate('deen') },
+    // Phase 16 (#2): the Salah tile opens the monthly Salah calendar.
+    // Before this, BOTH the Salah tile and the Prayer times tile went
+    // to 'deen', and no code anywhere called goTo('salah-calendar') —
+    // the calendar route existed but was unreachable at every width
+    // (no media query or conditional render hid it; there was simply
+    // no link). The Prayer times tile below still opens 'deen'.
+    { label: s.home.tiles.salah, icon: <Moon size={25} strokeWidth={1.8} />, onClick: () => onNavigate('salah-calendar') },
     { label: s.home.tiles.tasbeeh, icon: <TasbeehIcon />, onClick: () => onNavigate('tasbeeh') },
     { label: s.home.tiles.prayerTime, icon: <Clock3 size={25} strokeWidth={1.8} />, onClick: () => onNavigate('deen') },
     { label: s.home.tiles.mosque, icon: <MosqueIcon />, onClick: () => onOpenGuidance('mosques') },
     { label: s.home.tiles.challenges, icon: <Trophy size={25} strokeWidth={1.8} />, onClick: () => onNavigate('challenges') },
     { label: s.home.tiles.focus, icon: <Target size={25} strokeWidth={1.8} />, onClick: () => onNavigate('focus') },
     { label: s.home.tiles.sleep, icon: <BedDouble size={25} strokeWidth={1.8} />, onClick: () => onNavigate('sleep') },
+    // Phase 16 (#5): Analytics (preview #17) had a route and a real
+    // screen but no entry point anywhere in the app. The tile label
+    // comes from the existing strings system (s.analytics.title —
+    // 'Analytics' in both languages).
+    { label: s.analytics.title, icon: <BarChart3 size={25} strokeWidth={1.8} />, onClick: () => onNavigate('analytics') },
   ];
 
   return (
@@ -221,11 +264,10 @@ export default function Home({
       <div className="home-ayah">
         <div className="home-ayah-ar">اَلَا بِذِكْرِ اللّٰهِ تَطْمَىِٕنُّ الْقُلُوْبُ</div>
         <p>
-          <b>{s.home.ayahLabel}</b> &ldquo;Sun lo, Allah ke zikr se hi dilon ko
-          sukoon milta hai.&rdquo;
+          <b>{s.home.ayahLabel}</b> &ldquo;{ayah.primary}&rdquo;
         </p>
         <p>
-          <b>EN:</b> &ldquo;Verily, in the remembrance of Allah do hearts find rest.&rdquo;
+          <b>{language === 'en' ? 'Hinglish:' : 'EN:'}</b> &ldquo;{ayah.secondary}&rdquo;
         </p>
       </div>
     </div>

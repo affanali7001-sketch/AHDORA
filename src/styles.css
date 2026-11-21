@@ -1254,4 +1254,17 @@ a{color:inherit;text-decoration:none}
 @media (max-width:760px){
   .deen-screen,.focus-screen,.profile-screen{margin:-20px -16px 0;padding:16px 16px 24px}
   .analytics-screen .analytics-grid{grid-template-columns:1fr}
+  /* Phase 16: Guidance MUST stack on phones. Phase 15 fixed this only
+     by source order (a same-specificity 760px 1fr rule placed after the
+     1150px 1fr 1fr rule), so any later block or minifier reorder can
+     silently restore the two-column phone layout ("HAMARA CONTENT
+     WAADA" squeezed half-width, topic buttons cramped). This rule wins
+     on specificity (.page-content .guidance-layout = 0,2,0 beats every
+     0,1,0 rule) regardless of order, and sits in the last media block
+     of the file. Desktop two-column layout is untouched: this block
+     only matches at <=760px. */
+  .page-content .guidance-layout{grid-template-columns:1fr}
+  /* Phase 16: Deen header holds two calendar buttons now (Salah + Islamic);
+     let them wrap on narrow phones instead of crowding the title. */
+  .deen-screen .apphead{flex-wrap:wrap}
 }
