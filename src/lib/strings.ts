@@ -95,6 +95,7 @@ const en = {
   /** Pill nav aria-labels (icon-only buttons). */
   nav: {
     home: 'Home',
+    dashboard: 'Dashboard',
     quran: 'Quran',
     focus: 'Focus',
     profile: 'Profile',
@@ -158,6 +159,7 @@ const en = {
     challengeEmpty:
       'No active challenge. Join one and make a little progress every day.',
     challengeJoin: 'Join a challenge',
+    editPrayerTimes: 'Edit prayer times',
   },
 
   deen: {
@@ -202,6 +204,7 @@ const en = {
     sourceNote: (method: string, city: string) =>
       `Times come from your city. If you set your own time for a prayer (Onboarding Step 6), that is what you see. Source: Aladhan · ${method} · ${city}`,
     sourceNoteManual: ' · some times are set manually',
+    editPrayerTimes: 'Edit prayer times',
   },
 
   salahCalendar: {
@@ -1285,6 +1288,7 @@ const hi: Strings = {
 
   nav: {
     home: 'Home',
+    dashboard: 'Dashboard',
     quran: 'Quran',
     focus: 'Focus',
     profile: 'Profile',
@@ -1347,6 +1351,7 @@ const hi: Strings = {
     challengeTitle: 'Challenge',
     challengeEmpty: 'Koi challenge active nahi hai. Ek challenge join karo aur roz thoda-thoda aage badho.',
     challengeJoin: 'Challenge join karo',
+    editPrayerTimes: 'Namaz ke time badlo',
   },
 
   deen: {
@@ -1391,6 +1396,7 @@ const hi: Strings = {
     sourceNote: (method: string, city: string) =>
       `Time tumhare city ke hisab se aata hai. Kisi namaz ka apna time set kiya ho (Onboarding Step 6) to wahi dikhta hai. Source: Aladhan · ${method} · ${city}`,
     sourceNoteManual: ' · kuch time manual set hain',
+    editPrayerTimes: 'Namaz ke time badlo',
   },
 
   salahCalendar: {

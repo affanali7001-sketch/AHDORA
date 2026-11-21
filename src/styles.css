@@ -1239,6 +1239,10 @@ a{color:inherit;text-decoration:none}
 .profile-college{text-align:center;margin-top:3px}
 .profile-status{text-align:center;font-size:11px;color:#A9CFC4;margin-top:6px}
 .profile-complete-btn{display:flex;margin:14px auto 0}
+/* Phase 17: prominent "edit your details" button at the top of Profile. */
+.profile-edit-btn{display:flex;margin:14px auto 0}
+/* Phase 17: full-width "edit prayer times" entry on Dashboard + Deen. */
+.edit-times-btn{width:100%;margin:12px 0 4px}
 .profile-screen .kpis{margin-top:14px}
 .profile-screen .acard .setrow small{color:#A9CFC4;opacity:1}
 .profile-screen .lang-switch{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.12)}

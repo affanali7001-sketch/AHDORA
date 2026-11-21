@@ -91,8 +91,8 @@ import type { CSSProperties, ReactNode, FormEvent } from 'react';
 import {
   Activity, ArrowRight, ArrowUpRight, Bell, BookOpen, BookMarked,
   CalendarDays, Check, CheckCheck, ChevronLeft, ChevronRight, Clock3,
-  Compass, Eye, EyeOff, Flame, GraduationCap, Heart, Home, Lock,
-  Moon, Pause, Play, Plus, Shield,
+  Compass, Eye, EyeOff, Flame, GraduationCap, Heart, Home, LayoutDashboard, Lock,
+  Moon, Pause, Pencil, Play, Plus, Shield,
   ShieldCheck, Sparkles, Square, Sun, Target, Timer, Trophy, UserRound, Users, X, Zap,
 } from 'lucide-react';
 
@@ -608,6 +608,23 @@ function App() {
     if (screen === 'login') setAuthSuccess(false);
   }, [screen]);
 
+  // Phase 17: the "edit prayer times" entries on Dashboard / Deen open
+  // the Salah calendar with its manual time editor already open. Any
+  // other visit (Home Salah tile, Deen "Salah calendar" button) must
+  // open the calendar normally, so the flag resets whenever the user
+  // leaves the calendar — SalahTracker remounts on each visit and
+  // reads the flag as its initial editor state.
+  const [salahCalendarEditorOpen, setSalahCalendarEditorOpen] = useState(false);
+
+  useEffect(() => {
+    if (page !== 'salah-calendar') setSalahCalendarEditorOpen(false);
+  }, [page]);
+
+  function openSalahCalendarEditor() {
+    setSalahCalendarEditorOpen(true);
+    goTo('salah-calendar');
+  }
+
   const goTo = (next: Page) => {
     setPage(next);
     setScreen('app');
@@ -971,15 +988,15 @@ function App() {
         )}
         <div className="page-content">
           {page === 'home' && <HomeScreen profile={newUser} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} guestMode={guestMode} onNavigate={goTo} onOpenGuidance={goToGuidance} language={language} />}
-          {page === 'dashboard' && <Dashboard userName={profileName || 'there'} onNavigate={goTo} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} todayTasks={todayTasks} studyStats={studyStats} guestMode={guestMode} activeChallenges={activeChallenges} rewards={rewards} dataLoading={!guestMode && (!studyLoaded || !salahLoaded)} sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} unreadCount={unreadCount} onOpenNotifications={() => goTo('notifications')} language={language} />}
-          {page === 'deen' && <Deen onNotify={notify} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} onRefreshSalah={refreshSalahToday} onOpenGuidance={goToGuidance} onOpenSalahCalendar={() => goTo('salah-calendar')} onBack={() => goTo('home')} profile={newUser} language={language} />}
+          {page === 'dashboard' && <Dashboard userName={profileName || 'there'} onNavigate={goTo} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} todayTasks={todayTasks} studyStats={studyStats} guestMode={guestMode} activeChallenges={activeChallenges} rewards={rewards} dataLoading={!guestMode && (!studyLoaded || !salahLoaded)} sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} unreadCount={unreadCount} onOpenNotifications={() => goTo('notifications')} onOpenTimeEditor={openSalahCalendarEditor} language={language} />}
+          {page === 'deen' && <Deen onNotify={notify} prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} onRefreshSalah={refreshSalahToday} onOpenGuidance={goToGuidance} onOpenSalahCalendar={() => goTo('salah-calendar')} onOpenTimeEditor={openSalahCalendarEditor} onBack={() => goTo('home')} profile={newUser} guestMode={guestMode} language={language} />}
           {page === 'salah-calendar' && (
             <section className="salahcal-screen">
               <div className="apphead">
                 <button type="button" className="aback" onClick={() => goTo('home')} aria-label={s.common.back}><ChevronLeft size={20} /></button>
                 <div><h4>{s.salahCalendar.title}</h4><div className="asub">{s.salahCalendar.sub}</div></div>
               </div>
-              <SalahTracker onNotify={notify} language={language} />
+              <SalahTracker onNotify={notify} language={language} startEditorOpen={salahCalendarEditorOpen} />
             </section>
           )}
           {page === 'tasbeeh' && <Tasbeeh userId={authUser?.id ?? ''} onBack={() => goTo('home')} language={language} />}
@@ -995,7 +1012,8 @@ function App() {
         </div>
       </main>
       <nav className="pillnav-bar" aria-label="Main sections">
-        <button type="button" className={`pillnav-item ${(page === 'home' || page === 'dashboard') ? 'on' : ''}`} onClick={() => goTo('home')} aria-label={s.nav.home}><Home size={21} strokeWidth={1.8} /></button>
+        <button type="button" className={`pillnav-item ${page === 'home' ? 'on' : ''}`} onClick={() => goTo('home')} aria-label={s.nav.home}><Home size={21} strokeWidth={1.8} /></button>
+        <button type="button" className={`pillnav-item ${page === 'dashboard' ? 'on' : ''}`} onClick={() => goTo('dashboard')} aria-label={s.nav.dashboard}><LayoutDashboard size={21} strokeWidth={1.8} /></button>
         <button type="button" className={`pillnav-item ${page === 'guidance' ? 'on' : ''}`} onClick={() => goToGuidance('quran')} aria-label={s.nav.quran}><BookOpen size={21} strokeWidth={1.8} /></button>
         <button type="button" className={`pillnav-item ${page === 'focus' ? 'on' : ''}`} onClick={() => goTo('focus')} aria-label={s.nav.focus}><Target size={21} strokeWidth={1.8} /></button>
         <button type="button" className={`pillnav-item ${page === 'profile' ? 'on' : ''}`} onClick={() => goTo('profile')} aria-label={s.nav.profile}><UserRound size={21} strokeWidth={1.8} /></button>
@@ -1745,6 +1763,7 @@ function Dashboard({
   sleepEndTime,
   unreadCount,
   onOpenNotifications,
+  onOpenTimeEditor,
   language,
 }: {
   userName: string;
@@ -1766,6 +1785,8 @@ function Dashboard({
   sleepEndTime: string;
   unreadCount: number;
   onOpenNotifications: () => void;
+  /** Phase 17: open the Salah calendar with the manual time editor already open. */
+  onOpenTimeEditor: () => void;
   language: AppLanguage;
 }) {
   const s = stringsFor(language);
@@ -1841,6 +1862,15 @@ function Dashboard({
 
       <NextPrayerBanner prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} now={now} language={language} />
 
+      {/* Phase 17: visible prayer-time edit entry on the Dashboard prayer
+          card — opens the Salah calendar with the manual time editor
+          already open. Guests have no account to save times to. */}
+      {!guestMode && (
+        <button type="button" className="sbtn edit-times-btn" onClick={onOpenTimeEditor}>
+          <Clock3 size={15} /> {s.dashboard.editPrayerTimes}
+        </button>
+      )}
+
       <section className="dash-card">
         {challenge ? (
           <>
@@ -1868,7 +1898,7 @@ function Dashboard({
  * 'salah-calendar' route now, the reflection quote card is gone (not
  * in the preview), and the static "dua for today" card is gone — its
  * content is covered by Guidance / Duas. */
-function Deen({ onNotify, prayerTimes, prayerStatus, prayerError, salahToday, onRefreshSalah, onOpenGuidance, onOpenSalahCalendar, onBack, profile, language }: {
+function Deen({ onNotify, prayerTimes, prayerStatus, prayerError, salahToday, onRefreshSalah, onOpenGuidance, onOpenSalahCalendar, onOpenTimeEditor, onBack, profile, guestMode, language }: {
   onNotify: (message: string) => void;
   prayerTimes: PrayerTimesResponse | null;
   prayerStatus: 'idle' | 'loading' | 'loaded' | 'error' | 'no-city';
@@ -1877,8 +1907,11 @@ function Deen({ onNotify, prayerTimes, prayerStatus, prayerError, salahToday, on
   onRefreshSalah: () => Promise<void>;
   onOpenGuidance: (tab: GuidanceTab, surahNumber?: number) => void;
   onOpenSalahCalendar: () => void;
+  /** Phase 17: open the Salah calendar with the manual time editor already open. */
+  onOpenTimeEditor: () => void;
   onBack: () => void;
   profile: UserProfile;
+  guestMode: boolean;
   language: AppLanguage;
 }) {
   const s = stringsFor(language);
@@ -1939,6 +1972,16 @@ function Deen({ onNotify, prayerTimes, prayerStatus, prayerError, salahToday, on
       <NextPrayerBanner prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} now={now} language={language} />
 
       <PrayerTimesPanel prayerTimes={prayerTimes} prayerStatus={prayerStatus} prayerError={prayerError} salahToday={salahToday} now={now} onQaza={handleQaza} qazaBusy={qazaBusy} language={language} />
+
+      {/* Phase 17: visible prayer-time edit entry on the Deen screen,
+          right under the prayer list — opens the Salah calendar with
+          the manual time editor already open. Guests have no account
+          to save times to. */}
+      {!guestMode && (
+        <button type="button" className="sbtn edit-times-btn" onClick={onOpenTimeEditor}>
+          <Clock3 size={15} /> {s.deen.editPrayerTimes}
+        </button>
+      )}
 
       <section className="acard">
         <h5>{s.deen.dailyPractice}</h5>
@@ -4227,6 +4270,17 @@ function Profile({
         <div className="kpi"><b>{s.common.days(streak)}</b><span>{s.profile.streak}</span></div>
         <div className="kpi"><b>{rewards?.badges.length ?? 0}</b><span>{s.profile.badges}</span></div>
       </div>
+
+      {/* Phase 17: prominent details-edit entry at the top of Profile.
+          The same action already existed as a small settings row below
+          ("Edit your details"), but the user could not find it — this
+          button opens the 8-step onboarding in edit mode, pre-filled,
+          at step 1. Guests have no saved profile to edit. */}
+      {!guestMode && (
+        <button type="button" className="sbtn pk profile-edit-btn" onClick={() => onEditProfile(0)}>
+          <Pencil size={15} /> {s.profile.editDetails}
+        </button>
+      )}
 
       {onboardingIncomplete && !guestMode && (
         <button type="button" className="sbtn pk profile-complete-btn" onClick={() => onEditProfile(onboardingResumeStep)}>

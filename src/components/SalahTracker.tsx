@@ -77,9 +77,12 @@ const dateKey = (date: Date) =>
 type Props = {
   onNotify: (message: string) => void;
   language: AppLanguage;
+  /** Phase 17: open with the manual time editor already expanded
+   * (used by the Dashboard / Deen "edit prayer times" entries). */
+  startEditorOpen?: boolean;
 };
 
-export default function SalahTracker({ onNotify, language }: Props) {
+export default function SalahTracker({ onNotify, language, startEditorOpen = false }: Props) {
   const s = stringsFor(language);
   const today = dateKey(new Date());
   const [month, setMonth] = useState(today.slice(0, 7));
@@ -96,7 +99,7 @@ export default function SalahTracker({ onNotify, language }: Props) {
   const [timesNote, setTimesNote] = useState('');
 
   // Manual per-prayer times: the user's own overrides, saved per user.
-  const [showTimeEditor, setShowTimeEditor] = useState(false);
+  const [showTimeEditor, setShowTimeEditor] = useState(startEditorOpen);
   const [draftSettings, setDraftSettings] = useState<PrayerSettings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [savingTimes, setSavingTimes] = useState(false);
