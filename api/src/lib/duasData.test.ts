@@ -40,7 +40,7 @@ describe('duasData', () => {
       // An exact reference (collection + number), never a vague claim.
       expect(dua.source.trim().length, dua.id).toBeGreaterThan(0);
       expect(dua.source, `${dua.id}: source must name a collection and number`).toMatch(
-        /(Bukhari|Muslim|Abi Dawud|Tirmidhi)/,
+        /(Bukhari|Muslim|Abi Dawud|Tirmidhi|Ahmad|Quran)/,
       );
       expect(dua.source, `${dua.id}: source must include a hadith number`).toMatch(/\d/);
     }
@@ -89,7 +89,77 @@ describe('duasData', () => {
     expect(isDuaTopic('morning')).toBe(true);
     expect(isDuaTopic('daily')).toBe(true);
     expect(isDuaTopic('wudu')).toBe(true);
+    expect(isDuaTopic('anxiety')).toBe(true);
+    expect(isDuaTopic('overthinking')).toBe(true);
     expect(isDuaTopic('evening')).toBe(false);
     expect(isDuaTopic('')).toBe(false);
+  });
+
+  it('keeps the original 11 duas first, in their original order', () => {
+    expect(DUAS.slice(0, 11).map((dua) => dua.id)).toEqual([
+      'sone-se-pehle',
+      'bistar-par-lete-waqt',
+      'neend-na-aaye-ayat-kursi',
+      'neend-na-aaye-baqarah-aakhri',
+      'jaagne-par',
+      'khana-shuru-karne-se-pehle',
+      'khane-ke-baad',
+      'ghar-se-nikalte-waqt',
+      'pareshani-mein',
+      'toilet-jane-se-pehle',
+      'wuzu-ke-baad',
+    ]);
+  });
+
+  it('has the Phase 13 anxiety / overthinking / sleep duas', () => {
+    expect(filterDuasByTopic(DUAS, 'anxiety').map((dua) => dua.id)).toEqual([
+      'pareshani-ghabrahat',
+      'allahumma-inni-abduka',
+      'rehmat-ki-ummed',
+    ]);
+    expect(filterDuasByTopic(DUAS, 'overthinking').map((dua) => dua.id)).toEqual([
+      'yunus-ki-dua',
+      'hasbunallahu',
+      'amantu-billahi',
+      'taawwudh',
+      'namaz-mein-waswasa',
+    ]);
+    expect(filterDuasByTopic(DUAS, 'sleep')).toHaveLength(8);
+    expect(DUAS.map((dua) => dua.id)).toContain('aslamtu-nafsi');
+    expect(DUAS.map((dua) => dua.id)).toContain('sone-se-pehle-teen-qul');
+    expect(DUAS.map((dua) => dua.id)).toContain('tasbeeh-e-fatimah');
+  });
+
+  it('does not duplicate duas that already existed', () => {
+    // Distress dua (Bukhari 6346 / Muslim 2730) stays a single entry.
+    expect(DUAS.filter((dua) => dua.id === 'pareshani-mein')).toHaveLength(1);
+    expect(DUAS.filter((dua) => dua.source.includes('6346'))).toHaveLength(1);
+    // Sleep duas from the original list stay single entries too.
+    for (const id of ['sone-se-pehle', 'bistar-par-lete-waqt', 'jaagne-par']) {
+      expect(DUAS.filter((dua) => dua.id === id)).toHaveLength(1);
+    }
+    expect(DUAS).toHaveLength(22);
+  });
+
+  it('keeps the weak-chain insomnia dua out', () => {
+    const text = JSON.stringify(DUAS).toLowerCase();
+    expect(text).not.toContain('gharat');
+    expect(text).not.toContain('gharatin-nujum');
+    expect(text).not.toContain('gharat an-nujum');
+  });
+
+  it('every new dua carries its exact reference', () => {
+    const byId = new Map(DUAS.map((dua) => [dua.id, dua]));
+    expect(byId.get('pareshani-ghabrahat')?.source).toContain('Bukhari 6369');
+    expect(byId.get('allahumma-inni-abduka')?.source).toContain('Ahmad 3712');
+    expect(byId.get('rehmat-ki-ummed')?.source).toContain('Abi Dawud 5090');
+    expect(byId.get('yunus-ki-dua')?.source).toContain('Quran 21:87');
+    expect(byId.get('hasbunallahu')?.source).toContain('Quran 3:173');
+    expect(byId.get('amantu-billahi')?.source).toContain('Muslim 134');
+    expect(byId.get('taawwudh')?.source).toContain('Quran 7:200');
+    expect(byId.get('namaz-mein-waswasa')?.source).toContain('Muslim 2203');
+    expect(byId.get('aslamtu-nafsi')?.source).toContain('Bukhari 247');
+    expect(byId.get('sone-se-pehle-teen-qul')?.source).toContain('Bukhari 5017');
+    expect(byId.get('tasbeeh-e-fatimah')?.source).toContain('Bukhari 3705');
   });
 });

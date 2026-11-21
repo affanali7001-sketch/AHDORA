@@ -4,6 +4,12 @@ import { ArrowLeft, ArrowRight } from 'lucide-react';
 import AhdoraLogo from './AhdoraLogo';
 import type { PrayerName, UserProfile } from '../types/profile';
 import { prayerNames, sleepDurationLabel } from '../types/profile';
+import {
+  ONBOARDING_STEPS,
+  ONBOARDING_STRINGS,
+  pickText,
+  type AppLanguage,
+} from '../lib/language';
 
 
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -37,6 +43,8 @@ type Props = {
   mode?: 'initial' | 'edit';
   /** Edit mode only: go back to Profile without saving. */
   onCancel?: () => void;
+  /** Phase 13 — chosen language; step titles, hints and buttons are bilingual. */
+  language: AppLanguage;
 };
 
 function isValidTime(value: string): boolean {
@@ -45,7 +53,7 @@ function isValidTime(value: string): boolean {
   return Boolean(match);
 }
 
-export default function Onboarding({ user, onChange, onComplete, onSkip, initialStep = 0, mode = 'initial', onCancel }: Props) {
+export default function Onboarding({ user, onChange, onComplete, onSkip, initialStep = 0, mode = 'initial', onCancel, language }: Props) {
   const [step, setStep] = useState(initialStep);
   const [error, setError] = useState('');
   /**
@@ -101,16 +109,17 @@ export default function Onboarding({ user, onChange, onComplete, onSkip, initial
     clearFieldError(`prayer:${prayer}`);
   };
 
-  const steps = useMemo(() => [
-    { title: 'Personal information', text: 'Your account details are already connected.' },
-    { title: 'Education', text: 'Tell us what you are learning.' },
-    { title: 'College schedule', text: 'Add the days and hours you are unavailable.' },
-    { title: 'Study schedule', text: 'Set a realistic daily learning rhythm.' },
-    { title: 'Location & prayer calculation', text: 'Where you are decides your prayer times.' },
-    { title: 'Individual prayer timings', text: 'Adjust each prayer time if you need to.' },
-    { title: 'Sleep schedule', text: 'Plan your rest and focus window.' },
-    { title: 'Review & save', text: 'Check everything, then save to your account.' },
-  ], []);
+  // Phase 13 — step titles + hints are the preview's exact bilingual
+  // pairs (steps / stepsEn). The chosen language is the big line, the
+  // other language sits right below it. Field labels and validation
+  // messages inside the steps stay as they are.
+  const steps = useMemo(() => ONBOARDING_STEPS.map((stepInfo) => ({
+    title: pickText(stepInfo.title, language),
+    hint: pickText(stepInfo.hint, language),
+  })), [language]);
+  const backLabel = pickText(ONBOARDING_STRINGS.back, language);
+  const skipLabel = pickText(ONBOARDING_STRINGS.skip, language);
+  const saveLabel = pickText(ONBOARDING_STRINGS.save, language);
 
   /**
    * Per-step validation. Returns one message per missing/invalid
@@ -332,8 +341,10 @@ export default function Onboarding({ user, onChange, onComplete, onSkip, initial
         <div className="auth-brand"><AhdoraLogo size={42} /><span>AHDORA</span></div>
         <div className="auth-heading">
           <span className="eyebrow">STEP {step + 1} OF {steps.length}</span>
-          <h1>{steps[step].title}</h1>
-          <p>{steps[step].text}</p>
+          <h1>{steps[step].title.primary}</h1>
+          <p className="bilingual-secondary bilingual-secondary-large">{steps[step].title.secondary}</p>
+          <p style={{ marginTop: 8 }}>{steps[step].hint.primary}</p>
+          <p className="bilingual-secondary">{steps[step].hint.secondary}</p>
         </div>
 
         <div className="progress-track" aria-label={`Onboarding step ${step + 1} of ${steps.length}`}>
@@ -520,13 +531,19 @@ export default function Onboarding({ user, onChange, onComplete, onSkip, initial
 
         {error && <p style={{ color: 'var(--red)', fontSize: 13, marginTop: 12 }}>{error}</p>}
         <form onSubmit={step === steps.length - 1 ? submit : next} className="onboarding-actions">
-          {step > 0 && <button type="button" className="outline-button" onClick={() => { setStep((current) => current - 1); setError(''); setFieldErrors({}); }}><ArrowLeft size={15} /> Back</button>}
+          {step > 0 && <button type="button" className="outline-button" onClick={() => { setStep((current) => current - 1); setError(''); setFieldErrors({}); }}><ArrowLeft size={15} /><span className="bilingual-label"><span>{backLabel.primary}</span><small>{backLabel.secondary}</small></span></button>}
           <button type="submit" className="primary-button" disabled={busy || skipping}>
-            {busy ? 'Saving profile...' : step === steps.length - 1 ? (mode === 'edit' ? 'Save karo' : 'Confirm & save') : 'Continue'} <ArrowRight size={16} />
+            {busy ? 'Saving profile...' : step === steps.length - 1 ? (
+              mode === 'edit' ? 'Save karo' : (
+                <span className="bilingual-label"><span>{saveLabel.primary}</span><small>{saveLabel.secondary}</small></span>
+              )
+            ) : (
+              <>{ONBOARDING_STRINGS.next} <ArrowRight size={16} /></>
+            )}
           </button>
         </form>
-        <button type="button" className="text-button" onClick={skip} disabled={busy || skipping} style={{ marginTop: 10 }}>
-          {skipping ? 'Save ho raha hai…' : 'Baad me bharenge — Skip karo'}
+        <button type="button" className="text-button bilingual-skip" onClick={skip} disabled={busy || skipping} style={{ marginTop: 10 }}>
+          {skipping ? 'Save ho raha hai…' : (<><span>{skipLabel.primary}</span><small>{skipLabel.secondary}</small></>)}
         </button>
         {' '}
         {mode === 'edit' && onCancel && (

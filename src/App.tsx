@@ -20,6 +20,8 @@ import FeedbackForm from './components/FeedbackForm';
 import PasswordField from './components/PasswordField';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Onboarding from './components/Onboarding';
+import LanguageSelector from './components/LanguageSelector';
+import { LOGIN_STRINGS, pickText, readStoredLanguage, storeLanguage, type AppLanguage } from './lib/language';
 import AuthBackdrop from './components/AuthBackdrop';
 import Typewriter from './components/Typewriter';
 import AhdoraMeaning from './components/AhdoraMeaning';
@@ -82,7 +84,7 @@ import type { CSSProperties, ReactNode, FormEvent } from 'react';
 import {
   Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpen, BookMarked,
   CalendarDays, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3,
-  Compass, Eye, EyeOff, Flame, Footprints, GraduationCap, Heart, Home, LayoutDashboard, Lock,
+  Compass, Eye, EyeOff, Flame, Footprints, GraduationCap, Heart, Home, Languages, LayoutDashboard, Lock,
   LockKeyhole, LogOut, Menu, Moon, MoreHorizontal, Plus, Search, Settings, Shield,
   ShieldCheck, Sparkles, Sun, Target, Timer, Trophy, UserRound, Users, X, Zap,
 } from 'lucide-react';
@@ -174,7 +176,18 @@ const guidanceCards = [
 ];
 
 function App() {
-  const [screen, setScreen] = useState<'checking' | 'welcome' | 'login' | 'forgot' | 'reset' | 'onboarding' | 'app'>('checking');
+  const [screen, setScreen] = useState<'checking' | 'welcome' | 'login' | 'forgot' | 'reset' | 'onboarding' | 'app' | 'language'>('checking');
+  // Phase 13 — language choice (English / Hinglish), stored in
+  // localStorage under `ahdora-language`. The app's copy from Login
+  // through Onboarding is bilingual: the chosen language is shown
+  // big, the other language alongside it in smaller text.
+  const [language, setLanguage] = useState<AppLanguage>(() => readStoredLanguage() ?? 'hi');
+  // Where the language screen sends the user after they pick one.
+  const [afterLanguageScreen, setAfterLanguageScreen] = useState<'login' | 'app' | 'onboarding'>('login');
+  // Password-reset links land on the reset screen; the session check
+  // must not reroute those users (pre-existing behaviour preserved).
+  // Read during render — before the reset effect clears the URL.
+  const resetLinkRef = useRef(new URLSearchParams(window.location.search).has('resetToken'));
   const [resetToken, setResetToken] = useState('');
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   // True briefly after a successful login/signup so the auth button can
@@ -258,6 +271,34 @@ function App() {
     toastTimer.current = window.setTimeout(() => setToast(''), 2600);
   };
 
+  /**
+   * Route to a post-auth screen, showing the language picker first
+   * when no choice is stored yet. Reads localStorage directly so
+   * the check is never stale inside an effect closure. A returning
+   * user (choice stored) never sees the picker again.
+   */
+  function openPostAuthScreen(next: 'app' | 'onboarding') {
+    if (readStoredLanguage() !== null) {
+      setScreen(next);
+      return;
+    }
+    setAfterLanguageScreen(next);
+    setScreen('language');
+  }
+
+  /** First-open picker: store the choice, then continue where the user was headed. */
+  function handleLanguageConfirm(next: AppLanguage) {
+    storeLanguage(next);
+    setLanguage(next);
+    setScreen(afterLanguageScreen);
+  }
+
+  /** Change the language later (Login screen switch, Profile settings). */
+  function handleLanguageChange(next: AppLanguage) {
+    storeLanguage(next);
+    setLanguage(next);
+  }
+
   async function hydrateProfile(user: AuthUser) {
     setAuthUser(user);
     setProfileName(user.name);
@@ -270,7 +311,7 @@ function App() {
         // A skipped (incomplete) profile still enters the app — the
         // dashboard works with whatever is filled in, and Profile shows
         // "Profile poora karo" until onboarding is finished.
-        setScreen('app');
+        openPostAuthScreen('app');
       } else {
         setNewUser(emptyProfile(user.name, user.email));
         setOnboardingCompleted(false);
@@ -278,7 +319,7 @@ function App() {
         // at a step left over from a previous account in this tab (P9).
         setOnboardingInitialStep(0);
         setOnboardingResumeStep(0);
-        setScreen('onboarding');
+        openPostAuthScreen('onboarding');
       }
     } catch (error) {
       // A missing /api/profile route is not treated as a completed profile.
@@ -286,7 +327,7 @@ function App() {
       setOnboardingCompleted(false);
       setOnboardingInitialStep(0);
       setOnboardingResumeStep(0);
-      setScreen('onboarding');
+      openPostAuthScreen('onboarding');
       notify(error instanceof Error ? error.message : 'Profile load nahi ho payi.');
     }
   }
@@ -506,13 +547,13 @@ function App() {
             setNewUser(loaded.profile);
             setOnboardingCompleted(loaded.onboardingCompleted);
             setOnboardingResumeStep(loaded.onboardingStep);
-            setScreen('app');
+            openPostAuthScreen('app');
           } else {
             setNewUser(emptyProfile(user.name, user.email));
             setOnboardingCompleted(false);
             setOnboardingInitialStep(0);
             setOnboardingResumeStep(0);
-            setScreen('onboarding');
+            openPostAuthScreen('onboarding');
           }
         } catch {
           if (!active) return;
@@ -520,10 +561,22 @@ function App() {
           setOnboardingCompleted(false);
           setOnboardingInitialStep(0);
           setOnboardingResumeStep(0);
-          setScreen('onboarding');
+          openPostAuthScreen('onboarding');
         }
       })
-      .catch(() => { if (active) setScreen('welcome'); });
+      .catch(() => {
+        if (!active) return;
+        // Logged out: first open without a stored language goes to the
+        // picker (which then sends the user to Login); everyone else
+        // gets the welcome screen as before. Reset-link users keep
+        // the pre-existing behaviour (welcome).
+        if (resetLinkRef.current || readStoredLanguage() !== null) {
+          setScreen('welcome');
+        } else {
+          setAfterLanguageScreen('login');
+          setScreen('language');
+        }
+      });
     return () => { active = false; };
   }, []);
 
@@ -840,11 +893,14 @@ function App() {
   if (screen === 'checking') {
     return <div className="auth-screen"><div className="auth-card"><div className="auth-brand"><AhdoraLogo size={42} /><span>AHDORA</span></div><p>Checking your secure session...</p></div></div>;
   }
+  if (screen === 'language') {
+    return <LanguageSelector onConfirm={handleLanguageConfirm} />;
+  }
   if (screen === 'welcome') {
     return <Welcome onContinue={() => setScreen('login')} onExplore={() => { setGuestMode(true); setProfileName('Guest'); setScreen('app'); }} />;
   }
   if (screen === 'login') {
-    return <Login onBack={() => setScreen('welcome')} onLogin={handleLogin} onSignup={handleSignup} onForgot={() => setScreen('forgot')} authSuccess={authSuccess} />;
+    return <Login onBack={() => setScreen('welcome')} onLogin={handleLogin} onSignup={handleSignup} onForgot={() => setScreen('forgot')} authSuccess={authSuccess} language={language} onLanguageChange={handleLanguageChange} />;
   }
   if (screen === 'forgot') {
     return <ForgotPassword onBack={() => setScreen('login')} onSent={() => notify('If an account exists for this email, a reset link has been sent.')} />;
@@ -853,7 +909,7 @@ function App() {
     return <ResetPassword token={resetToken} onDone={() => { setResetToken(''); setScreen('login'); notify('Password reset. Please log in with your new password.'); }} onBack={() => { setResetToken(''); setScreen('login'); }} />;
   }
   if (screen === 'onboarding') {
-    return <Onboarding user={newUser} onChange={setNewUser} onComplete={handleOnboardingComplete} onSkip={handleOnboardingSkip} initialStep={onboardingInitialStep} mode={editingProfile ? 'edit' : 'initial'} onCancel={handleOnboardingCancel} />;
+    return <Onboarding user={newUser} onChange={setNewUser} onComplete={handleOnboardingComplete} onSkip={handleOnboardingSkip} initialStep={onboardingInitialStep} mode={editingProfile ? 'edit' : 'initial'} onCancel={handleOnboardingCancel} language={language} />;
   }
 
   return (
@@ -921,10 +977,16 @@ function App() {
           {page === 'guidance' && <Guidance onNotify={notify} onOpenFeedback={() => setFeedbackOpen(true)} tab={guidanceTab} onTabChange={setGuidanceTab} guestMode={guestMode} profileCity={newUser.city} initialSurah={guidanceSurah} onInitialSurahOpened={() => setGuidanceSurah(null)} onOpenSurah={(surahNumber) => goToGuidance('quran', surahNumber)} />}
           {page === 'focus' && <Focus sleepStartTime={newUser.sleepStartTime || newUser.sleepTime} sleepEndTime={newUser.sleepEndTime} onSleepChange={(start, end) => setNewUser((current) => ({ ...current, sleepStartTime: start, sleepEndTime: end }))} onSaveFocus={handleSaveFocus} focusSaving={focusSaving} focusEnabled={focusEnabled} setFocusEnabled={setFocusEnabled} youtubeAllowed={youtubeAllowed} setYoutubeAllowed={setYoutubeAllowed} onNotify={notify} />}
           {page === 'analytics' && <Analytics stats={studyStats} guestMode={guestMode} rewards={rewards} activeChallenges={activeChallenges} challengeHistory={challengeHistory} focusHistory={pomodoroHistory} onNotify={notify} />}
-          {page === 'profile' && <Profile onNotify={notify} user={authUser} guestMode={guestMode} onLogout={handleLogout} onAccountDeleted={handleAccountDeleted} onboardingIncomplete={onboardingCompleted === false} onEditProfile={handleEditProfile} onboardingResumeStep={resumeStep(newUser)} onOpenFeedback={() => setFeedbackOpen(true)} onNavigate={goTo} />}
+          {page === 'profile' && <Profile onNotify={notify} user={authUser} guestMode={guestMode} onLogout={handleLogout} onAccountDeleted={handleAccountDeleted} onboardingIncomplete={onboardingCompleted === false} onEditProfile={handleEditProfile} onboardingResumeStep={resumeStep(newUser)} onOpenFeedback={() => setFeedbackOpen(true)} onNavigate={goTo} language={language} onLanguageChange={handleLanguageChange} />}
         </div>
         <footer className="app-footer"><span>© 2026 AHDORA</span><span>Built around what matters.</span><button onClick={() => setFeedbackOpen(true)}><CircleHelp size={14} /> Help & feedback</button></footer>
       </main>
+      <nav className="mobile-pillnav" aria-label="Main sections">
+        <button type="button" className={`pillnav-item ${page === 'dashboard' ? 'on' : ''}`} onClick={() => goTo('dashboard')} aria-label="Home"><Home size={21} strokeWidth={1.8} /></button>
+        <button type="button" className={`pillnav-item ${page === 'guidance' ? 'on' : ''}`} onClick={() => goTo('guidance')} aria-label="Quran"><BookOpen size={21} strokeWidth={1.8} /></button>
+        <button type="button" className={`pillnav-item ${page === 'focus' ? 'on' : ''}`} onClick={() => goTo('focus')} aria-label="Focus"><Timer size={21} strokeWidth={1.8} /></button>
+        <button type="button" className={`pillnav-item ${page === 'profile' ? 'on' : ''}`} onClick={() => goTo('profile')} aria-label="Profile"><UserRound size={21} strokeWidth={1.8} /></button>
+      </nav>
       {mobileNav && <button className="mobile-backdrop" onClick={() => setMobileNav(false)} aria-label="Close navigation" />}
       {feedbackOpen && <FeedbackForm onClose={() => setFeedbackOpen(false)} onNotify={notify} />}
       {toast && <div className="toast"><Check size={16} />{toast}</div>}
@@ -958,7 +1020,7 @@ function Welcome({ onContinue, onExplore }: { onContinue: () => void; onExplore:
             A thoughtful space to bring your faith, learning and daily habits into better balance. One sincere step at a time.
           </p>
           <div className="hero-actions">
-            <button className="gold-button" onClick={onContinue}>
+            <button className="primary-button" onClick={onContinue}>
               Start your journey <ArrowRight size={17} />
             </button>
             <button className="text-button" onClick={onExplore}>
@@ -1030,12 +1092,16 @@ function Login({
   onSignup,
   onForgot,
   authSuccess,
+  language,
+  onLanguageChange,
 }: {
   onBack: () => void;
   onLogin: (email: string, password: string) => Promise<void>;
   onSignup: (user: { name: string; email: string; password: string }) => Promise<void>;
   onForgot: () => void;
   authSuccess: boolean;
+  language: AppLanguage;
+  onLanguageChange: (language: AppLanguage) => void;
 }) {
   const [tab, setTab] = useState<'login' | 'signup'>('login');
   const [name, setName] = useState('');
@@ -1047,6 +1113,18 @@ function Login({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
+  // Phase 13 — bilingual Login: the chosen language is the big line,
+  // the other language sits right below it. Strings are the preview's
+  // exact data-en / data-hi pairs.
+  const heading = pickText(tab === 'login' ? LOGIN_STRINGS.headingLogin : LOGIN_STRINGS.headingSignup, language);
+  const sub = tab === 'login'
+    ? pickText(LOGIN_STRINGS.subLogin, language)
+    : { primary: LOGIN_STRINGS.subSignup, secondary: '' };
+  const tabCreate = pickText(LOGIN_STRINGS.tabCreate, language);
+  const nameLabel = pickText(LOGIN_STRINGS.nameLabel, language);
+  const forgot = pickText(LOGIN_STRINGS.forgot, language);
+  const notice = pickText(LOGIN_STRINGS.notice, language);
+  const submitSignup = pickText(LOGIN_STRINGS.submitSignup, language);
 
   // Shows the error and replays the card's shake animation.
   function fail(message: string) {
@@ -1128,8 +1206,10 @@ function Login({
 
         <div className="auth-heading">
           <span className="eyebrow">YOUR SPACE, YOUR PACE</span>
-          <h1>{tab === 'login' ? 'Welcome back.' : 'Begin with intention.'}</h1>
-          <p>{tab === 'login' ? 'Pick up where you left off.' : 'Create your personal AHDORA space.'}</p>
+          <h1>{heading.primary}</h1>
+          <p className="bilingual-secondary bilingual-secondary-large">{heading.secondary}</p>
+          <p style={{ marginTop: 8 }}>{sub.primary}</p>
+          {sub.secondary && <p className="bilingual-secondary">{sub.secondary}</p>}
         </div>
 
         <AhdoraMeaning />
@@ -1148,7 +1228,7 @@ function Login({
             className={tab === 'signup' ? 'selected' : ''}
             onClick={() => { setTab('signup'); setError(''); setConfirmPassword(''); }}
           >
-            Create account
+            {tabCreate.primary}
           </button>
         </div>
 
@@ -1165,7 +1245,7 @@ function Login({
                   autoComplete="name"
                   required
                 />
-                <label className="auth-floating-label" htmlFor="auth-name">Your name</label>
+                <label className="auth-floating-label" htmlFor="auth-name">{nameLabel.primary}</label>
               </div>
             )}
 
@@ -1251,7 +1331,7 @@ function Login({
               </>
             ) : (
               <>
-                {tab === 'login' ? 'Log in' : 'Create account'}
+                {tab === 'login' ? 'Log in' : submitSignup.primary}
                 <ArrowRight size={16} />
               </>
             )}
@@ -1259,16 +1339,26 @@ function Login({
         </form>
 
         {tab === 'login' && (
-          <button type="button" className="text-button" onClick={onForgot} style={{ marginTop: 12 }}>
-            Forgot your password?
+          <button type="button" className="text-button bilingual-skip" onClick={onForgot} style={{ marginTop: 12 }}>
+            <span>{forgot.primary}</span>
+            <small>{forgot.secondary}</small>
           </button>
         )}
 
         <div className="auth-notice">
           <Shield size={15} />
           <span>
-            Secure session is handled by the AHDORA API. Use a unique password. Email verification ka link aapke email par bheja jata hai — inbox aur spam folder check karo.
+            <span>{notice.primary}</span>
+            <span className="bilingual-secondary" style={{ display: 'block', marginTop: 4 }}>{notice.secondary}</span>
           </span>
+        </div>
+
+        <div className="login-lang-row">
+          <span>Bhasha · Language</span>
+          <div className="lang-switch" role="group" aria-label="Language">
+            <button type="button" className={language === 'en' ? 'selected' : ''} onClick={() => onLanguageChange('en')} disabled={busy || authSuccess}>English</button>
+            <button type="button" className={language === 'hi' ? 'selected' : ''} onClick={() => onLanguageChange('hi')} disabled={busy || authSuccess}>Hinglish</button>
+          </div>
         </div>
       </div>
 
@@ -1604,7 +1694,7 @@ function Dashboard({
             <span className="eyebrow light-eyebrow"><Sparkles size={13} /> YOUR DAILY REMINDER</span>
             <h2>Progress is built<br />one sincere step<br /><em>at a time.</em></h2>
             <p>Keep your intentions clear and your effort consistent.</p>
-            <button className="gold-button" onClick={() => onNavigate('guidance')}>
+            <button className="primary-button" onClick={() => onNavigate('guidance')}>
               Explore guidance <ArrowRight size={15} />
             </button>
           </div>
@@ -1775,7 +1865,7 @@ function Dashboard({
                 {rewards.badges.length > 0 && ` · ${rewards.badges.length} badge${rewards.badges.length === 1 ? '' : 's'}: ${rewards.badges.map((b) => b.title).join(', ')}`}
               </p>
             )}
-            <button className="outline-gold" onClick={() => onNavigate('challenges')}>
+            <button className="outline-button" onClick={() => onNavigate('challenges')}>
               {activeChallenges.length > 0 ? 'View my challenges' : 'Explore challenges'} <ArrowRight size={14} />
             </button>
           </div>
@@ -1865,7 +1955,7 @@ function QuickTile({ icon: Icon, title, text, onClick }: { icon: IconType; title
   );
 }
 
-const subjectColours = ['mint', 'gold', 'blue', 'rose', 'violet'];
+const subjectColours = ['mint', 'peach', 'blue', 'rose', 'violet'];
 
 /** Remaining time for a live session, derived exactly like the server does. */
 function remainingForSession(session: PomodoroSession, nowMs: number): number {
@@ -3013,7 +3103,7 @@ function Challenges({
           <span className="eyebrow">A HEALTHY KIND OF COMPETITION</span>
           <h2>Compete with your past self.<br /><em>Support each other.</em></h2>
           <p>Keep worship personal. Points come from real activity — finished focus sessions, completed tasks and challenge days — never per prayer.</p>
-          <button className="gold-button" onClick={() => setTab('explore')}>
+          <button className="primary-button" onClick={() => setTab('explore')}>
             Start a challenge <ArrowRight size={15} />
           </button>
         </div>
@@ -3820,6 +3910,8 @@ function Profile({
   onboardingResumeStep,
   onOpenFeedback,
   onNavigate,
+  language,
+  onLanguageChange,
 }: {
   onNotify: (message: string) => void;
   user: AuthUser | null;
@@ -3834,6 +3926,8 @@ function Profile({
   onboardingResumeStep: number;
   onOpenFeedback: () => void;
   onNavigate: (page: Page) => void;
+  language: AppLanguage;
+  onLanguageChange: (language: AppLanguage) => void;
 }) {
   const displayName = user?.name || (guestMode ? 'Guest preview' : 'Your account');
   const initials = displayName
@@ -3881,6 +3975,14 @@ function Profile({
 
         <section className="panel settings-card">
           <SectionTitle title="Preferences" />
+          <div className="setting-row-static">
+            <div className="setting-icon"><Languages size={17} /></div>
+            <div><strong>Language · Bhasha</strong><span>Login aur onboarding ki bhasha</span></div>
+            <div className="lang-switch" role="group" aria-label="Language">
+              <button type="button" className={language === 'en' ? 'selected' : ''} onClick={() => onLanguageChange('en')}>English</button>
+              <button type="button" className={language === 'hi' ? 'selected' : ''} onClick={() => onLanguageChange('hi')}>Hinglish</button>
+            </div>
+          </div>
           <SettingRow
             icon={Bell}
             title="Notifications"

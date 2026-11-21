@@ -9,6 +9,7 @@ import {
   Search,
   Target,
 } from 'lucide-react';
+import { curatedHinglishMeaning } from '../lib/curatedQuranMeanings';
 import {
   addBookmark,
   deleteBookmark,
@@ -67,6 +68,11 @@ export default function QuranBrowser({
   // ayah list); Arabic is always shown.
   const [showTransliteration, setShowTransliteration] = useState(true);
   const [showTranslation, setShowTranslation] = useState(true);
+  // Hinglish tarjuma exists ONLY for the 4 curated verses (see
+  // curatedQuranMeanings.ts) — there is no verified full-Qur'an
+  // Hinglish translation upstream, so this toggle shows a line only
+  // on those ayahs and nothing is invented for the rest.
+  const [showHinglishMeaning, setShowHinglishMeaning] = useState(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const loadMeta = useCallback(async () => {
@@ -337,7 +343,20 @@ export default function QuranBrowser({
           >
             English tarjuma: {showTranslation ? 'On · Dikhao' : 'Off · Chhupao'}
           </button>
+          <button
+            className="outline-button"
+            aria-pressed={showHinglishMeaning}
+            onClick={() => setShowHinglishMeaning((value) => !value)}
+          >
+            Hinglish tarjuma: {showHinglishMeaning ? 'On · Dikhao' : 'Off · Chhupao'}
+          </button>
         </div>
+
+        <p className="quran-source-line">
+          Hinglish tarjuma sirf curated aayaton (13:28, 2:286, 20:25–28, 23:97–98) ke liye
+          dikhta hai — poore Qur'an ka verified Hinglish tarjuma abhi available nahi hai,
+          isliye baaki aayaton par sirf transliteration + English tarjuma hai.
+        </p>
 
         <div className="quran-ayah-list">
           {selected.surah.ayahs.map((ayah) => (
@@ -380,6 +399,19 @@ export default function QuranBrowser({
                   {ayah.translation}
                 </p>
               )}
+              {showHinglishMeaning &&
+                (() => {
+                  const curated = curatedHinglishMeaning(
+                    selected.surah.number,
+                    ayah.numberInSurah,
+                  );
+                  return curated ? (
+                    <p className="quran-translation">
+                      <span className="eyebrow">TARJUMA · HINGLISH · </span>
+                      {curated.meaning}
+                    </p>
+                  ) : null;
+                })()}
               {ayah.sajda && <span className="quran-sajda">Sajda ayah · Sajda wali ayat</span>}
             </article>
           ))}

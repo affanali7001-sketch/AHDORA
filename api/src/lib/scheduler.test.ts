@@ -188,6 +188,37 @@ describe('notificationCopy (Hinglish)', () => {
     expect(prayerMissed('Asr').title).toBe('Asr ki namaz reh gayi');
   });
 
+  it('carries Quranic teaching in the Asr-missed copy, with a Qaza prompt', () => {
+    const copy = prayerMissed('Asr');
+    expect(copy.title).toBe('Asr ki namaz reh gayi');
+    expect(copy.body).toContain('2:238');
+    expect(copy.body).toContain('552');
+    expect(copy.body).toContain('553');
+    expect(copy.body).toContain('Qaza abhi padh lo');
+    // Two short lines max, and no invented "shifa (healing) in Asr" claim.
+    expect(copy.body.split('\n').length).toBeLessThanOrEqual(2);
+    expect(copy.body.toLowerCase()).not.toContain('shifa');
+  });
+
+  it('carries Quranic teaching in the Fajr-missed copy, with a Qaza prompt', () => {
+    const copy = prayerMissed('Fajr');
+    expect(copy.title).toBe('Fajr ki namaz reh gayi');
+    expect(copy.body).toContain('19:59');
+    expect(copy.body).toContain('74:42-43');
+    expect(copy.body).toContain('Qaza abhi padh lo');
+    expect(copy.body.split('\n').length).toBeLessThanOrEqual(2);
+    expect(copy.body.toLowerCase()).not.toContain('shifa');
+  });
+
+  it('keeps the plain missed copy (with Qaza prompt) for other prayers', () => {
+    expect(prayerMissed('Dhuhr')).toEqual({
+      title: 'Dhuhr ki namaz reh gayi',
+      body: 'Dhuhr ki namaz miss ho gayi — Qaza padh lo, abhi bhi waqt hai.',
+    });
+    expect(prayerMissed('Maghrib').body).not.toContain('2:238');
+    expect(prayerMissed('Isha').body).not.toContain('19:59');
+  });
+
   it('welcomes the user by name in Hinglish', () => {
     const copy = welcome('Affan');
     expect(copy.title).toBe('AHDORA me swagat hai!');

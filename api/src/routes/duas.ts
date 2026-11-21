@@ -19,7 +19,7 @@ import {
 export const duasRouter = Router();
 
 const SOURCE_NOTE =
-  'Har dua ke saath uska exact hadith source diya gaya hai (Sahih al-Bukhari, Sahih Muslim, Sunan Abi Dawud, Jami’ at-Tirmidhi). Koi dua apni taraf se nahi banayi gayi.';
+  'Har dua ke saath uska exact source diya gaya hai (Quran, Sahih al-Bukhari, Sahih Muslim, Sunan Abi Dawud, Jami’ at-Tirmidhi, Musnad Ahmad). Koi dua apni taraf se nahi banayi gayi.';
 
 duasRouter.get('/', (req, res) => {
   const topic = typeof req.query.topic === 'string' ? req.query.topic.trim() : '';

@@ -110,6 +110,25 @@ export type TaskInput = {
   status?: TaskStatus;
 };
 
+/* Subject colours — display values vs the API wire values.
+   Phase 13 renamed the old colour to "peach" in the UI, but the API
+   (api/src/models/StudySubject.ts, owned by the API team) still
+   validates colour against its own enum, so the wire value below is
+   translated here at the boundary only. Existing subjects stored
+   under the old value keep working; new ones are created with the
+   same wire value. If the API enum is ever renamed to "peach",
+   delete this mapping and pass colours through unchanged. */
+const WIRE_COLOUR_FOR_PEACH = 'gold';
+function toWireColour(colour: string): string {
+  return colour === 'peach' ? WIRE_COLOUR_FOR_PEACH : colour;
+}
+function fromWireColour(colour: string): string {
+  return colour === WIRE_COLOUR_FOR_PEACH ? 'peach' : colour;
+}
+function mapSubject(subject: StudySubject): StudySubject {
+  return { ...subject, colour: fromWireColour(subject.colour) };
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await apiFetch(path, {
     ...options,
@@ -137,23 +156,23 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export async function fetchSubjects(): Promise<StudySubject[]> {
   const result = await request<{ subjects: StudySubject[] }>('/api/study/subjects');
-  return result.subjects ?? [];
+  return (result.subjects ?? []).map(mapSubject);
 }
 
 export async function createSubject(input: SubjectInput): Promise<StudySubject> {
   const result = await request<{ subject: StudySubject }>('/api/study/subjects', {
     method: 'POST',
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, colour: input.colour ? toWireColour(input.colour) : undefined }),
   });
-  return result.subject;
+  return mapSubject(result.subject);
 }
 
 export async function updateSubject(id: string, input: SubjectInput): Promise<StudySubject> {
   const result = await request<{ subject: StudySubject }>(`/api/study/subjects/${id}`, {
     method: 'PUT',
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, colour: input.colour ? toWireColour(input.colour) : undefined }),
   });
-  return result.subject;
+  return mapSubject(result.subject);
 }
 
 export async function deleteSubject(id: string): Promise<void> {
@@ -202,7 +221,14 @@ export async function fetchToday(): Promise<TodayResponse> {
 }
 
 export async function fetchStudyStats(): Promise<StudyStats> {
-  return request<StudyStats>('/api/study/stats');
+  const stats = await request<StudyStats>('/api/study/stats');
+  return {
+    ...stats,
+    subjectBreakdown: (stats.subjectBreakdown ?? []).map((row) => ({
+      ...row,
+      colour: fromWireColour(row.colour),
+    })),
+  };
 }
 
 /* Pomodoro — the server is the source of truth for the timer. */

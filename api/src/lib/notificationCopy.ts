@@ -34,6 +34,22 @@ export function prayerDeadlineWarning(prayer: PrayerName): NotificationCopy {
 }
 
 export function prayerMissed(prayer: PrayerName): NotificationCopy {
+  if (prayer === 'Asr') {
+    return {
+      title: 'Asr ki namaz reh gayi',
+      body:
+        'Quran 2:238 — beech wali namaz (Asr) ki khaas hifazat karo. Bukhari 552: Asr miss karna jaise ghar-maal kho dena; Bukhari 553: Asr chhodne se amal zaya ho jate hain.\n' +
+        'Qaza abhi padh lo — der mat karo.',
+    };
+  }
+  if (prayer === 'Fajr') {
+    return {
+      title: 'Fajr ki namaz reh gayi',
+      body:
+        'Quran 19:59 — namaz bhoolne wale bhatak jate hain. Quran 74:42-43 — "Saqar me kya le gaya?" — "Hum namaz nahi padhte the."\n' +
+        'Qaza abhi padh lo — der mat karo.',
+    };
+  }
   return {
     title: `${prayer} ki namaz reh gayi`,
     body: `${prayer} ki namaz miss ho gayi — Qaza padh lo, abhi bhi waqt hai.`,

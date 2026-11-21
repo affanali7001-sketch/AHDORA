@@ -22,16 +22,28 @@
  * References were checked against sunnah.com / islamqa.info on
  * 2026-11-20: Bukhari 6324, 6325, 6320, 2311, 5009, 6346, 142,
  * 5376; Muslim 234, 2730, 2714; Abu Dawud 5095, 4023, 3767;
- * Tirmidhi 3426, 3458.
+ * Tirmidhi 3426, 3458. New anxiety / overthinking / sleep entries
+ * added 2026-11-21 (Phase 13): Bukhari 6369, 247, 5017, 3705,
+ * 6318; Muslim 134, 2203, 2710; Abu Dawud 5090; Musnad Ahmad
+ * 3712 (graded sahih); Quran 21:87, 3:173, 7:200, 16:98.
+ *
+ * Some requested items were NOT duplicated because they already
+ * exist above: the distress dua (Bukhari 6346 / Muslim 2730) is
+ * 'pareshani-mein'; the sleep duas Bukhari 6324, 6320 and 6325,
+ * Ayat al-Kursi (2311) and Baqarah 2:285-286 (5009) are already
+ * listed. The new sleep entries are only the three that were
+ * missing: aslamtu-nafsi, teen Qul, Tasbeeh-e-Fatimah.
  */
 
-export type DuaTopic = 'sleep' | 'morning' | 'daily' | 'wudu';
+export type DuaTopic = 'sleep' | 'morning' | 'daily' | 'wudu' | 'anxiety' | 'overthinking';
 
 export const DUA_TOPICS: { id: DuaTopic; label: string; hinglish: string }[] = [
   { id: 'sleep', label: 'Neend', hinglish: 'Sone aur neend se judi duas' },
   { id: 'morning', label: 'Subah', hinglish: 'Jaagne par' },
   { id: 'daily', label: 'Rozana', hinglish: 'Roz-marra ke kaam' },
   { id: 'wudu', label: 'Wuzu', hinglish: 'Wuzu ke baad' },
+  { id: 'anxiety', label: 'Anxiety', hinglish: 'Pareshani, ghabrahat aur bechaini ke liye' },
+  { id: 'overthinking', label: 'Overthinking', hinglish: 'Waswas aur zyada sochne par' },
 ];
 
 export type DuaText = {
@@ -211,6 +223,158 @@ export const DUAS: Dua[] = [
       'Ash-hadu an laa ilaaha illallaahu wahdahu laa shareeka lah, wa ash-hadu anna Muhammadan ‘abduhu wa rasooluh.',
     meaning:
       'Main gawahi deta hoon ke Allah ke siwa koi ma’bood nahi, woh akela hai, uska koi shareek nahi; aur main gawahi deta hoon ke Muhammad (ﷺ) uske bande aur Rasool hain.',
+  },
+  // ---- Anxiety (pareshani / ghabrahat) — added 2026-11-21 ----
+  {
+    id: 'pareshani-ghabrahat',
+    title: 'Fikr aur gham se panaah',
+    topics: ['anxiety'],
+    when: 'Jab fikr, gham ya ghabrahat mehsoos ho',
+    source: 'Sahih al-Bukhari 6369',
+    kind: 'dua',
+    arabic:
+      'اللَّهُمَّ إِنِّي أَعُوذُ بِكَ مِنَ الْهَمِّ وَالْحَزَنِ، وَالْعَجْزِ وَالْكَسَلِ، وَالْجُبْنِ وَالْبُخْلِ، وَضَلَعِ الدَّيْنِ وَغَلَبَةِ الرِّجَالِ',
+    transliteration:
+      "Allahumma inni a'udhu bika minal-hammi wal-hazani, wal-'ajzi wal-kasali, wal-jubni wal-bukhli, wa dala'id-dayni wa ghalabatir-rijal.",
+    meaning:
+      'Ae Allah! Main Teri panaah maangta hoon fikr aur gham se, be-basi aur susti se, buzdili aur kanjoosi se, qarz ke bojh se aur logon ke ghalbe se.',
+  },
+  {
+    id: 'allahumma-inni-abduka',
+    title: 'Bande ki dua — Quran dil ka noor bane',
+    topics: ['anxiety'],
+    when: 'Jab dil bojhal ho, gham ya fikr zyada ho',
+    source: 'Musnad Ahmad 3712 (graded sahih)',
+    kind: 'dua',
+    arabic:
+      'اللَّهُمَّ إِنِّي عَبْدُكَ، ابْنُ عَبْدِكَ، ابْنُ أَمَتِكَ، نَاصِيَتِي بِيَدِكَ، مَاضٍ فِيَّ حُكْمُكَ، عَدْلٌ فِيَّ قَضَاؤُكَ، أَسْأَلُكَ بِكُلِّ اسْمٍ هُوَ لَكَ سَمَّيْتَ بِهِ نَفْسَكَ، أَوْ أَنْزَلْتَهُ فِي كِتَابِكَ، أَوْ عَلَّمْتَهُ أَحَدًا مِنْ خَلْقِكَ، أَوِ اسْتَأْثَرْتَ بِهِ فِي عِلْمِ الْغَيْبِ عِنْدَكَ، أَنْ تَجْعَلَ الْقُرْآنَ رَبِيعَ قَلْبِي، وَنُورَ صَدْرِي، وَجَلَاءَ حُزْنِي، وَذَهَابَ هَمِّي',
+    transliteration:
+      "Allahumma inni 'abduka ibnu 'abdika ibnu amatika, nasiyati biyadika, madin fiyya hukmuka, 'adlun fiyya qada'uka, as'aluka bikulli ismin huwa laka sammayta bihi nafsaka aw anzaltahu fi kitabika aw 'allamtahu ahadan min khalqika awista'tharta bihi fi 'ilmil-ghaybi 'indaka an taj'alal-Qur'ana rabi'a qalbi wa nura sadri wa jala'a huzni wa dhahaba hammi.",
+    meaning:
+      'Ae Allah! Main Tera banda hoon, Tere bande ka beta, Teri bandi ka beta. Meri peshani Tere haath mein hai, Tera hukm mujh par jaari hai, Tera faisla mere baare mein bilkul insaaf hai. Main Tujhse Tere har us naam ke wasile se maangta hoon jo Tune khud apne liye rakha, ya apni Kitab mein nazil kiya, ya apni makhlooq mein se kisi ko sikhaya, ya apne paas ghaib ke ilm mein mehfooz rakha — ke Tu Quran ko mere dil ki bahar, mere seene ka noor, mere gham ko door karne wala aur meri fikr ko mitaane wala bana de.',
+    note: 'Isi hadith mein hai ke jo bhi is dua ko padhe, Allah uska gham aur fikr door karke uski jagah khushi de deta hai.',
+  },
+  {
+    id: 'rehmat-ki-ummed',
+    title: 'Allah ki rehmat ki ummeed',
+    topics: ['anxiety'],
+    when: 'Subah-shaam, ya jab dil bechain ho',
+    source: 'Sunan Abi Dawud 5090 (hasan)',
+    kind: 'dua',
+    arabic:
+      'اللَّهُمَّ رَحْمَتَكَ أَرْجُو، فَلَا تَكِلْنِي إِلَى نَفْسِي طَرْفَةَ عَيْنٍ، وَأَصْلِحْ لِي شَأْنِي كُلَّهُ، لَا إِلَهَ إِلَّا أَنْتَ',
+    transliteration:
+      "Allahumma rahmataka arju, fala takilni ila nafsi tarfata 'ayn, wa aslih li sha'ni kullahu, la ilaha illa anta.",
+    meaning:
+      'Ae Allah! Main Teri rehmat ki ummeed rakhta hoon — mujhe ek pal ke liye bhi mere nafs ke hawale na kar, aur mere saare kaam sudhaar de. Tere siwa koi ma’bood nahi.',
+  },
+  // ---- Overthinking / waswas — added 2026-11-21 ----
+  {
+    id: 'yunus-ki-dua',
+    title: 'Yunus (A) ki dua',
+    topics: ['overthinking'],
+    when: 'Jab dil par bojh ho, ghabrahat ya galti ka ehsaas ho',
+    source: 'Quran 21:87',
+    kind: 'dua',
+    arabic: 'لَا إِلَهَ إِلَّا أَنْتَ سُبْحَانَكَ إِنِّي كُنْتُ مِنَ الظَّالِمِينَ',
+    transliteration: 'La ilaha illa anta, subhanaka, inni kuntu minaz-zalimin.',
+    meaning:
+      'Tere siwa koi ma’bood nahi, Tu paak hai — beshak main hi zalimon mein se tha.',
+    note: 'Yeh dua Hazrat Yunus (A) ne machhli ke pet mein padhi thi, aur Allah ne unki dua qubool karke unhe najaat di.',
+  },
+  {
+    id: 'hasbunallahu',
+    title: 'Hasbunallahu wa ni’mal-wakil',
+    topics: ['overthinking'],
+    when: 'Jab kisi baat ki fikr sataaye ya darr lage',
+    source: 'Quran 3:173',
+    kind: 'dua',
+    arabic: 'حَسْبُنَا اللَّهُ وَنِعْمَ الْوَكِيلُ',
+    transliteration: "Hasbunallahu wa ni'mal-wakil.",
+    meaning: 'Allah hi hamare liye kaafi hai, aur woh behtareen kaar-saaz hai.',
+  },
+  {
+    id: 'amantu-billahi',
+    title: 'Waswasa aaye to — imaan ka iqraar',
+    topics: ['overthinking'],
+    when: 'Jab shaitan dil mein waswasa dale',
+    source: 'Sahih Muslim 134',
+    kind: 'dua',
+    arabic: 'آمَنْتُ بِاللَّهِ وَرُسُلِهِ',
+    transliteration: 'Amantu billahi wa rusulihi.',
+    meaning: 'Main Allah par aur uske Rasoolon par imaan laya.',
+    note: 'Jab shaitan Allah ke baare mein bure khayal waswase ke roop mein dale, to yeh kehkar Allah ki panaah maangein — Sahih Muslim 134 mein iska hukm hai.',
+  },
+  {
+    id: 'taawwudh',
+    title: 'Ta’awwudh — shaitan se panaah',
+    topics: ['overthinking'],
+    when: 'Jab bhi waswasa ya bura khayal aaye',
+    source: 'Quran 7:200; Quran 16:98',
+    kind: 'dua',
+    arabic: 'أَعُوذُ بِاللَّهِ مِنَ الشَّيْطَانِ الرَّجِيمِ',
+    transliteration: "A'udhu billahi minash-shaytanir-rajim.",
+    meaning: 'Main Allah ki panaah maangta hoon shaitan-e-mardood se.',
+    note: 'Quran mein hukm hai: jab shaitan ki taraf se koi waswasa aaye, to Allah ki panaah maango (7:200); aur Quran padhne se pehle bhi ta’awwudh padho (16:98).',
+  },
+  {
+    id: 'namaz-mein-waswasa',
+    title: 'Namaz mein waswasa aaye to',
+    topics: ['overthinking'],
+    when: 'Namaz ke dauraan jab waswasa aaye',
+    source: 'Sahih Muslim 2203',
+    kind: 'dua',
+    arabic: 'أَعُوذُ بِاللَّهِ مِنَ الشَّيْطَانِ الرَّجِيمِ',
+    transliteration: "A'udhu billahi minash-shaytanir-rajim.",
+    meaning: 'Main Allah ki panaah maangta hoon shaitan-e-mardood se.',
+    note: 'Ta’awwudh padhein aur baayein taraf teen baar halki si thook dein (bina thook nikale). Nabi (ﷺ) ne Uthman ibn Abi al-’As (R) ko namaz mein waswasa aane par yahi tareeqa bataya tha.',
+  },
+  // ---- Sleep — new entries added 2026-11-21 ----
+  // (Bismika Allahumma amutu wa ahya, Bismika Rabbi wada'tu janbi,
+  //  jaagne ki dua, Ayat al-Kursi aur Baqarah ki aakhri do ayatein
+  //  pehle se maujood hain — duplicate nahi kiye gaye.)
+  {
+    id: 'aslamtu-nafsi',
+    title: 'Sone se pehle — apne aap ko Allah ke hawale',
+    topics: ['sleep'],
+    when: 'Sone se pehle, bistar par lete waqt',
+    source: 'Sahih al-Bukhari 247; Sahih Muslim 2710',
+    kind: 'dua',
+    arabic:
+      'اللَّهُمَّ أَسْلَمْتُ نَفْسِي إِلَيْكَ، وَفَوَّضْتُ أَمْرِي إِلَيْكَ، وَأَلْجَأْتُ ظَهْرِي إِلَيْكَ، رَغْبَةً وَرَهْبَةً إِلَيْكَ، لَا مَلْجَأَ وَلَا مَنْجَا مِنْكَ إِلَّا إِلَيْكَ، اللَّهُمَّ آمَنْتُ بِكِتَابِكَ الَّذِي أَنْزَلْتَ، وَبِنَبِيِّكَ الَّذِي أَرْسَلْتَ',
+    transliteration:
+      "Allahumma aslamtu nafsi ilayk, wa fawwadtu amri ilayk, wa alja'tu zahri ilayk, raghbatan wa rahbatan ilayk, la malja'a wa la manja minka illa ilayk, Allahumma amantu bikitabikal-ladhi anzalt, wa binabiyyikal-ladhi arsalt.",
+    meaning:
+      'Ae Allah! Maine apni jaan Tere hawale kar di, apna kaam Tere supurd kar diya, apni peeth Teri taraf laga li — Teri taraf raghbat aur Tere darr ke saath. Tere siwa koi panaah aur najaat ki jagah nahi. Ae Allah! Main imaan laya Teri us Kitab par jo Tune nazil ki, aur Tere us Nabi par jise Tune bheja.',
+    note: 'Hadith mein hai ke yeh padh kar sone wala agar usi raat inteqal kar jaye to fitrat (Islam) par hoga.',
+  },
+  {
+    id: 'sone-se-pehle-teen-qul',
+    title: 'Sone se pehle — Teen Qul',
+    topics: ['sleep'],
+    when: 'Sone se pehle, bistar par',
+    source: 'Sahih al-Bukhari 5017',
+    kind: 'quran-amal',
+    quranSurah: 112,
+    quranSurahName: 'Al-Ikhlas',
+    quranAyahStart: 1,
+    quranAyahEnd: 4,
+    practice:
+      'Sone se pehle Surah Al-Ikhlas (112), Surah Al-Falaq (113) aur Surah An-Nas (114) padh kar dono hatheliyon par phoonk dein, phir unhe sar aur chehre se shuru karke jism par jahan tak haath pahunche, pher lein — yeh teen baar karein. Hadith mein hai ke Nabi (ﷺ) har raat sone se pehle aisa karte the. Poori suratein Quran browser mein padhein — yahan unka text copy nahi kiya gaya.',
+  },
+  {
+    id: 'tasbeeh-e-fatimah',
+    title: 'Sone se pehle — Tasbeeh-e-Fatimah',
+    topics: ['sleep'],
+    when: 'Sone se pehle, bistar par',
+    source: 'Sahih al-Bukhari 3705; Sahih al-Bukhari 6318',
+    kind: 'dua',
+    arabic: 'سُبْحَانَ اللَّهِ، الْحَمْدُ لِلَّهِ، اللَّهُ أَكْبَرُ',
+    transliteration:
+      'SubhanAllah (33 baar), Alhamdulillah (33 baar), Allahu Akbar (34 baar).',
+    meaning:
+      'SubhanAllah — Allah paak hai. Alhamdulillah — tamam tareefein Allah ke liye hain. Allahu Akbar — Allah sabse bada hai.',
+    note: 'Nabi (ﷺ) ne Hazrat Fatimah (R) ko sone se pehle yeh tasbeeh padhne ko bataya tha — yeh khadim se behtar hai.',
   },
 ];
 
