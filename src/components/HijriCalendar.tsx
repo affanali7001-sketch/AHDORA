@@ -33,6 +33,28 @@ type UpcomingOccasion = {
  * labelled `andaaz`, because the real date depends on moon
  * sighting. If the scan finds nothing, the card is hidden.
  */
+/**
+ * Month header: the API already includes the year in every entry
+ * ("Jumādá al-ākhirah 1448"). When a Gregorian month spans two
+ * Hijri months of the SAME year, show the year once at the end
+ * ("Jumādá al-ūlá – Jumādá al-ākhirah 1448"); when it crosses
+ * years, keep both years ("Dhū al-Ḥijjah 1447 / Muḥarram 1448").
+ * A single month stays "Month Year".
+ */
+export function formatHijriMonthHeader(months: string[]): string {
+  if (months.length !== 2) return months.join(' / ');
+  const split = (entry: string): { name: string; year: string } => {
+    const lastSpace = entry.lastIndexOf(' ');
+    if (lastSpace === -1) return { name: entry, year: '' };
+    return { name: entry.slice(0, lastSpace), year: entry.slice(lastSpace + 1) };
+  };
+  const [first, second] = months.map(split);
+  if (first.year !== '' && first.year === second.year) {
+    return `${first.name} – ${second.name} ${first.year}`;
+  }
+  return months.join(' / ');
+}
+
 export default function HijriCalendar({
   onNotify,
   guestMode,
@@ -252,7 +274,7 @@ export default function HijriCalendar({
               <ChevronLeft size={18} />
             </button>
             <strong>
-              {month?.hijriMonths.join(' / ') ?? ''}
+              {month ? formatHijriMonthHeader(month.hijriMonths) : ''}
             </strong>
             <button className="icon-button" aria-label={s.hijri.nextMonth} onClick={() => shiftMonth(1)}>
               <ChevronRight size={18} />
