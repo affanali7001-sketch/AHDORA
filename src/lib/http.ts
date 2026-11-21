@@ -33,11 +33,18 @@
  *   WebView origin (https://localhost) is not on the server's CORS
  *   allowlist, and the SameSite=Lax session cookie would not be set by
  *   a cross-site fetch response. Instead requests go through
- *   CapacitorHttp, the native HTTP layer: it bypasses CORS and shares
- *   the WebView cookie jar on Android, so the HttpOnly session cookie
- *   and the CSRF cookie behave like first-party cookies. The response
- *   is wrapped back into a standard Response so every caller is
- *   unchanged. On-device login still needs a real-device check.
+ *   CapacitorHttp, the native HTTP layer: it bypasses CORS, but it
+ *   does NOT send back cookies set by earlier responses (proven
+ *   2026-11-21 by Heroku logs: CSRF GET 200, login POST 403
+ *   "Invalid CSRF token" twice — the ahdora_csrf cookie was never
+ *   sent back). So this file keeps a manual cookie jar for the
+ *   native path (see nativeCookieJar): Set-Cookie headers are parsed
+ *   out of native responses, the jar is sent as a Cookie header on
+ *   later requests, and the CSRF token is seeded into the jar
+ *   directly from the token body (the token IS the cookie value).
+ *   The response is wrapped back into a standard Response so every
+ *   caller is unchanged. On-device login still needs a real-device
+ *   check.
  * - No `@capacitor/core` dependency: the repo has no Capacitor
  *   packages (capacitor.config.ts / android/ live only in the
  *   apk-build scratch copy), so the native layer is reached through
@@ -103,9 +110,50 @@ function isNetworkFailure(error: unknown): boolean {
 }
 
 /**
+ * Manual cookie jar for the native (CapacitorHttp) path only.
+ *
+ * The native layer does not reliably send back cookies set by
+ * earlier responses — neither the ahdora_csrf cookie from the token
+ * GET nor the HttpOnly session cookie from a login POST. Without the
+ * cookie, the server's double-submit CSRF check rejects every
+ * mutation with 403 "Invalid CSRF token", and the client retry fails
+ * the same way (the token header is fresh but the cookie is still
+ * missing). So: parse Set-Cookie out of native responses and send
+ * the jar back as a Cookie header on later native requests.
+ */
+const nativeCookieJar = new Map<string, string>();
+
+/** CSRF cookie name — must match api/src/config.ts CSRF_COOKIE_NAME. */
+const CSRF_COOKIE_NAME = 'ahdora_csrf';
+
+function storeNativeCookies(headers: unknown): void {
+  if (!headers || typeof headers !== 'object') return;
+  for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+    if (key.toLowerCase() !== 'set-cookie') continue;
+    const values = Array.isArray(value) ? value : [value];
+    for (const raw of values) {
+      if (typeof raw !== 'string') continue;
+      // Take name=value before the first ';' (attributes follow it).
+      const pair = raw.split(';', 1)[0].trim();
+      const eq = pair.indexOf('=');
+      if (eq <= 0) continue;
+      nativeCookieJar.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+    }
+  }
+}
+
+function nativeCookieHeader(): string | undefined {
+  if (nativeCookieJar.size === 0) return undefined;
+  return [...nativeCookieJar.entries()].map(([name, value]) => `${name}=${value}`).join('; ');
+}
+
+/**
  * Native HTTP request via CapacitorHttp, adapted back to a standard
- * Response. responseType 'text' is forced so the body is always a
- * plain string here; callers parse JSON themselves via .json().
+ * Response. responseType 'text' is requested, but some native layers
+ * still return parsed objects — those are JSON-stringified, never
+ * dropped, so error bodies (e.g. the 403 CSRF message) survive.
+ * Cookies are carried manually (see nativeCookieJar): the native
+ * layer does not send back cookies set by earlier responses.
  *
  * Slow 4G: 10s to connect, 30s to read, and ONE retry when no HTTP
  * response was received at all (transport error / timeout / status 0)
@@ -123,10 +171,17 @@ async function nativeFetch(path: string, init: RequestInit): Promise<Response> {
   let lastError: unknown = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
+      // Send the manual cookie jar: the native layer does not send
+      // back cookies set by earlier responses (session + CSRF).
+      const requestHeaders = { ...headers };
+      if (!requestHeaders['Cookie']) {
+        const cookieHeader = nativeCookieHeader();
+        if (cookieHeader) requestHeaders['Cookie'] = cookieHeader;
+      }
       const result = await plugin.request({
         url,
         method,
-        headers,
+        headers: requestHeaders,
         data: init.body ?? undefined,
         responseType: 'text',
         connectTimeout: 10_000,
@@ -135,7 +190,18 @@ async function nativeFetch(path: string, init: RequestInit): Promise<Response> {
       // Some native layers surface a transport failure as status 0
       // instead of rejecting — treat it as a retryable failure.
       if (!result.status) throw new Error(NETWORK_ERROR_MESSAGE);
-      const body = typeof result.data === 'string' ? result.data : '';
+      // Persist any cookies the response set (session + CSRF).
+      storeNativeCookies(result.headers);
+      // The plugin may return a parsed object despite responseType
+      // 'text' — never drop the body: a 403 without its error body
+      // surfaces as a generic "Request failed" instead of the real
+      // CSRF message.
+      const body =
+        typeof result.data === 'string'
+          ? result.data
+          : result.data == null
+            ? ''
+            : JSON.stringify(result.data);
       return new Response(body, {
         status: result.status,
         headers: (result.headers ?? {}) as Record<string, string>,
@@ -175,7 +241,13 @@ async function fetchCsrfToken(): Promise<string | null> {
     const promise = doRequest('/api/auth/csrf', { credentials: 'include', cache: 'no-store' })
       .then(async (response) => {
         const data = await response.json().catch(() => ({}));
-        return typeof data.csrfToken === 'string' ? data.csrfToken : null;
+        const token = typeof data.csrfToken === 'string' ? data.csrfToken : null;
+        // Native path: seed the manual cookie jar from the token —
+        // the token IS the ahdora_csrf cookie value by construction,
+        // so the login POST sends the cookie even when the native
+        // layer hides Set-Cookie headers entirely.
+        if (token && isNativeHttp()) nativeCookieJar.set(CSRF_COOKIE_NAME, token);
+        return token;
       })
       .catch(() => null);
     csrfPromise = promise;
