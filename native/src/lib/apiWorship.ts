@@ -272,6 +272,41 @@ export async function fetchHijriMonth(year: number, month: number): Promise<Hijr
   return requestLive<HijriMonth>(`/api/hijri/month?year=${year}&month=${month}`);
 }
 
+export type HijriEventKey =
+  | 'ramadan'
+  | 'eid-fitr'
+  | 'eid-adha'
+  | 'qadr'
+  | 'arafah'
+  | 'new-year'
+  | 'ashura'
+  | 'mawlid'
+  | 'miraj'
+  | 'barat';
+
+/** One big Islamic day from GET /api/hijri/events (real Aladhan markers only). */
+export type HijriEvent = {
+  key: HijriEventKey;
+  label: string;
+  hijriDay: string;
+  hijriMonth: string;
+  hijriYear: string;
+  gregorianDate: string;
+  daysUntil: number;
+};
+
+export type HijriEventsResponse = {
+  source: string;
+  convention: string;
+  today: string;
+  adjustmentDays: number;
+  events: HijriEvent[];
+};
+
+export async function fetchHijriEvents(): Promise<HijriEventsResponse> {
+  return requestLive<HijriEventsResponse>('/api/hijri/events');
+}
+
 export type Mosque = {
   id: string;
   name: string;
