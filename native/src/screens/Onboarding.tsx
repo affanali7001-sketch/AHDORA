@@ -181,6 +181,7 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
     if (targetStep === 0) {
       if (!form.name.trim()) fields.name = s.obRequired;
       if (!form.city.trim()) fields.city = s.obRequired;
+      if (!form.state.trim()) fields.state = s.obRequired;
     } else if (targetStep === 1) {
       if (!form.course.trim()) fields.course = s.obRequired;
       // School (Class 1–12) has no semester — never ask for it.
@@ -286,7 +287,7 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
       : semesterLabel;
 
   const reviewLines = [
-    `${form.name || '—'} · ${form.city || '—'}`,
+    `${form.name || '—'} · ${form.city || '—'}${form.state ? `, ${form.state}` : ''}`,
     `${form.course || '—'} · ${eduLabel}`,
     `College ${form.collegeStart ? formatTime12h(form.collegeStart) : '?'} – ${
       form.collegeEnd ? formatTime12h(form.collegeEnd) : '?'
@@ -332,6 +333,15 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
             />
           </Field>
           {fieldError('city')}
+          <Field label={s.obState}>
+            <Input
+              value={form.state}
+              onChangeText={(v) => update('state', v)}
+              placeholder="Uttar Pradesh"
+              autoCapitalize="words"
+            />
+          </Field>
+          {fieldError('state')}
         </View>
       )}
 
