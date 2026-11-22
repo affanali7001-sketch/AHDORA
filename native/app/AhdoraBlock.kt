@@ -146,24 +146,27 @@ class AhdoraBlock : Module() {
     }
 
     Function("openAccessibilitySettings") {
-      val context = appContext.reactContext ?: return@Function
+      val context = appContext.reactContext ?: return@Function null
       val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
       (context as? Activity)?.startActivity(intent) ?: context.startActivity(intent)
+      null
     }
 
     Function("openUsageAccessSettings") {
-      val context = appContext.reactContext ?: return@Function
+      val context = appContext.reactContext ?: return@Function null
       val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
       (context as? Activity)?.startActivity(intent) ?: context.startActivity(intent)
+      null
     }
 
     Function("openOverlaySettings") {
-      val context = appContext.reactContext ?: return@Function
+      val context = appContext.reactContext ?: return@Function null
       val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
       (context as? Activity)?.startActivity(intent) ?: context.startActivity(intent)
+      null
     }
   }
 }
