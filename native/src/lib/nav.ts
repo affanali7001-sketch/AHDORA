@@ -51,6 +51,9 @@ export type ScreenProps = {
   onLoginSuccess: (u: AuthUser) => void;
   onLogout: () => Promise<void>;
   onOnboardingDone: () => void;
+  /** True only when Onboarding is opened fresh after signup/login
+   * (not when editing the profile) — shows the details-video popup. */
+  freshOnboarding?: boolean;
 };
 
 /** Bottom pill nav (shown only after login): Home, Dashboard, Quran, Focus, Profile. */

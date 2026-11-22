@@ -14,6 +14,7 @@
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -24,6 +25,8 @@ import type { ScreenProps } from '../lib/nav';
 import { stringsFor } from '../lib/strings';
 import { C, F, L, T } from '../lib/theme';
 import { Card, Chip, Field, Input, PillButton, ProgressBar } from '../components/ui';
+import TutorialVideo from '../components/TutorialVideo';
+import { SIGNUP_VIDEO_URL } from '../lib/videos';
 import {
   emptyProfileForm,
   formatTime12h,
@@ -48,8 +51,14 @@ const SEMESTERS = [
 
 const STUDY_HOURS = ['1', '2', '3', '4+'];
 
-export default function OnboardingScreen({ lang, user, onOnboardingDone }: ScreenProps) {
+export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOnboarding }: ScreenProps) {
   const s = stringsFor(lang);
+  // After a fresh signup the details form is where people get stuck —
+  // show a one-time popup pointing to the (Hinglish) how-to video.
+  // The popup text itself follows the user's language choice.
+  const [videoPopup, setVideoPopup] = useState<'prompt' | 'video' | null>(
+    freshOnboarding ? 'prompt' : null,
+  );
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<ProfileForm>(() => {
     const f = emptyProfileForm(user?.name ?? '');
@@ -457,6 +466,50 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone }: Scree
         disabled={skipping || busy}
         block
       />
+
+      {/* Details-video popup — fresh signup only, once per visit. */}
+      <Modal
+        visible={!loading && videoPopup !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setVideoPopup(null)}
+      >
+        <View style={styles.modalWrap}>
+          <View style={styles.modalCard}>
+            {videoPopup === 'prompt' ? (
+              <>
+                <Text style={styles.modalTitle}>{s.obVideoPopT}</Text>
+                <Text style={styles.modalBody}>{s.obVideoPopB}</Text>
+                <PillButton
+                  label={s.obVideoWatch}
+                  onPress={() => setVideoPopup('video')}
+                  block
+                />
+                <View style={{ marginTop: 10 }}>
+                  <PillButton
+                    label={s.obVideoLater}
+                    variant="ghost"
+                    onPress={() => setVideoPopup(null)}
+                    block
+                  />
+                </View>
+              </>
+            ) : (
+              <>
+                <TutorialVideo url={SIGNUP_VIDEO_URL} title={s.obVideoPopT} />
+                <View style={{ marginTop: 12 }}>
+                  <PillButton
+                    label={s.obVideoClose}
+                    variant="ghost"
+                    onPress={() => setVideoPopup(null)}
+                    block
+                  />
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -565,4 +618,32 @@ const styles = StyleSheet.create({
     lineHeight: 27, // 14 * 1.9, preview .card p line-height
   },
   footerRow: { flexDirection: 'row', gap: 10, marginTop: 22 },
+  modalWrap: {
+    flex: 1,
+    backgroundColor: 'rgba(6, 48, 42, 0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    backgroundColor: C.white,
+    borderRadius: 24,
+    padding: 20,
+    maxHeight: '88%',
+  },
+  modalTitle: {
+    fontFamily: F.sans,
+    fontSize: 18,
+    fontWeight: '800',
+    color: C.ink,
+    marginBottom: 6,
+  },
+  modalBody: {
+    fontFamily: F.sans,
+    fontSize: 14,
+    color: C.muted,
+    lineHeight: 22,
+    marginBottom: 16,
+  },
 });

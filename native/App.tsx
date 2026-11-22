@@ -98,6 +98,9 @@ export default function App() {
   const [lang, setLang] = useState<AppLanguage>('hi');
   const [user, setUser] = useState<AuthUser | null>(null);
   const [checkingOnboarding, setCheckingOnboarding] = useState(false);
+  // True only when Onboarding opens fresh after signup/login (not when
+  // editing the profile) — Onboarding shows the details-video popup.
+  const [onboardingFresh, setOnboardingFresh] = useState(false);
 
   // One family name per typeface; fontWeight selects the face (SDK 58
   // expo-font FontFamilyDefinition array form). Family names must match
@@ -146,6 +149,8 @@ export default function App() {
 
   function goTo(next: ScreenId) {
     if (next === screen) return;
+    // Editing the profile is not a fresh onboarding — no video popup.
+    if (next === 'onboarding') setOnboardingFresh(false);
     setHistory((prev) => [...prev, screen]);
     setScreen(next);
   }
@@ -163,6 +168,7 @@ export default function App() {
     try {
       const status = await loadProfileWithCompletion(u.name);
       if (!status.onboardingCompleted && !status.onboardingSkipped) {
+        setOnboardingFresh(true);
         setScreen('onboarding');
       } else {
         setScreen('dashboard');
@@ -192,6 +198,7 @@ export default function App() {
     onLoginSuccess: handleLoginSuccess,
     onLogout: handleLogout,
     onOnboardingDone: () => setScreen('dashboard'),
+    freshOnboarding: onboardingFresh,
   };
 
   const showPillNav = user !== null && screen !== 'onboarding' && !checkingOnboarding;
