@@ -22,18 +22,18 @@
  * standard South Asian Para names, confirmed against public Juz
  * listings (ayahdailyapp / quransarif / quranvocab).
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
+  Animated,
+  Easing,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
   View,
-  type ScrollViewInstance,
 } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
 import { stringsFor, type AppLanguage } from '../lib/strings';
@@ -263,7 +263,6 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
   const [paraDone, setParaDone] = useState(false);
   const [audio, setAudio] = useState<QuranAudioState>(() => getQuranAudioState());
 
-  const scrollRef = useRef<ScrollViewInstance | null>(null);
   const cacheRef = useRef<Record<number, PageCacheEntry>>({});
   const loadingRef = useRef<Set<number>>(new Set());
   const mountedRef = useRef(true);
@@ -271,6 +270,38 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
   const juzRef = useRef<number | null>(null);
   const viewRef = useRef<'list' | 'reader'>('list');
   const lastAudioPageRef = useRef(audio.page);
+
+  // --- Real page-turn state ---
+  // A flip is { from, to, dir }: the leaf (the `from` page going
+  // forward, the `to` page coming back) rotates around the book's
+  // left edge (the spine) while the under-page sits beneath it.
+  // `flipProgress` 0 = leaf flat on the right, 1 = leaf flat on
+  // the left. Forward: 0 -> 1. Backward: 1 -> 0.
+  type FlipState = { from: number; to: number; dir: 1 | -1 };
+  const [flip, setFlip] = useState<FlipState | null>(null);
+  const flipProgress = useRef(new Animated.Value(0)).current;
+  const flippingRef = useRef(false);
+
+  // The leaf's rotateY, pivoted on its left edge: translate the
+  // leaf left by half its width (so the spine sits at the origin),
+  // rotate, then translate back. Perspective makes it read as 3D.
+  const leafRotateY = useMemo(
+    () =>
+      flipProgress.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['0deg', '-180deg'],
+      }),
+    [flipProgress],
+  );
+  const leafTransform = useMemo(
+    () => [
+      { perspective: 900 },
+      { translateX: -pageWidth / 2 },
+      { rotateY: leafRotateY },
+      { translateX: pageWidth / 2 },
+    ],
+    [pageWidth, leafRotateY],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -367,18 +398,89 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
     [loadPage],
   );
 
+  /** Start a visible page turn to `to`. dir 1 = forward (the
+   * current page turns over to reveal the next), dir -1 = backward
+   * (the previous page turns back over the current one). The
+   * animation itself runs in the effect below, after the leaf has
+   * mounted, so the first frame is not lost. */
+  const startFlip = useCallback(
+    (to: number, dir: 1 | -1) => {
+      if (flippingRef.current) return;
+      const from = indexRef.current;
+      if (to === from) return;
+      flippingRef.current = true;
+      setFlip({ from, to, dir });
+    },
+    [],
+  );
+
+  // Run the turn once the leaf is mounted. On completion the index
+  // moves to the new page (the base already shows it, so there is
+  // no jump) and the leaf is removed. If the animation is
+  // interrupted (reader closed mid-flip), the index stays put and
+  // the flip lock is released so the next flip is not blocked.
+  useEffect(() => {
+    if (!flip) return;
+    flipProgress.setValue(flip.dir === 1 ? 0 : 1);
+    const anim = Animated.timing(flipProgress, {
+      toValue: flip.dir === 1 ? 1 : 0,
+      duration: 650,
+      easing: Easing.inOut(Easing.quad),
+      useNativeDriver: true,
+    });
+    anim.start(({ finished }) => {
+      if (finished) goToIndex(flip.to);
+      setFlip(null);
+      flippingRef.current = false;
+    });
+    return () => {
+      anim.stop();
+      flippingRef.current = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flip]);
+
   const flipTo = useCallback(
     (i: number) => {
       const jNum = juzRef.current;
-      if (!jNum) return;
+      if (!jNum || flippingRef.current) return;
       const j = JUZ[jNum - 1];
       const count = j.endPage - j.startPage + 1;
       const clamped = Math.max(0, Math.min(count - 1, i));
-      scrollRef.current?.scrollTo({ x: clamped * pageWidth, animated: true });
-      goToIndex(clamped);
+      if (clamped === indexRef.current) return;
+      startFlip(clamped, clamped > indexRef.current ? 1 : -1);
     },
-    [pageWidth, goToIndex],
+    [startFlip],
   );
+
+  // Swipe on the book: a horizontal swipe runs the SAME turn
+  // animation as the Prev/Next buttons. The capture handler only
+  // claims clearly-horizontal gestures, so vertical scrolling of
+  // the page still works. The handler reads refs (never stale),
+  // so the PanResponder can be created once.
+  const swipeRef = useRef<(dx: number) => void>(() => {});
+  swipeRef.current = (dx: number) => {
+    const jNum = juzRef.current;
+    if (!jNum || flippingRef.current) return;
+    const j = JUZ[jNum - 1];
+    const count = j.endPage - j.startPage + 1;
+    if (dx < 0) {
+      if (indexRef.current < count - 1) startFlip(indexRef.current + 1, 1);
+    } else if (indexRef.current > 0) {
+      startFlip(indexRef.current - 1, -1);
+    }
+  };
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponderCapture: (_evt, gs) =>
+        !flippingRef.current &&
+        Math.abs(gs.dx) > 24 &&
+        Math.abs(gs.dx) > Math.abs(gs.dy) * 1.2,
+      onPanResponderRelease: (_evt, gs) => {
+        if (Math.abs(gs.dx) > 50) swipeRef.current(gs.dx);
+      },
+    }),
+  ).current;
 
   const openJuz = useCallback(
     (n: number) => {
@@ -392,12 +494,13 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
       indexRef.current = 0;
       setParaDone(false);
       setMarkMsg(null);
+      setFlip(null);
+      flippingRef.current = false;
+      flipProgress.setValue(0);
       void loadPage(j.startPage);
       void loadPage(j.startPage + 1);
-      // If the reader was already open (next-Para jump), reset the scroll.
-      setTimeout(() => scrollRef.current?.scrollTo({ x: 0, animated: false }), 60);
     },
-    [loadPage],
+    [loadPage, flipProgress],
   );
 
   // Follow the global manager: when auto-play advances the page, flip
@@ -416,11 +519,6 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
       setParaDone(true);
     }
   }, [audio.page, flipTo]);
-
-  function onScrollEnd(e: NativeSyntheticEvent<NativeScrollEvent>): void {
-    const i = Math.round(e.nativeEvent.contentOffset.x / pageWidth);
-    goToIndex(i);
-  }
 
   async function markPageRead(): Promise<void> {
     if (!juz || markBusy) return;
@@ -493,6 +591,14 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
   }
   const pageCount = j.endPage - j.startPage + 1;
   const currentPage = j.startPage + index;
+  // The base layer shows the under-page during a flip (the next
+  // page going forward, the current page going back) and the
+  // current page when idle. The leaf is the turning page (the
+  // current page going forward, the previous page coming back).
+  const baseIndex = flip ? (flip.dir === 1 ? flip.to : flip.from) : index;
+  const leafIndex = flip ? (flip.dir === 1 ? flip.from : flip.to) : null;
+  const basePageNum = j.startPage + baseIndex;
+  const leafPageNum = leafIndex !== null ? j.startPage + leafIndex : null;
   const currentEntry = cache[currentPage];
   const currentMushaf = currentEntry?.mushaf ?? null;
   const firstAyah = currentMushaf?.ayahs[0] ?? null;
@@ -503,8 +609,6 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
           firstSurah.revelationType === 'Meccan' ? s.mecca : s.medina
         } · ${firstSurah.numberOfAyahs} ${s.aayatWord} · ${s.paraWord} ${firstAyah.juz}`
       : null;
-  const pageNumbers: number[] = [];
-  for (let p = j.startPage; p <= j.endPage; p++) pageNumbers.push(p);
 
   return (
     <View style={styles.reader}>
@@ -523,33 +627,61 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
         {readerSub ? <Text style={styles.readerSub}>{readerSub}</Text> : null}
       </View>
 
-      <ScrollView
-        ref={scrollRef}
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        onMomentumScrollEnd={onScrollEnd}
-        style={styles.book}
-      >
-        {pageNumbers.map((pageNum, pageIdx) => (
-          <View key={pageNum} style={[styles.pageChild, { width: pageWidth }]}>
-            {renderBookPage(
-              pageNum,
-              pageIdx,
-              index,
-              cache[pageNum],
-              audio,
-              currentPage,
-              s,
-              shared,
-              markPageRead,
-              markBusy,
-              markMsg,
-              retryPage,
-            )}
-          </View>
-        ))}
-      </ScrollView>
+      <View style={styles.book} {...panResponder.panHandlers}>
+        {/* Base layer: the page underneath the turn. Keyed by page
+            so it remounts (scroll back to top) when the page changes. */}
+        <View key={basePageNum} style={styles.baseLayer}>
+          {renderBookPage(
+            basePageNum,
+            baseIndex,
+            index,
+            cache[basePageNum],
+            audio,
+            currentPage,
+            s,
+            shared,
+            markPageRead,
+            markBusy,
+            markMsg,
+            retryPage,
+          )}
+        </View>
+
+        {/* Turning leaf: the page rotating around the spine (left
+            edge). Front face = the turning page; back face = a
+            plain cream page, the back of the leaf. The leaf takes
+            no touches — swipes keep reaching the book beneath it. */}
+        {flip && leafIndex !== null && leafPageNum !== null ? (
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.leaf, { width: pageWidth, transform: leafTransform }]}
+          >
+            <View style={[styles.face, { backfaceVisibility: 'hidden' }]}>
+              {renderBookPage(
+                leafPageNum,
+                leafIndex,
+                index,
+                cache[leafPageNum],
+                audio,
+                currentPage,
+                s,
+                shared,
+                markPageRead,
+                markBusy,
+                markMsg,
+                retryPage,
+              )}
+            </View>
+            <View
+              style={[
+                styles.face,
+                styles.backFace,
+                { backfaceVisibility: 'hidden', transform: [{ rotateY: '180deg' }] },
+              ]}
+            />
+          </Animated.View>
+        ) : null}
+      </View>
 
       {paraDone ? (
         <View style={styles.doneCard}>
@@ -572,7 +704,7 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
         <PillButton
           label={shared.prevPage}
           variant="ghost"
-          disabled={index <= 0}
+          disabled={index <= 0 || flip !== null}
           onPress={() => index > 0 && flipTo(index - 1)}
           style={styles.flipBtn}
         />
@@ -582,7 +714,7 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
         <PillButton
           label={shared.nextPage}
           variant="primary"
-          disabled={index >= pageCount - 1}
+          disabled={index >= pageCount - 1 || flip !== null}
           onPress={() => index < pageCount - 1 && flipTo(index + 1)}
           style={styles.flipBtn}
         />
@@ -975,7 +1107,30 @@ const styles = StyleSheet.create({
   pageTagText: { fontFamily: F.sans, fontSize: 11, fontWeight: '800', color: C.peachInk },
   readerSub: { fontFamily: F.sans, fontSize: 13, color: C.muted, marginTop: 4 },
   book: { flex: 1, marginTop: 12 },
-  pageChild: { flex: 1 },
+  baseLayer: { flex: 1 },
+  /* Turning leaf: absolutely positioned over the base, pivoting on
+   * the spine (left edge). Width is set inline to the page width. */
+  leaf: { position: 'absolute', top: 0, bottom: 0, left: 0 },
+  /* One side of the leaf. The front shows the turning page; the
+   * back is a plain cream page. overflow hidden clips the page's
+   * long ScrollView to the visible page area. */
+  face: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    overflow: 'hidden',
+  },
+  backFace: {
+    backgroundColor: MUSHAF_BG,
+    borderWidth: 2.5,
+    borderColor: C.teal900,
+    borderRadius: 8,
+    marginHorizontal: S.pad,
+    marginTop: 4,
+    marginBottom: 24,
+  },
   pageChildContent: {
     paddingHorizontal: S.pad,
     paddingBottom: 24,

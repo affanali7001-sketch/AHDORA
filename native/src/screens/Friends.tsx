@@ -33,6 +33,7 @@ import {
   type FriendRequestItem,
   type PublicUser,
 } from '../lib/apiSocial';
+import { setChallengeUserTarget } from '../lib/navTarget';
 
 type SharedProgress = {
   challengeTitle: string;
@@ -54,6 +55,7 @@ export default function FriendsScreen({ lang, goTo }: ScreenProps) {
   const [friends, setFriends] = useState<(PublicUser & { since: string })[]>([]);
   const [discover, setDiscover] = useState<PublicUser[]>([]);
   const [incoming, setIncoming] = useState<FriendRequestItem[]>([]);
+  const [outgoing, setOutgoing] = useState<FriendRequestItem[]>([]);
   const [outgoingIds, setOutgoingIds] = useState<Set<string>>(new Set());
   const [invites, setInvites] = useState<ChallengeInvite[]>([]);
   const [streaks, setStreaks] = useState<Record<string, SharedProgress | null>>({});
@@ -78,6 +80,7 @@ export default function FriendsScreen({ lang, goTo }: ScreenProps) {
       setFriends(fr);
       setDiscover(disc);
       setIncoming(reqs.incoming);
+      setOutgoing(reqs.outgoing);
       setOutgoingIds(new Set(reqs.outgoing.map((r) => r.other?.id).filter(Boolean) as string[]));
       setInvites(inv.incoming);
       // Real shared challenge progress per friend (shared fields only).
@@ -145,6 +148,11 @@ export default function FriendsScreen({ lang, goTo }: ScreenProps) {
     }
   }
 
+  function challenge(person: PublicUser) {
+    setChallengeUserTarget({ id: person.id, name: person.name });
+    goTo('challenges');
+  }
+
   const friendIds = new Set(friends.map((f) => f.id));
   const shownDiscover = (results !== null ? results : discover).filter((p) => !friendIds.has(p.id));
 
@@ -174,7 +182,7 @@ export default function FriendsScreen({ lang, goTo }: ScreenProps) {
             label={s.frChallenge}
             small
             variant="ghost"
-            onPress={() => goTo('challenges')}
+            onPress={() => challenge(person)}
           />
         </View>
       </View>
@@ -288,6 +296,35 @@ export default function FriendsScreen({ lang, goTo }: ScreenProps) {
             )}
           </Card>
 
+          {/* Requests you sent — who you asked, so you can see it.
+              A friend request is accepted only when the other side
+              accepts it; until then it waits here. */}
+          <Card>
+            <Text style={T.cardTitle}>{s.frOutgoing}</Text>
+            {outgoing.length === 0 ? (
+              <Text style={[T.cardBody, { marginTop: 6 }]}>{s.frNoOutgoing}</Text>
+            ) : (
+              outgoing.map((r, i) =>
+                r.other ? (
+                  <View key={r.id} style={styles.row}>
+                    <View style={[styles.avatar, i % 2 === 1 && styles.avatarPeach]}>
+                      <Text style={[styles.avatarText, i % 2 === 1 && styles.avatarTextPeach]}>
+                        {r.other.initial}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.name}>{r.other.name}</Text>
+                      <Text style={styles.sub}>
+                        ⭐ {typeof r.other.points === 'number' ? r.other.points : 0} {s.frPoints}
+                      </Text>
+                    </View>
+                    <Text style={styles.sentTag}>{s.frSent}</Text>
+                  </View>
+                ) : null,
+              )
+            )}
+          </Card>
+
           {/* My friends */}
           <Card>
             <Text style={T.cardTitle}>{s.frMine}</Text>
@@ -311,7 +348,7 @@ export default function FriendsScreen({ lang, goTo }: ScreenProps) {
                           : s.frNoShared}
                       </Text>
                     </View>
-                    <PillButton label={s.frChallenge} small variant="ghost" onPress={() => goTo('challenges')} />
+                    <PillButton label={s.frChallenge} small variant="ghost" onPress={() => challenge(f)} />
                   </View>
                 );
               })
@@ -341,4 +378,15 @@ const styles = StyleSheet.create({
   sub: { fontFamily: 'PlusJakartaSans', fontSize: 12.5, color: C.muted, marginTop: 2 },
   reqBtns: { flexDirection: 'row', gap: 6 },
   discoverBtns: { flexDirection: 'column', gap: 6, alignItems: 'flex-end' },
+  sentTag: {
+    fontFamily: 'PlusJakartaSans',
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: C.teal700,
+    backgroundColor: C.teal100,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    overflow: 'hidden',
+  },
 });

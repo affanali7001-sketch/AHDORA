@@ -14,6 +14,7 @@ import { C, L, T } from '../lib/theme';
 import { Card, Chip, Input, PillButton } from '../components/ui';
 import {
   createSubject,
+  discoverPeople,
   listFriends,
   listSubjects,
   listTasks,
@@ -24,6 +25,7 @@ import {
   type StudySubject,
   type StudyTask,
 } from '../lib/apiSocial';
+import { setChallengeUserTarget } from '../lib/navTarget';
 
 function cap(value: string): string {
   return value.length > 0 ? value.charAt(0).toUpperCase() + value.slice(1) : value;
@@ -34,7 +36,8 @@ export default function StudyScreen({ lang, goTo }: ScreenProps) {
   const [subjects, setSubjects] = useState<StudySubject[]>([]);
   const [tasks, setTasks] = useState<StudyTask[]>([]);
   const [stats, setStats] = useState<StudyStats | null>(null);
-  const [friends, setFriends] = useState<PublicUser[]>([]);
+  const [allUsers, setAllUsers] = useState<PublicUser[]>([]);
+  const [challengeQuery, setChallengeQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -47,16 +50,28 @@ export default function StudyScreen({ lang, goTo }: ScreenProps) {
     setLoading(true);
     setError('');
     try {
-      const [subs, tks, st, frs] = await Promise.all([
+      const [subs, tks, st, frs, disc] = await Promise.all([
         listSubjects(),
         listTasks(),
         studyStats(),
         listFriends().catch(() => [] as PublicUser[]),
+        discoverPeople(50).catch(() => [] as PublicUser[]),
       ]);
       setSubjects(subs);
       setTasks(tks);
       setStats(st);
-      setFriends(frs);
+      // Challenge card shows EVERYONE (friends + new people), not
+      // just friends — a non-friend gets a request first, then an
+      // invite (see Challenges). Dedupe by id.
+      const seen = new Set<string>();
+      const merged: PublicUser[] = [];
+      for (const u of [...frs, ...disc]) {
+        if (!seen.has(u.id)) {
+          seen.add(u.id);
+          merged.push(u);
+        }
+      }
+      setAllUsers(merged);
       if (subs.length > 0) setSelectedId((prev) => prev ?? subs[0].id);
     } catch (e) {
       setError(e instanceof Error ? e.message : s.errorGeneric);
@@ -209,33 +224,57 @@ export default function StudyScreen({ lang, goTo }: ScreenProps) {
             </View>
           </View>
 
-          {/* Challenge a friend — study together */}
+          {/* Challenge a friend — study together. Everyone is listed
+              (friends + new people), with a name search. The Challenge
+              button opens Challenges with that person pre-selected. */}
           <Card>
             <Text style={T.cardTitle}>{s.studyChallengeTitle}</Text>
             <Text style={[T.cardBody, { marginTop: 6 }]}>{s.studyChallengeBody}</Text>
-            {friends.length === 0 ? (
-              <Text style={[T.cardBody, { marginTop: 8 }]}>{s.studyNoFriendsCh}</Text>
-            ) : (
-              friends.slice(0, 3).map((f) => (
+            <View style={{ marginTop: 10 }}>
+              <Input
+                value={challengeQuery}
+                onChangeText={setChallengeQuery}
+                placeholder={s.chInviteSearchPh}
+                autoCapitalize="words"
+                autoCorrect={false}
+              />
+            </View>
+            {(() => {
+              const q = challengeQuery.trim().toLowerCase();
+              const rows = allUsers.filter((u) => !q || u.name.toLowerCase().includes(q));
+              if (rows.length === 0) {
+                return (
+                  <Text style={[T.cardBody, { marginTop: 8 }]}>{s.studyNoFriendsCh}</Text>
+                );
+              }
+              return rows.slice(0, 5).map((f) => (
                 <View key={f.id} style={styles.friendRow}>
                   <View style={styles.friendAvatar}>
                     <Text style={styles.friendAvatarText}>{f.initial}</Text>
                   </View>
-                  <Text style={[styles.friendName, { flex: 1 }]}>{f.name}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.friendName}>{f.name}</Text>
+                    <Text style={styles.taskMeta}>
+                      ⭐ {typeof f.points === 'number' ? f.points : 0} {s.frPoints}
+                    </Text>
+                  </View>
                   <PillButton
                     label={s.frChallenge}
                     small
-                    onPress={() => goTo('challenges')}
+                    onPress={() => {
+                      setChallengeUserTarget({ id: f.id, name: f.name });
+                      goTo('challenges');
+                    }}
                   />
                 </View>
-              ))
-            )}
+              ));
+            })()}
             <View style={{ marginTop: 12 }}>
               <PillButton
-                label={friends.length === 0 ? s.frTitle : s.studyChallengeBtn}
+                label={allUsers.length === 0 ? s.frTitle : s.studyChallengeBtn}
                 variant="peach"
                 block
-                onPress={() => goTo(friends.length === 0 ? 'friends' : 'challenges')}
+                onPress={() => goTo(allUsers.length === 0 ? 'friends' : 'challenges')}
               />
             </View>
           </Card>

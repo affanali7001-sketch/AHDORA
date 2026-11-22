@@ -55,8 +55,8 @@ import ParaBookScreen from './src/screens/ParaBook';
 import LifeAyahsScreen from './src/screens/LifeAyahs';
 import DuasScreen from './src/screens/Duas';
 import TasbeehScreen from './src/screens/Tasbeeh';
-import HijriScreen from './src/screens/Hijri';
 import IslamicCalendarScreen from './src/screens/IslamicCalendar';
+import SearchScreen from './src/screens/Search';
 import MosqueScreen from './src/screens/Mosque';
 import StudyScreen from './src/screens/Study';
 import FocusScreen from './src/screens/Focus';
@@ -314,10 +314,10 @@ function renderScreen(screen: ScreenId, props: ScreenProps) {
       return <DuasScreen {...props} />;
     case 'tasbeeh':
       return <TasbeehScreen {...props} />;
-    case 'hijri':
-      return <HijriScreen {...props} />;
     case 'islamic-calendar':
       return <IslamicCalendarScreen {...props} />;
+    case 'search':
+      return <SearchScreen {...props} />;
     case 'mosque':
       return <MosqueScreen {...props} />;
     case 'study':
@@ -350,15 +350,20 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   loadingText: { fontFamily: F.sans, marginTop: 12, fontSize: 14, color: C.muted },
   pillNav: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 16,
+    // In-flow, NOT absolute: the floating pill used to overlap the
+    // MiniPlayer (same dark teal, buttons hidden under it — user
+    // report 2026-11-22). Stacked in the column — content, then
+    // MiniPlayer, then the pill at the very bottom — nothing is
+    // covered and every button stays visible and tappable. The
+    // pill look (rounded, side margins, shadow) is unchanged.
     flexDirection: 'row',
     gap: 2,
     backgroundColor: C.teal900,
     borderRadius: 999,
     padding: 6,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 12,
     shadowColor: '#000',
     shadowOpacity: 0.18,
     shadowRadius: 12,

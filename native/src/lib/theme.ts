@@ -44,7 +44,7 @@ export const S = {
   radiusLg: 24, // teal-head radius
   gap: 12,
   screenTop: 52,
-  screenBottom: 108, // space for the pill nav
+  screenBottom: 24, // pill nav is in-flow now (was 108 for the floating pill)
 } as const;
 
 /**

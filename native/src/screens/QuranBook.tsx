@@ -28,6 +28,7 @@ import {
   View,
 } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
+import { takeQuranSurahTarget } from '../lib/navTarget';
 import { stringsFor, type AppLanguage } from '../lib/strings';
 import { C, F, L, S, T } from '../lib/theme';
 import { Chip, Field, Input, PillButton, Switch, TealHead } from '../components/ui';
@@ -339,7 +340,14 @@ export default function QuranBookScreen({
     // Surah index for the landing screen.
     fetchSurahList()
       .then((list) => {
-        if (mountedRef.current) setSurahs(list);
+        if (!mountedRef.current) return;
+        setSurahs(list);
+        // Search deep-link: open the surah the user picked in Search.
+        const target = takeQuranSurahTarget();
+        if (target !== null) {
+          const su = list.find((x) => x.number === target);
+          if (su) openSurah(su);
+        }
       })
       .catch(() => {
         if (mountedRef.current) setSurahError(s.loadFailed);

@@ -12,9 +12,24 @@
  * calendar/:month (per-day prayer statuses + month totals),
  * /api/study/pomodoro/history (completed sessions with completedAt +
  * focusMinutesEarned, for the per-day chart and the monthly total).
+ *
+ * Speed (user complaint 2026-11-22: the screen loaded far too
+ * slowly): the three sources used to load behind ONE Promise.all
+ * with a single full-screen spinner, so the slowest request
+ * (~2.2s for /stats, ~1.7s for /calendar, ~1.6s for /history —
+ * measured live against Heroku; the no-DB baseline is ~0.4s and
+ * each sequential Heroku→Atlas round trip costs ~0.3s) gated the
+ * whole screen. Now each source loads independently and its section
+ * renders as soon as ITS data arrives, and the last load is cached
+ * in AsyncStorage (per user; the calendar cache is per month) so
+ * repeat visits show real data instantly while a background refresh
+ * updates it. Cached data is real data from a previous load — never
+ * fake. The server round trips were cut in the same change
+ * (study.ts stats + history, salah.ts calendar — see those files).
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiFetch } from '../lib/api';
 import type { ScreenProps } from '../lib/nav';
 import { stringsFor } from '../lib/strings';
@@ -60,39 +75,118 @@ function mondayOfWeek(now: Date): Date {
   return d;
 }
 
-export default function AnalyticsScreen({ lang }: ScreenProps) {
+export default function AnalyticsScreen({ lang, user }: ScreenProps) {
   const s = stringsFor(lang);
   const [period, setPeriod] = useState<Period>('weekly');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const [stats, setStats] = useState<StudyStats | null>(null);
+  const [statsLoaded, setStatsLoaded] = useState(false);
+  const [statsError, setStatsError] = useState('');
   const [days, setDays] = useState<SalahCalendarDay[]>([]);
   const [monthTotals, setMonthTotals] = useState<Record<string, number>>({});
+  const [calLoaded, setCalLoaded] = useState(false);
+  const [calError, setCalError] = useState('');
   const [history, setHistory] = useState<HistorySession[]>([]);
+  const [histLoaded, setHistLoaded] = useState(false);
+  const [histError, setHistError] = useState('');
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError('');
+  const uid = user?.id ?? 'anon';
+  const month = monthKey(new Date());
+  const statsKey = `analytics:stats:${uid}`;
+  const calKey = `analytics:cal:${uid}:${month}`;
+  const histKey = `analytics:hist:${uid}`;
+
+  // One independent loader per source — no Promise.all gating the
+  // screen, and each one caches its own result for the next visit.
+  const loadStats = useCallback(async () => {
+    setStatsError('');
     try {
-      const [st, cal, hist] = await Promise.all([
-        studyStats(),
-        salahCalendar(monthKey(new Date())),
-        fetchHistory(),
-      ]);
+      const st = await studyStats();
       setStats(st);
+      setStatsLoaded(true);
+      void AsyncStorage.setItem(statsKey, JSON.stringify(st)).catch(() => undefined);
+    } catch (e) {
+      setStatsError(e instanceof Error ? e.message : s.errorGeneric);
+      setStatsLoaded(true);
+    }
+  }, [s.errorGeneric, statsKey]);
+
+  const loadCal = useCallback(async () => {
+    setCalError('');
+    try {
+      const cal = await salahCalendar(month);
       setDays(cal.days);
       setMonthTotals(cal.totals);
-      setHistory(hist);
+      setCalLoaded(true);
+      void AsyncStorage.setItem(calKey, JSON.stringify({ days: cal.days, totals: cal.totals })).catch(
+        () => undefined,
+      );
     } catch (e) {
-      setError(e instanceof Error ? e.message : s.errorGeneric);
-    } finally {
-      setLoading(false);
+      setCalError(e instanceof Error ? e.message : s.errorGeneric);
+      setCalLoaded(true);
     }
-  }, [s.errorGeneric]);
+  }, [s.errorGeneric, calKey, month]);
 
+  const loadHistory = useCallback(async () => {
+    setHistError('');
+    try {
+      const hist = await fetchHistory();
+      setHistory(hist);
+      setHistLoaded(true);
+      void AsyncStorage.setItem(histKey, JSON.stringify(hist)).catch(() => undefined);
+    } catch (e) {
+      setHistError(e instanceof Error ? e.message : s.errorGeneric);
+      setHistLoaded(true);
+    }
+  }, [s.errorGeneric, histKey]);
+
+  const loadAll = useCallback(() => {
+    void loadStats();
+    void loadCal();
+    void loadHistory();
+  }, [loadStats, loadCal, loadHistory]);
+
+  // Cache first (instant, real data from the last load), then refresh
+  // each source in the background — repeat visits never stare at a
+  // spinner. A corrupt cache entry is ignored; the refresh follows.
   useEffect(() => {
-    void load();
-  }, [load]);
+    let active = true;
+    void (async () => {
+      try {
+        const [cachedStats, cachedCal, cachedHist] = await Promise.all([
+          AsyncStorage.getItem(statsKey),
+          AsyncStorage.getItem(calKey),
+          AsyncStorage.getItem(histKey),
+        ]);
+        if (!active) return;
+        if (cachedStats) {
+          setStats(JSON.parse(cachedStats) as StudyStats);
+          setStatsLoaded(true);
+        }
+        if (cachedCal) {
+          const parsed = JSON.parse(cachedCal) as {
+            days?: SalahCalendarDay[];
+            totals?: Record<string, number>;
+          };
+          setDays(Array.isArray(parsed.days) ? parsed.days : []);
+          setMonthTotals(parsed.totals ?? {});
+          setCalLoaded(true);
+        }
+        if (cachedHist) {
+          const parsed = JSON.parse(cachedHist) as HistorySession[];
+          if (Array.isArray(parsed)) {
+            setHistory(parsed);
+            setHistLoaded(true);
+          }
+        }
+      } catch {
+        // Ignore — the network refresh below still runs.
+      }
+    })();
+    loadAll();
+    return () => {
+      active = false;
+    };
+  }, [statsKey, calKey, histKey, loadAll]);
 
   // --- 7-bar chart: Mon–Sun focus minutes this week ---
   const weekBars = useMemo(() => {
@@ -143,6 +237,9 @@ export default function AnalyticsScreen({ lang }: ScreenProps) {
     prayed > 0 || (focusMinutes !== null && focusMinutes > 0) || weekBars.some((v) => v > 0);
 
   const maxBar = Math.max(...weekBars, 1);
+  const allLoaded = statsLoaded && calLoaded && histLoaded;
+  const gridReady = statsLoaded && calLoaded;
+  const allFailed = Boolean(statsError && calError && histError) && !stats && days.length === 0 && history.length === 0;
 
   return (
     <ScrollView contentContainerStyle={L.scroll} showsVerticalScrollIndicator={false}>
@@ -160,23 +257,25 @@ export default function AnalyticsScreen({ lang }: ScreenProps) {
         ))}
       </View>
 
-      {loading ? (
-        <ActivityIndicator color={C.teal700} style={{ marginVertical: 24 }} />
-      ) : error && !stats && days.length === 0 ? (
+      {allFailed ? (
         <Card>
-          <Text style={T.error}>{error}</Text>
-          <PillButton label={s.retry} onPress={() => void load()} />
+          <Text style={T.error}>{statsError || calError || histError}</Text>
+          <PillButton label={s.retry} onPress={loadAll} />
         </Card>
       ) : (
         <View>
-          {error ? <Text style={T.error}>{error}</Text> : null}
-          {!hasData ? (
-            <EmptyState title={s.anTitle} body={s.anNoData} />
-          ) : (
-            <>
-              {/* 7-bar chart */}
-              <Card>
-                <Text style={T.cardTitle}>{s.anStudy}</Text>
+          {/* 7-bar chart — renders as soon as the history arrives */}
+          <Card>
+            <Text style={T.cardTitle}>{s.anStudy}</Text>
+            {!histLoaded ? (
+              <ActivityIndicator color={C.teal700} style={{ marginVertical: 24 }} />
+            ) : histError && history.length === 0 ? (
+              <View>
+                <Text style={[T.error, { marginTop: 8 }]}>{histError}</Text>
+                <PillButton label={s.retry} onPress={() => void loadHistory()} />
+              </View>
+            ) : (
+              <View>
                 <View style={styles.chart}>
                   {weekBars.map((value, i) => (
                     <View key={i} style={styles.barCol}>
@@ -196,9 +295,26 @@ export default function AnalyticsScreen({ lang }: ScreenProps) {
                     </View>
                   ))}
                 </View>
-              </Card>
+                {histError ? <Text style={[T.error, { marginTop: 8 }]}>{histError}</Text> : null}
+              </View>
+            )}
+          </Card>
 
-              {/* Stat grid */}
+          {/* Stat grid — renders as soon as stats + calendar arrive.
+              The monthly focus cell waits for the history (it is the
+              only cell that needs it); "…" is a loading mark, not data. */}
+          {!gridReady ? (
+            <ActivityIndicator color={C.teal700} style={{ marginVertical: 24 }} />
+          ) : stats === null && days.length === 0 && (statsError || calError) ? (
+            <Card>
+              <Text style={T.error}>{statsError || calError}</Text>
+              <PillButton label={s.retry} onPress={loadAll} />
+            </Card>
+          ) : !allLoaded || hasData ? (
+            <View>
+              {statsError || calError ? (
+                <Text style={[T.error, { marginBottom: 8 }]}>{statsError || calError}</Text>
+              ) : null}
               <View style={styles.statGrid}>
                 <View style={styles.stat}>
                   <Text style={styles.statValue}>
@@ -207,11 +323,23 @@ export default function AnalyticsScreen({ lang }: ScreenProps) {
                   <Text style={styles.statLabel}>{s.anSalah}</Text>
                 </View>
                 <View style={styles.stat}>
-                  <Text style={styles.statValue}>{focusMinutes === null ? '—' : `${focusMinutes} min`}</Text>
+                  <Text style={styles.statValue}>
+                    {period === 'monthly' && !histLoaded
+                      ? '…'
+                      : focusMinutes === null
+                        ? '—'
+                        : `${focusMinutes} min`}
+                  </Text>
                   <Text style={styles.statLabel}>{s.anStudyTot}</Text>
                 </View>
                 <View style={styles.stat}>
-                  <Text style={styles.statValue}>{focusMinutes === null ? '—' : `${focusMinutes} min`}</Text>
+                  <Text style={styles.statValue}>
+                    {period === 'monthly' && !histLoaded
+                      ? '…'
+                      : focusMinutes === null
+                        ? '—'
+                        : `${focusMinutes} min`}
+                  </Text>
                   <Text style={styles.statLabel}>{s.anFocusTot}</Text>
                 </View>
                 <View style={styles.stat}>
@@ -220,7 +348,9 @@ export default function AnalyticsScreen({ lang }: ScreenProps) {
                 </View>
               </View>
               <Text style={styles.note}>{s.anSleepNoData}</Text>
-            </>
+            </View>
+          ) : (
+            <EmptyState title={s.anTitle} body={s.anNoData} />
           )}
         </View>
       )}

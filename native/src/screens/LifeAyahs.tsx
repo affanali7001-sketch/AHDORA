@@ -22,6 +22,7 @@ import { Card, PillButton } from '../components/ui';
 import {
   everyAyahUrl,
   tilawatFallbackUrl,
+  urduAudioUrl,
 } from '../lib/apiWorship';
 
 /** The four curated ayahs — verbatim curated text, preview order. */
@@ -98,6 +99,8 @@ type AudioItem = { uri: string; fallbackUri: string };
 export default function LifeAyahsScreen({ lang }: ScreenProps) {
   const s = stringsFor(lang);
   const [playingRef, setPlayingRef] = useState<string | null>(null);
+  /** Which voice is playing for playingRef: tilawat or Urdu tarjuma. */
+  const [playingMode, setPlayingMode] = useState<'tilawat' | 'tarjuma' | null>(null);
   const [audioBusy, setAudioBusy] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
 
@@ -119,6 +122,7 @@ export default function LifeAyahsScreen({ lang }: ScreenProps) {
     queueRef.current = [];
     queueIndexRef.current = 0;
     setPlayingRef(null);
+    setPlayingMode(null);
     setAudioBusy(false);
     const sound = soundRef.current;
     soundRef.current = null;
@@ -142,7 +146,9 @@ export default function LifeAyahsScreen({ lang }: ScreenProps) {
       let retried = false;
       player.addListener('playbackStatusUpdate', (status) => {
         if (status.error) {
-          if (uri === item.uri) {
+          // Tilawat has a real fallback (EveryAyah → AlQuran Cloud).
+          // Tarjuma has none (ur.khan only) — retry the same URI once.
+          if (item.fallbackUri && uri === item.uri) {
             player.replace({ uri: item.fallbackUri });
             player.play();
           } else if (!retried) {
@@ -211,6 +217,42 @@ export default function LifeAyahsScreen({ lang }: ScreenProps) {
     }
     queueRef.current = queue;
     setPlayingRef(ayah.reference);
+    setPlayingMode('tilawat');
+    await playAt(0);
+  }
+
+  /**
+   * Tarjuma voice (user request 2026-11-22): the Urdu tarjuma of
+   * the same ayahs, Shamshad Ali Khan (ur.khan, Islamic Network
+   * CDN, 64 kbps only — verified 200), one Urdu mp3 per ayah in
+   * the range, played back-to-back. No fallback host exists for
+   * ur.khan, so a failure retries the same URI once (playAt).
+   * The 2:286 card shows only the selected portion of the Arabic,
+   * but the tarjuma audio is the full ayah's tarjuma — that is
+   * the real tarjuma of the ayah, not a cut.
+   */
+  async function toggleTarjuma(ayah: (typeof CURATED_AYAHS)[number]): Promise<void> {
+    if (playingRef === ayah.reference && playingMode === 'tarjuma') {
+      await stopAudio();
+      return;
+    }
+    setAudioError(null);
+    setAudioBusy(true);
+    await stopAudio();
+    const GLOBAL_START: Record<number, number> = {
+      2: 8,
+      13: 1708,
+      20: 2349,
+      23: 2674,
+    };
+    const start = GLOBAL_START[ayah.surahNumber] ?? 0;
+    const queue: AudioItem[] = [];
+    for (let a = ayah.ayahStart; a <= ayah.ayahEnd; a += 1) {
+      queue.push({ uri: urduAudioUrl(start + a - 1), fallbackUri: '' });
+    }
+    queueRef.current = queue;
+    setPlayingRef(ayah.reference);
+    setPlayingMode('tarjuma');
     await playAt(0);
   }
 
@@ -222,7 +264,9 @@ export default function LifeAyahsScreen({ lang }: ScreenProps) {
 
       {CURATED_AYAHS.map((ayah) => {
         const theme = lang === 'hi' ? ayah.themeHi : ayah.themeEn;
-        const playing = playingRef === ayah.reference;
+        const playingTilawat = playingRef === ayah.reference && playingMode === 'tilawat';
+        const playingTarjuma = playingRef === ayah.reference && playingMode === 'tarjuma';
+        const playing = playingTilawat || playingTarjuma;
         return (
           <Card key={ayah.reference}>
             <View style={styles.headRow}>
@@ -237,19 +281,32 @@ export default function LifeAyahsScreen({ lang }: ScreenProps) {
             <Text style={styles.meaning}>{ayah.meaning}</Text>
             <Text style={styles.english}>{ayah.english}</Text>
             <View style={styles.divider} />
-            <View style={styles.footRow}>
-              <Text style={styles.ref}>
-                Surah {ayah.surah} · {ayah.reference}
-              </Text>
-              <PillButton
-                label={
-                  playing ? '■ Roko' : audioBusy && !playing ? '…' : '▶ Voice suno'
-                }
-                variant="ghost"
-                small
-                busy={audioBusy && playing}
-                onPress={() => void toggleVoice(ayah)}
-              />
+            <Text style={styles.ref}>
+              Surah {ayah.surah} · {ayah.reference}
+            </Text>
+            <View style={styles.voiceRow}>
+              <View style={{ flex: 1 }}>
+                <PillButton
+                  label={
+                    playingTilawat ? '■ Roko' : audioBusy && playing ? '…' : '▶ Voice suno'
+                  }
+                  variant="ghost"
+                  small
+                  block
+                  busy={audioBusy && playingTilawat}
+                  onPress={() => void toggleVoice(ayah)}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <PillButton
+                  label={playingTarjuma ? s.lifeTarjumaStop : s.lifeTarjuma}
+                  variant="peach"
+                  small
+                  block
+                  busy={audioBusy && playingTarjuma}
+                  onPress={() => void toggleTarjuma(ayah)}
+                />
+              </View>
             </View>
           </Card>
         );
@@ -319,6 +376,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 10,
+  },
+  voiceRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
   },
   ref: { fontFamily: F.sans, fontSize: 12.5, color: C.muted, flex: 1 },
 });

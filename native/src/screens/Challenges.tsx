@@ -20,15 +20,18 @@ import { C, L, T } from '../lib/theme';
 import { Card, Chip, EmptyState, Input, PillButton, TealHead } from '../components/ui';
 import {
   checkInChallenge,
+  discoverPeople,
   joinTemplate,
   leaveChallenge,
   listChallengeTemplates,
   listFriends,
   myChallenges,
+  sendFriendRequest,
   type ChallengeParticipation,
   type ChallengeTemplate,
   type PublicUser,
 } from '../lib/apiSocial';
+import { takeChallengeUserTarget, type ChallengeUserTarget } from '../lib/navTarget';
 
 const DARES: Record<AppLanguage, string[]> = {
   en: [
@@ -105,6 +108,10 @@ export default function ChallengesScreen({ lang }: ScreenProps) {
   const [active, setActive] = useState<ChallengeParticipation[]>([]);
   const [templates, setTemplates] = useState<ChallengeTemplate[]>([]);
   const [friends, setFriends] = useState<(PublicUser & { since: string })[]>([]);
+  const [allUsers, setAllUsers] = useState<PublicUser[]>([]);
+  const [inviteQuery, setInviteQuery] = useState('');
+  const [targetUser, setTargetUser] = useState<ChallengeUserTarget | null>(null);
+  const [reqSentIds, setReqSentIds] = useState<Set<string>>(new Set());
   const [friendProgress, setFriendProgress] = useState<
     { friend: PublicUser; progress: SharedProgress }[]
   >([]);
@@ -123,10 +130,28 @@ export default function ChallengesScreen({ lang }: ScreenProps) {
     setLoading(true);
     setError('');
     try {
-      const [mine, temps, fr] = await Promise.all([myChallenges(), listChallengeTemplates(), listFriends()]);
+      const [mine, temps, fr, disc] = await Promise.all([
+        myChallenges(),
+        listChallengeTemplates(),
+        listFriends(),
+        discoverPeople(50).catch(() => [] as PublicUser[]),
+      ]);
       setActive(mine.active);
       setTemplates(temps);
       setFriends(fr);
+      // Invite picker shows EVERYONE (friends + new people), not
+      // just friends — the server only allows inviting friends, so
+      // non-friends get a "Send request" button instead (after they
+      // accept, they can be invited). Dedupe by id.
+      const seen = new Set<string>();
+      const merged: PublicUser[] = [];
+      for (const u of [...fr, ...disc]) {
+        if (!seen.has(u.id)) {
+          seen.add(u.id);
+          merged.push(u);
+        }
+      }
+      setAllUsers(merged);
       // Friends' shared challenge progress (shared fields only).
       const settled = await Promise.allSettled(fr.slice(0, 6).map(async (f) => ({ f, shared: await sharedWith(f.id) })));
       const rows: { friend: PublicUser; progress: SharedProgress }[] = [];
@@ -147,6 +172,16 @@ export default function ChallengesScreen({ lang }: ScreenProps) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // A friend/discover row's "Challenge" button sets this target:
+  // open the invite picker for that person (they sort first).
+  useEffect(() => {
+    const target = takeChallengeUserTarget();
+    if (target) {
+      setTargetUser(target);
+      setShowInvitePicker(true);
+    }
+  }, []);
 
   const hero = active.find((p) => p.totalDays === 30) ?? active[0] ?? null;
 
@@ -351,29 +386,98 @@ export default function ChallengesScreen({ lang }: ScreenProps) {
             <EmptyState title={s.chTitle} body={s.chNoActive} />
           )}
 
-          {/* Invite picker — real invite via the API */}
+          {/* Invite picker — EVERYONE (friends + new people), with
+              search. The server only lets you invite friends, so a
+              non-friend gets a "Send request" button instead: once
+              they accept, they can be invited. The person picked on
+              Friends/Study/Search sorts first. */}
           {showInvitePicker && hero ? (
             <Card>
               <Text style={T.cardTitle}>{s.chInvitePick}</Text>
-              {friends.length === 0 ? (
-                <Text style={[T.cardBody, { marginTop: 6 }]}>{s.chNoFriends}</Text>
-              ) : (
-                friends.map((f) => (
-                  <View key={f.id} style={styles.friendRow}>
-                    <View style={styles.avatar}>
-                      <Text style={styles.avatarText}>{f.initial}</Text>
+              <Text style={[T.cardBody, { marginTop: 4 }]}>{s.chInviteAll}</Text>
+              <View style={{ marginTop: 10 }}>
+                <Input
+                  value={inviteQuery}
+                  onChangeText={setInviteQuery}
+                  placeholder={s.chInviteSearchPh}
+                  autoCapitalize="words"
+                  autoCorrect={false}
+                />
+              </View>
+              {(() => {
+                const q = inviteQuery.trim().toLowerCase();
+                const friendIds = new Set(friends.map((f) => f.id));
+                const rows = allUsers
+                  .filter((u) => !q || u.name.toLowerCase().includes(q))
+                  .sort((a, b) => {
+                    if (targetUser && a.id === targetUser.id) return -1;
+                    if (targetUser && b.id === targetUser.id) return 1;
+                    const aF = friendIds.has(a.id) ? 0 : 1;
+                    const bF = friendIds.has(b.id) ? 0 : 1;
+                    return aF - bF;
+                  });
+                if (rows.length === 0) {
+                  return (
+                    <Text style={[T.cardBody, { marginTop: 8 }]}>{s.chNoUsers}</Text>
+                  );
+                }
+                return rows.map((u, i) => {
+                  const isFriend = friendIds.has(u.id);
+                  const invited = invitedIds.has(u.id);
+                  const reqSent = reqSentIds.has(u.id);
+                  return (
+                    <View
+                      key={u.id}
+                      style={[
+                        styles.friendRow,
+                        targetUser?.id === u.id && styles.targetRow,
+                      ]}
+                    >
+                      <View style={[styles.avatar, i % 2 === 1 && styles.avatarPeach]}>
+                        <Text style={[styles.avatarText, i % 2 === 1 && styles.avatarTextPeach]}>
+                          {u.initial}
+                        </Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.friendName}>{u.name}</Text>
+                        <Text style={styles.friendSub}>
+                          ⭐ {typeof u.points === 'number' ? u.points : 0} {s.frPoints}
+                          {isFriend ? '' : ` · ${s.frReq}`}
+                        </Text>
+                      </View>
+                      {isFriend ? (
+                        <PillButton
+                          label={invited ? s.chInviteSent : s.chInvite}
+                          small
+                          variant={invited ? 'ghost' : 'primary'}
+                          onPress={() => void inviteFriend(u.id)}
+                          disabled={invited || busyId === u.id}
+                        />
+                      ) : (
+                        <PillButton
+                          label={reqSent ? s.frSent : s.frReq}
+                          small
+                          variant={reqSent ? 'ghost' : 'primary'}
+                          onPress={() => {
+                            if (busyId || reqSent) return;
+                            setBusyId(u.id);
+                            void sendFriendRequest(u.id)
+                              .then(() => {
+                                setReqSentIds((prev) => new Set(prev).add(u.id));
+                                setNotice(s.frSent);
+                              })
+                              .catch((e) => {
+                                setError(e instanceof Error ? e.message : s.errorGeneric);
+                              })
+                              .finally(() => setBusyId(null));
+                          }}
+                          disabled={reqSent || busyId === u.id}
+                        />
+                      )}
                     </View>
-                    <Text style={styles.friendName}>{f.name}</Text>
-                    <PillButton
-                      label={invitedIds.has(f.id) ? s.chInviteSent : s.chInvite}
-                      small
-                      variant={invitedIds.has(f.id) ? 'ghost' : 'primary'}
-                      onPress={() => void inviteFriend(f.id)}
-                      disabled={invitedIds.has(f.id) || busyId === f.id}
-                    />
-                  </View>
-                ))
-              )}
+                  );
+                });
+              })()}
             </Card>
           ) : null}
 
@@ -513,6 +617,12 @@ const styles = StyleSheet.create({
   checkedIn: { fontFamily: 'PlusJakartaSans', fontSize: 13, fontWeight: '700', color: C.navInactive, textAlign: 'center', marginTop: 4 },
   leave: { fontFamily: 'PlusJakartaSans', fontSize: 13, fontWeight: '700', color: C.peach, textAlign: 'center', marginTop: 10 },
   friendRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: C.line },
+  targetRow: {
+    backgroundColor: C.teal100,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    marginHorizontal: -8,
+  },
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.teal700, alignItems: 'center', justifyContent: 'center' },
   avatarPeach: { backgroundColor: C.peachMid },
   avatarText: { fontFamily: 'PlusJakartaSans', fontSize: 17, fontWeight: '800', color: C.white },

@@ -8,7 +8,7 @@
  * empty state is shown — never a fake number.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ScreenId, ScreenProps } from '../lib/nav';
 import { stringsFor } from '../lib/strings';
 import { C, F, L, T } from '../lib/theme';
@@ -126,7 +126,6 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
     { id: 'sleep', label: s.tileSleep, icon: '😴' },
     { id: 'challenges', label: s.tileChallenges, icon: '🏆', peach: true },
     { id: 'salahCalendar', label: s.calTile, icon: '📅' },
-    { id: 'hijri', label: s.tileHijri, icon: '🌙' },
     { id: 'islamic-calendar', label: s.tileIslamicCal, icon: '🕌', peach: true },
     { id: 'analytics', label: s.tileAnalytics, icon: '📈' },
   ];
@@ -143,6 +142,20 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
   return (
     <ScrollView contentContainerStyle={L.scroll} showsVerticalScrollIndicator={false}>
       <TealHead>
+        {/* WhatsApp-style top bar (user request 2026-11-22): AHDORA
+            on the left, search on the right, above the salam. The
+            rest of the header (salam, date, next prayer) is unchanged. */}
+        <View style={styles.topBar}>
+          <Text style={styles.brand}>AHDORA</Text>
+          <Pressable
+            onPress={() => goTo('search')}
+            style={styles.searchBtn}
+            accessibilityRole="button"
+            accessibilityLabel={s.searchTitle}
+          >
+            <Text style={styles.searchIcon}>🔍</Text>
+          </Pressable>
+        </View>
         <Text style={styles.arabic}>{s.salamArabic}</Text>
         <Text style={styles.greeting}>
           {s.homeGreeting} {user?.name ?? ''}
@@ -209,6 +222,28 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
 }
 
 const styles = StyleSheet.create({
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  brand: {
+    fontFamily: F.sans,
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: 2.5,
+    color: C.white,
+  },
+  searchBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchIcon: { fontSize: 18, color: C.white },
   arabic: {
     fontFamily: F.arabic,
     fontSize: 27,
