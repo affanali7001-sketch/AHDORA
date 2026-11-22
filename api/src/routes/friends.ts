@@ -20,6 +20,7 @@ import { ChallengeParticipant } from '../models/ChallengeParticipant.js';
 import { FriendRequest } from '../models/FriendRequest.js';
 import { Friendship, orderedPair } from '../models/Friendship.js';
 import { User } from '../models/User.js';
+import { UserPoints } from '../models/UserPoints.js';
 import { isDuplicateKeyError } from '../lib/points.js';
 
 export const friendsRouter = Router();
@@ -43,6 +44,28 @@ type PublicUserDoc = {
 function publicUser(doc: PublicUserDoc) {
   const initial = doc.name.trim().charAt(0).toUpperCase() || '?';
   return { id: String(doc._id), name: doc.name, initial };
+}
+
+/**
+ * Total points for a set of users, in ONE UserPoints query ($in over
+ * the returned ids). Users with no UserPoints row have 0 points.
+ * Only the single aggregate total is ever exposed — never a points
+ * history, and never through publicUser() itself, so the friends
+ * list, requests and invites keep the id + name + initial shape.
+ */
+async function pointsTotals(userIds: string[]): Promise<Map<string, number>> {
+  const totals = new Map<string, number>();
+  if (userIds.length === 0) return totals;
+  const rows = await UserPoints.find({ userId: { $in: userIds } })
+    .select('userId total')
+    .lean();
+  for (const row of rows) totals.set(String(row.userId), row.total ?? 0);
+  return totals;
+}
+
+/** publicUser plus the TOTAL points — discover/search only. */
+function publicUserWithPoints(doc: PublicUserDoc, points: number) {
+  return { ...publicUser(doc), points };
 }
 
 async function areFriends(userId: string, otherId: string): Promise<boolean> {
@@ -143,8 +166,14 @@ friendsRouter.get('/search', async (req, res, next) => {
       .select('_id name')
       .limit(10)
       .lean();
-    // Emails are searchable but never returned.
-    res.json({ users: users.map((u) => publicUser(u as PublicUserDoc)) });
+    // Emails are searchable but never returned. Points are the total
+    // only — no history, no breakdown.
+    const totals = await pointsTotals(users.map((u) => String(u._id)));
+    res.json({
+      users: users.map((u) =>
+        publicUserWithPoints(u as PublicUserDoc, totals.get(String(u._id)) ?? 0),
+      ),
+    });
   } catch (error) {
     next(error);
   }
@@ -177,8 +206,13 @@ friendsRouter.get('/discover', async (req, res, next) => {
       .limit(limit)
       .lean();
     // Only _id + name are ever selected, so no email or private data
-    // can leak through this response.
-    res.json({ users: users.map((u) => publicUser(u as PublicUserDoc)) });
+    // can leak through this response. Points are the total only.
+    const totals = await pointsTotals(users.map((u) => String(u._id)));
+    res.json({
+      users: users.map((u) =>
+        publicUserWithPoints(u as PublicUserDoc, totals.get(String(u._id)) ?? 0),
+      ),
+    });
   } catch (error) {
     next(error);
   }

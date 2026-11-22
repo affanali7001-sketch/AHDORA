@@ -5,6 +5,7 @@ import type { Server } from 'node:http';
 import mongoose from 'mongoose';
 import { friendsRouter } from './friends.js';
 import { User } from '../models/User.js';
+import { UserPoints } from '../models/UserPoints.js';
 
 /**
  * GET /api/friends/discover tests (Phase 15, item 4).
@@ -67,6 +68,29 @@ const ALL_DOCS: FakeDoc[] = [
 
 type Captured = { filter?: unknown; projection?: unknown; limit?: number };
 
+/** A few users have points; the rest have no UserPoints row (→ 0). */
+const POINTS: Record<string, number> = {
+  [OTHER_DOCS[0]!._id]: 150,
+  [OTHER_DOCS[2]!._id]: 42,
+};
+
+type PointsCaptured = { filter?: unknown };
+
+function installFakePoints(pointsById: Record<string, number>, captured: PointsCaptured) {
+  return vi.spyOn(UserPoints, 'find').mockImplementation(((filter: {
+    userId?: { $in?: string[] };
+  }) => {
+    captured.filter = filter;
+    const ids = filter?.userId?.$in ?? [];
+    const rows = ids
+      .filter((id) => typeof pointsById[id] === 'number')
+      .map((id) => ({ userId: id, total: pointsById[id] }));
+    return {
+      select: () => ({ lean: async () => rows }),
+    };
+  }) as never);
+}
+
 function installFakeFind(docs: FakeDoc[], captured: Captured) {
   return vi.spyOn(User, 'find').mockImplementation(((filter: { _id?: { $ne?: string } }) => {
     captured.filter = filter;
@@ -127,7 +151,9 @@ describe('GET /api/friends/discover', () => {
 
   it('returns other users, never self, and never an email', async () => {
     const captured: Captured = {};
+    const pointsCaptured: PointsCaptured = {};
     installFakeFind(ALL_DOCS, captured);
+    installFakePoints(POINTS, pointsCaptured);
     const { base, close } = await startServer();
     try {
       const res = await fetch(`${base}/api/friends/discover`);
@@ -139,7 +165,7 @@ describe('GET /api/friends/discover', () => {
       expect(JSON.stringify(body)).not.toContain('email');
       expect(JSON.stringify(body)).not.toContain('@example.com');
       for (const user of body.users) {
-        expect(Object.keys(user).sort()).toEqual(['id', 'initial', 'name']);
+        expect(Object.keys(user).sort()).toEqual(['id', 'initial', 'name', 'points']);
       }
       // The query itself excludes self and never selects email.
       expect(captured.filter).toEqual({ _id: { $ne: ME_ID } });
@@ -150,9 +176,33 @@ describe('GET /api/friends/discover', () => {
     }
   });
 
+  it('includes each user total points (0 when they have none), in one query', async () => {
+    const captured: Captured = {};
+    const pointsCaptured: PointsCaptured = {};
+    installFakeFind(ALL_DOCS, captured);
+    installFakePoints(POINTS, pointsCaptured);
+    const { base, close } = await startServer();
+    try {
+      const res = await fetch(`${base}/api/friends/discover`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as DiscoverBody;
+      const byId = new Map(body.users.map((u) => [u.id as string, u.points as number]));
+      expect(byId.get(OTHER_DOCS[0]!._id)).toBe(150);
+      expect(byId.get(OTHER_DOCS[2]!._id)).toBe(42);
+      expect(byId.get(OTHER_DOCS[1]!._id)).toBe(0);
+      // One UserPoints query with $in over the returned ids — no N+1.
+      expect(pointsCaptured.filter).toEqual({
+        userId: { $in: body.users.map((u) => u.id) },
+      });
+    } finally {
+      await close();
+    }
+  });
+
   it('respects ?limit=3', async () => {
     const captured: Captured = {};
     installFakeFind(ALL_DOCS, captured);
+    installFakePoints(POINTS, {});
     const { base, close } = await startServer();
     try {
       const res = await fetch(`${base}/api/friends/discover?limit=3`);
@@ -168,6 +218,7 @@ describe('GET /api/friends/discover', () => {
   it('clamps ?limit=99 down to 10', async () => {
     const captured: Captured = {};
     installFakeFind(ALL_DOCS, captured);
+    installFakePoints(POINTS, {});
     const { base, close } = await startServer();
     try {
       const res = await fetch(`${base}/api/friends/discover?limit=99`);
@@ -183,6 +234,7 @@ describe('GET /api/friends/discover', () => {
   it('falls back to 10 for an invalid ?limit', async () => {
     const captured: Captured = {};
     installFakeFind(ALL_DOCS, captured);
+    installFakePoints(POINTS, {});
     const { base, close } = await startServer();
     try {
       const res = await fetch(`${base}/api/friends/discover?limit=abc`);

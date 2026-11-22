@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.js';
 import { Profile } from '../models/Profile.js';
 import { QuranBookmark } from '../models/QuranBookmark.js';
+import { QuranDayLog } from '../models/QuranDayLog.js';
 import { QuranReading } from '../models/QuranReading.js';
 import {
   ARABIC_SOURCE,
@@ -16,7 +17,7 @@ import {
   fetchSurahList,
   searchAyahText,
 } from '../lib/quranUpstream.js';
-import { dateKeyInTimezone } from '../lib/timezone.js';
+import { addDays, dateKeyInTimezone } from '../lib/timezone.js';
 
 /**
  * Quran reading — verified text only.
@@ -337,7 +338,95 @@ quranRouter.post('/read', requireAuth, async (req, res, next) => {
       existing.lastAyahNumber = Math.max(existing.lastAyahNumber, parsed.data.ayahNumber);
       await existing.save();
     }
+    // The per-day log mirrors the same forward progress: ayahs added
+    // today also count toward "Quran read today". Re-reading adds
+    // nothing here either, because `added` is 0 for it. The
+    // QuranReading behaviour and the response shape are unchanged.
+    if (added > 0) {
+      await QuranDayLog.findOneAndUpdate(
+        { userId, dayKey: today },
+        { $inc: { ayahsRead: added } },
+        { upsert: true, new: true, setDefaultsOnInsert: true },
+      );
+    }
     res.json({ recorded: true, ayahsAddedToday: added });
+  } catch (error) {
+    next(error);
+  }
+});
+
+const listenedSchema = z.object({
+  minutes: z.number().int().min(0).optional(),
+}).strict();
+
+/**
+ * POST /api/quran/listened — record that the user listened to Quran
+ * recitation today. Sets listened=true for today and adds the
+ * minutes to today's total. `minutes` is optional (default 0);
+ * listening with 0 minutes still marks the day as listened.
+ */
+quranRouter.post('/listened', requireAuth, async (req, res, next) => {
+  try {
+    const userId = requireUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    const parsed = listenedSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid listening record' });
+      return;
+    }
+    const profile = await Profile.findOne({ userId }).lean();
+    const timezone = profile?.timezone?.trim() || 'Asia/Kolkata';
+    const today = dateKeyInTimezone(timezone);
+    const minutes = parsed.data.minutes ?? 0;
+    await QuranDayLog.findOneAndUpdate(
+      { userId, dayKey: today },
+      { $set: { listened: true }, $inc: { listenedMinutes: minutes } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+    res.json({ ok: true, listened: true, dayKey: today });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/quran/daily-log — the last N days (default 30, 1–90)
+ * including today, newest first. Days with no log row are filled
+ * in as "not read / not listened" so the client can show the gap
+ * honestly. Day keys follow the user's own timezone.
+ */
+quranRouter.get('/daily-log', requireAuth, async (req, res, next) => {
+  try {
+    const userId = requireUserId(req);
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    const rawDays =
+      typeof req.query.days === 'string' ? Number.parseInt(req.query.days, 10) : Number.NaN;
+    const days = Number.isFinite(rawDays)
+      ? Math.min(Math.max(rawDays, 1), 90)
+      : 30;
+    const profile = await Profile.findOne({ userId }).lean();
+    const timezone = profile?.timezone?.trim() || 'Asia/Kolkata';
+    const today = dateKeyInTimezone(timezone);
+    const keys = Array.from({ length: days }, (_, i) => addDays(today, -i));
+    const rows = await QuranDayLog.find({ userId, dayKey: { $in: keys } }).lean();
+    const byDay = new Map(rows.map((row) => [row.dayKey, row]));
+    res.json({
+      days: keys.map((dayKey) => {
+        const row = byDay.get(dayKey);
+        return {
+          dayKey,
+          ayahsRead: row?.ayahsRead ?? 0,
+          listened: row?.listened ?? false,
+          listenedMinutes: row?.listenedMinutes ?? 0,
+        };
+      }),
+    });
   } catch (error) {
     next(error);
   }
