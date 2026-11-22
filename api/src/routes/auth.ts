@@ -311,8 +311,10 @@ authRouter.post('/change-password', requireAuth, async (req, res, next) => {
     user.passwordHash = await hashPassword(parsed.data.newPassword);
     await user.save();
     // Rotate: all other sessions are invalidated, this one is re-issued.
-    await rotateSession(String(user._id), req, res);
-    res.json({ changed: true });
+    // The new token is returned in the body so the native app (which
+    // cannot read it from Set-Cookie) can keep the session alive.
+    const sessionToken = await rotateSession(String(user._id), req, res);
+    res.json({ changed: true, sessionToken });
   } catch (error) { next(error); }
 });
 
