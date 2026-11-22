@@ -27,13 +27,14 @@ function rawDay(
   hijriMonthEn: string,
   hijriYear: string,
   holidays: string[],
+  hijriMonthNumber = 9,
 ) {
   return {
     gregorian: { date: gregorianDDMMYYYY, weekday: { en: 'Monday' } },
     hijri: {
       date: `${hijriDay}-09-1448`,
       day: hijriDay,
-      month: { number: 9, en: hijriMonthEn, ar: 'رمضان', days: 30 },
+      month: { number: hijriMonthNumber, en: hijriMonthEn, ar: 'رمضان', days: 30 },
       year: hijriYear,
       holidays,
     },
@@ -63,6 +64,8 @@ describe('matchHijriEventKey', () => {
     expect(matchHijriEventKey('Eid al-Adha')).toBe('eid-adha');
     expect(matchHijriEventKey('Lailat-ul-Qadr')).toBe('qadr');
     expect(matchHijriEventKey('Day of Arafah')).toBe('arafah');
+    // Aladhan spells it 'Arafa' (verified live 2027-05-15) — both spellings map.
+    expect(matchHijriEventKey('Arafa')).toBe('arafah');
     expect(matchHijriEventKey('Islamic New Year')).toBe('new-year');
     expect(matchHijriEventKey('Day of Ashura')).toBe('ashura');
     expect(matchHijriEventKey("Prophet's Birthday")).toBe('mawlid');
@@ -137,6 +140,25 @@ describe('collectHijriEvents', () => {
     const ramadan = events.find((event) => event.key === 'ramadan');
     expect(ramadan?.gregorianDate).toBe('2027-02-07');
     expect(ramadan?.daysUntil).toBe(77);
+  });
+
+  it('derives Arafah, New Year and Ashura from the Hijri date when Aladhan marks nothing', () => {
+    // Verified live 2026-11-22: 15-05-2027 carries only 'Hajj' +
+    // 'Arafa', and 06-06-2027 (1 Muharram) carries no New Year
+    // marker at all — so these three come from the Hijri date
+    // itself (real conversion data), not the holidays array.
+    const days = [
+      rawDay('15-05-2027', '9', 'Dhū al-Ḥijjah', '1448', ['Hajj'], 12),
+      rawDay('06-06-2027', '1', 'Muḥarram', '1449', [], 1),
+      rawDay('15-06-2027', '10', 'Muḥarram', '1449', ['Ashura'], 1),
+    ]
+      .map(normaliseAladhanDay)
+      .filter((day): day is NonNullable<typeof day> => day !== null);
+    const events = collectHijriEvents(days, '2026-11-22', 0);
+    expect(events.map((event) => event.key)).toEqual(['arafah', 'new-year', 'ashura']);
+    expect(events.find((event) => event.key === 'arafah')?.gregorianDate).toBe('2027-05-15');
+    expect(events.find((event) => event.key === 'new-year')?.gregorianDate).toBe('2027-06-06');
+    expect(events.find((event) => event.key === 'new-year')?.label).toBe('Islamic New Year');
   });
 
   it('counts today as 0 days away', () => {

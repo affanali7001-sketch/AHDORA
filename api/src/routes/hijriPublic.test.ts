@@ -32,6 +32,7 @@ function daysInMonth(year: number, month: number): number {
 const FAKE_HOLIDAYS: Record<string, string[]> = {
   '2027-02-08': ['1st Day of Ramadan'],
   '2027-03-10': ['Eid al-Fitr'],
+  '2027-05-15': ['Arafa'],
   '2027-05-27': ['Eid al-Adha'],
 };
 
@@ -207,7 +208,7 @@ describe('GET /api/hijri/events (public)', () => {
     };
     expect(data.adjustmentDays).toBe(0);
     const keys = data.events.map((event) => event.key);
-    expect(keys).toEqual(['ramadan', 'eid-fitr', 'eid-adha']);
+    expect(keys).toEqual(['ramadan', 'eid-fitr', 'arafah', 'eid-adha']);
     const ramadan = data.events.find((event) => event.key === 'ramadan');
     expect(ramadan?.gregorianDate).toBe('2027-02-08');
     expect(ramadan?.label).toBe('1st Day of Ramadan');

@@ -317,7 +317,9 @@ export function matchHijriEventKey(holiday: string): HijriEventKey | null {
   if (h.includes('fitr')) return 'eid-fitr';
   if (h.includes('adha')) return 'eid-adha';
   if (h.includes('qadr')) return 'qadr';
-  if (h.includes('arafah')) return 'arafah';
+  // Aladhan spells it 'Arafa' (15-05-2027), not 'Arafah' — match
+  // the shorter form so both spellings map.
+  if (h.includes('arafa')) return 'arafah';
   if (h.includes('islamic new year')) return 'new-year';
   if (h.includes('ashura')) return 'ashura';
   if (h.includes("prophet's birthday") || h.includes('mawlid')) return 'mawlid';
@@ -347,22 +349,34 @@ export function collectHijriEvents(
   for (const day of sorted) {
     if (day.gregorian.date < today) continue;
     const shifted = shiftedLookup(sorted, day.gregorian.date, offset) ?? day;
-    for (const holiday of shifted.hijri.holidays) {
-      const key = matchHijriEventKey(holiday);
-      if (!key || found.has(key)) continue;
-      const daysUntil = Math.round(
-        (Date.parse(day.gregorian.date) - Date.parse(today)) / 86400000,
-      );
+    const daysUntil = Math.round(
+      (Date.parse(day.gregorian.date) - Date.parse(today)) / 86400000,
+    );
+    const record = (key: HijriEventKey, label: string) => {
+      if (found.has(key)) return;
       found.set(key, {
         key,
-        label: holiday,
+        label,
         hijriDay: shifted.hijri.day,
         hijriMonth: shifted.hijri.month.en,
         hijriYear: shifted.hijri.year,
         gregorianDate: day.gregorian.date,
         daysUntil,
       });
+    };
+    for (const holiday of shifted.hijri.holidays) {
+      const key = matchHijriEventKey(holiday);
+      if (key) record(key, holiday);
     }
+    // Fixed-date backup: Aladhan's holiday names vary ('Arafa' not
+    // 'Arafah') and 1 Muharram carries no marker at all, so derive
+    // these three from the Hijri date itself — the date still comes
+    // from Aladhan's real conversion, nothing is invented.
+    const monthNum = shifted.hijri.month.number;
+    const dayNum = Number(shifted.hijri.day);
+    if (monthNum === 12 && dayNum === 9) record('arafah', 'Day of Arafah');
+    if (monthNum === 1 && dayNum === 1) record('new-year', 'Islamic New Year');
+    if (monthNum === 1 && dayNum === 10) record('ashura', 'Day of Ashura');
   }
   return [...found.values()].sort((a, b) => a.gregorianDate.localeCompare(b.gregorianDate));
 }
