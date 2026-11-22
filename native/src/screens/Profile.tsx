@@ -20,7 +20,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { apiFetch, changePassword } from '../lib/api';
 import type { ScreenProps } from '../lib/nav';
-import { stringsFor } from '../lib/strings';
+import { stringsFor, type AppLanguage } from '../lib/strings';
+import { loadMinimal, saveMinimal } from '../lib/minimal';
 import { C, L, T } from '../lib/theme';
 import { Card, Input, PillButton, Switch } from '../components/ui';
 import TutorialVideo from '../components/TutorialVideo';
@@ -33,6 +34,18 @@ import {
 } from '../lib/apiSocial';
 
 const UNINSTALL_KEY = '@ahdora/profile/uninstallProtection';
+
+/** Local strings for the Minimal toggle (Tasbeeh pattern — strings.ts untouched). */
+const STRINGS: Record<AppLanguage, { minimalT: string; minimalS: string }> = {
+  en: {
+    minimalT: 'Minimal today view',
+    minimalS: 'Home shows only the next prayer and today’s prayer times — no tiles, no summary.',
+  },
+  hi: {
+    minimalT: 'Minimal aaj ka view',
+    minimalS: 'Home par sirf agli namaz aur aaj ke namaz ke time dikhenge — na tiles, na summary.',
+  },
+};
 
 function profileStr(profile: ProfileData | null, key: string): string {
   if (!profile) return '';
@@ -64,11 +77,14 @@ function eduDetail(profile: ProfileData | null): string {
 
 export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProps) {
   const s = stringsFor(lang);
+  const ms = STRINGS[lang];
+  const uid = user?.id ?? 'anon';
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [rewards, setRewards] = useState<RewardsSummary | null>(null);
   const [uninstall, setUninstall] = useState(false);
+  const [minimal, setMinimal] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [resetNote, setResetNote] = useState('');
   const [resetBusy, setResetBusy] = useState(false);
@@ -88,20 +104,22 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
     setLoading(true);
     setError('');
     try {
-      const [prof, rw, stored] = await Promise.all([
+      const [prof, rw, stored, minimalStored] = await Promise.all([
         getProfile(),
         rewardsSummary(),
         AsyncStorage.getItem(UNINSTALL_KEY),
+        loadMinimal(uid),
       ]);
       setProfile(prof.profile);
       setRewards(rw);
       if (stored !== null) setUninstall(stored === 'true');
+      setMinimal(minimalStored);
     } catch (e) {
       setError(e instanceof Error ? e.message : s.errorGeneric);
     } finally {
       setLoading(false);
     }
-  }, [s.errorGeneric]);
+  }, [s.errorGeneric, uid]);
 
   useEffect(() => {
     void load();
@@ -114,6 +132,11 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
     } catch {
       // Kept in memory for this session; the note below stays honest.
     }
+  }
+
+  async function toggleMinimal(value: boolean) {
+    setMinimal(value);
+    await saveMinimal(uid, value);
   }
 
   async function sendResetLink() {
@@ -240,6 +263,13 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
               <Switch value={uninstall} onValueChange={(v) => void toggleUninstall(v)} />
             </View>
             <Text style={styles.honestNote}>{s.pfUninstallNote}</Text>
+            <View style={styles.row}>
+              <View style={styles.rowText}>
+                <Text style={styles.rowLabel}>{ms.minimalT}</Text>
+                <Text style={styles.rowSub}>{ms.minimalS}</Text>
+              </View>
+              <Switch value={minimal} onValueChange={(v) => void toggleMinimal(v)} />
+            </View>
             <View style={styles.row}>
               <View style={styles.rowText}>
                 <Text style={styles.rowLabel}>{s.pfLangT}</Text>

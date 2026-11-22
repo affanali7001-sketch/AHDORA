@@ -10,7 +10,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ScreenId, ScreenProps } from '../lib/nav';
-import { stringsFor } from '../lib/strings';
+import { stringsFor, type AppLanguage } from '../lib/strings';
+import { loadMinimal } from '../lib/minimal';
 import { C, F, L, T } from '../lib/theme';
 import { Card, Chip, EmptyState, PillButton, TealHead, Tile, TileGrid } from '../components/ui';
 import {
@@ -50,8 +51,29 @@ function shortCountdown(mins: number): string {
 
 type HomeTile = { id: ScreenId; label: string; icon: string; peach?: boolean };
 
+/** Local strings for the Minimal today view (Tasbeeh pattern — strings.ts untouched). */
+const STRINGS: Record<
+  AppLanguage,
+  { todayTimes: string; tapToSee: string; tapToHide: string; prayed: string }
+> = {
+  en: {
+    todayTimes: "Today's prayer times",
+    tapToSee: 'Tap to see all times',
+    tapToHide: 'Tap to hide',
+    prayed: 'Prayed',
+  },
+  hi: {
+    todayTimes: 'Aaj ke namaz ke time',
+    tapToSee: 'Saare time dekhne ke liye dabao',
+    tapToHide: 'Chhupane ke liye dabao',
+    prayed: 'Padh li',
+  },
+};
+
 export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
   const s = stringsFor(lang);
+  const ms = STRINGS[lang];
+  const uid = user?.id ?? 'anon';
   const [times, setTimes] = useState<PrayerTimesResponse | null>(null);
   // Tomorrow's Fajr, only when every prayer today is done — the
   // server returns nextPrayer null after Isha, and showing "No
@@ -64,6 +86,11 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
   const [challengeLoaded, setChallengeLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  /** Minimal today view (Profile toggle) — re-read on every load so
+      toggling in Profile takes effect when the user comes back here. */
+  const [minimal, setMinimal] = useState(false);
+  /** The day's times in Minimal mode start collapsed; tap to expand. */
+  const [timesOpen, setTimesOpen] = useState(false);
 
   const load = useCallback(() => {
     let active = true;
@@ -74,7 +101,8 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
       fetchSalahDay(todayKey()),
       studyStats(),
       myChallenges(),
-    ]).then(([timesResult, dayResult, statsResult, challengesResult]) => {
+      loadMinimal(uid),
+    ]).then(([timesResult, dayResult, statsResult, challengesResult, minimalResult]) => {
       if (!active) return;
       if (timesResult.status === 'fulfilled') {
         setTimes(timesResult.value);
@@ -94,6 +122,7 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
       if (challengesResult.status === 'fulfilled') {
         setChallenge(challengesResult.value.active[0] ?? null);
       }
+      if (minimalResult.status === 'fulfilled') setMinimal(minimalResult.value);
       setChallengeLoaded(true);
       if (
         timesResult.status === 'rejected' &&
@@ -108,7 +137,7 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
     return () => {
       active = false;
     };
-  }, [s.loadFailed]);
+  }, [s.loadFailed, uid]);
 
   useEffect(load, [load]);
 
@@ -167,6 +196,89 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
       ? `${summaryParts.join(' · ')} ${s.homeTodayDetail}`
       : s.homeEmpty;
 
+  // The teal header is shared by both layouts: salam, greeting,
+  // date + Hijri date, and the live next-prayer card with countdown.
+  // Extracted once so the Minimal branch below reuses the exact
+  // same header instead of duplicating it.
+  const tealHead = (
+    <TealHead style={styles.tealHeadPad}>
+      <Text style={styles.arabic}>{s.salamArabic}</Text>
+      <Text style={styles.greeting}>
+        {s.homeGreeting} {user?.name ?? ''}
+      </Text>
+      <Text style={styles.dateLine}>
+        {dateLine}
+        {hijriDate ? ` · ${hijriDate}` : ''}
+      </Text>
+      {loading ? (
+        <ActivityIndicator color={C.white} style={{ marginTop: 16 }} />
+      ) : next && countdown !== null ? (
+        <View style={styles.nextCard}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.nextLabel}>
+              {s.nextPrayer}
+              {isTomorrow ? ` · ${s.tomorrowTag}` : ''}
+            </Text>
+            <Text style={styles.nextName}>
+              {next.name} · {formatTime12h(next.time)}
+            </Text>
+          </View>
+          <Chip label={shortCountdown(countdown)} tone="peach" />
+        </View>
+      ) : (
+        <Text style={[styles.dateLine, { marginTop: 14 }]}>{s.noPrayerToday}</Text>
+      )}
+    </TealHead>
+  );
+
+  // Minimal today view: ONLY the header (next prayer + countdown)
+  // and the day's prayer times as an expandable section. No top
+  // bar, no tiles grid, no "Aaj ek nazar me" card, no study or
+  // challenge summary — all times come from the fetch above.
+  if (minimal) {
+    return (
+      <ScrollView contentContainerStyle={L.scroll} showsVerticalScrollIndicator={false}>
+        {tealHead}
+        {times ? (
+          <Card>
+            <Pressable
+              onPress={() => setTimesOpen((v) => !v)}
+              style={styles.timesHead}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: timesOpen }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={T.cardTitle}>{ms.todayTimes}</Text>
+                <Text style={[T.cardBody, { marginTop: 2 }]}>
+                  {timesOpen ? ms.tapToHide : ms.tapToSee}
+                </Text>
+              </View>
+              <Text style={styles.chevron}>{timesOpen ? '▾' : '▸'}</Text>
+            </Pressable>
+            {timesOpen
+              ? PRAYER_NAMES.map((name, i) => (
+                  <View
+                    key={name}
+                    style={[
+                      styles.timeRow,
+                      i === PRAYER_NAMES.length - 1 && { borderBottomWidth: 0 },
+                    ]}
+                  >
+                    <Text style={styles.timeName}>{name}</Text>
+                    {day?.[name]?.status === 'prayed' ? (
+                      <Text style={styles.timePrayed}>✓ {ms.prayed}</Text>
+                    ) : null}
+                    <Text style={styles.timeValue}>{formatTime12h(times.timings[name])}</Text>
+                  </View>
+                ))
+              : null}
+          </Card>
+        ) : null}
+        {error ? <Text style={T.error}>{error}</Text> : null}
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView contentContainerStyle={L.scroll} showsVerticalScrollIndicator={false}>
       {/* AHDORA + search bar on a WHITE bar above the teal header
@@ -185,34 +297,7 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
       </View>
       {/* Extra top padding (+10px over the default 20) so the salam
           and the rest of the header sit a bit lower (user request). */}
-      <TealHead style={styles.tealHeadPad}>
-        <Text style={styles.arabic}>{s.salamArabic}</Text>
-        <Text style={styles.greeting}>
-          {s.homeGreeting} {user?.name ?? ''}
-        </Text>
-        <Text style={styles.dateLine}>
-          {dateLine}
-          {hijriDate ? ` · ${hijriDate}` : ''}
-        </Text>
-        {loading ? (
-          <ActivityIndicator color={C.white} style={{ marginTop: 16 }} />
-        ) : next && countdown !== null ? (
-          <View style={styles.nextCard}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.nextLabel}>
-                {s.nextPrayer}
-                {isTomorrow ? ` · ${s.tomorrowTag}` : ''}
-              </Text>
-              <Text style={styles.nextName}>
-                {next.name} · {formatTime12h(next.time)}
-              </Text>
-            </View>
-            <Chip label={shortCountdown(countdown)} tone="peach" />
-          </View>
-        ) : (
-          <Text style={[styles.dateLine, { marginTop: 14 }]}>{s.noPrayerToday}</Text>
-        )}
-      </TealHead>
+      {tealHead}
 
       <TileGrid>
         {tiles.map((tile) => (
@@ -332,4 +417,37 @@ const styles = StyleSheet.create({
   },
   tileIcon: { fontSize: 22, color: C.teal700 },
   tileIconPeach: { color: C.peachInk },
+  timesHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  chevron: { fontSize: 20, fontWeight: '800', color: C.teal700 },
+  timeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 11,
+    borderBottomWidth: 1,
+    borderBottomColor: C.line,
+  },
+  timeName: {
+    flex: 1,
+    fontFamily: F.sans,
+    fontSize: 15,
+    fontWeight: '700',
+    color: C.ink,
+  },
+  timePrayed: {
+    fontFamily: F.sans,
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: C.teal700,
+  },
+  timeValue: {
+    fontFamily: F.sans,
+    fontSize: 15,
+    fontWeight: '800',
+    color: C.teal900,
+  },
 });
