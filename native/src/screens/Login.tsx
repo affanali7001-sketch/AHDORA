@@ -17,6 +17,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import type { ScrollViewInstance } from 'react-native';
@@ -33,6 +34,7 @@ export default function LoginScreen({ lang, goTo, onLoginSuccess }: ScreenProps)
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resetSent, setResetSent] = useState<string | null>(null);
@@ -148,12 +150,15 @@ export default function LoginScreen({ lang, goTo, onLoginSuccess }: ScreenProps)
               editable={!busy}
             />
           </Field>
-          <Field label={s.password}>
-            <Input
+          <Text style={T.label}>{s.password}</Text>
+          <View style={styles.passwordRow}>
+            <TextInput
+              style={styles.passwordInput}
               value={password}
               onChangeText={setPassword}
               placeholder="••••••••"
-              secureTextEntry
+              placeholderTextColor={C.muted}
+              secureTextEntry={!showPassword}
               autoCapitalize="none"
               autoCorrect={false}
               autoComplete="password"
@@ -161,7 +166,10 @@ export default function LoginScreen({ lang, goTo, onLoginSuccess }: ScreenProps)
               onFocus={scrollPasswordIntoView}
               onSubmitEditing={submitLogin}
             />
-          </Field>
+            <Pressable onPress={() => setShowPassword((v) => !v)} accessibilityRole="button">
+              <Text style={styles.showToggle}>{showPassword ? s.hide : s.show}</Text>
+            </Pressable>
+          </View>
 
           {error ? <Text style={T.error}>{error}</Text> : null}
 
@@ -287,4 +295,16 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     color: C.peachInk,
   },
+  passwordRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.white,
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    marginBottom: 8,
+  },
+  passwordInput: { flex: 1, paddingVertical: 12, fontSize: 15, color: C.ink },
+  showToggle: { color: C.teal, fontWeight: '700', fontSize: 14, marginLeft: 8 },
 });
