@@ -28,6 +28,13 @@ function daysInMonth(year: number, month: number): number {
   return new Date(year, month, 0).getDate();
 }
 
+/** Fake key-day holidays, so /api/hijri/events has real markers to find. */
+const FAKE_HOLIDAYS: Record<string, string[]> = {
+  '2027-02-08': ['1st Day of Ramadan'],
+  '2027-03-10': ['Eid al-Fitr'],
+  '2027-05-27': ['Eid al-Adha'],
+};
+
 /** Fake Aladhan month payload for whatever month/year the route asks for. */
 function aladhanMonthPayload(month: number, year: number) {
   const count = daysInMonth(year, month);
@@ -46,7 +53,7 @@ function aladhanMonthPayload(month: number, year: number) {
         day: String(day),
         month: { number: 6, en: 'Jumādá al-ākhirah', ar: 'جُمادى الآخرة', days: 29 },
         year: '1448',
-        holidays: [],
+        holidays: FAKE_HOLIDAYS[`${year}-${mm}-${dd}`] ?? [],
       },
     };
   });
@@ -184,6 +191,37 @@ describe('GET /api/hijri/month (public)', () => {
 
   it('never leaks the raw 401 string to a guest', async () => {
     const response = await fetch(`${base}/api/hijri/month?year=2026&month=11`);
+    const text = await response.text();
+    expect(text).not.toContain('Authentication required');
+  });
+});
+
+describe('GET /api/hijri/events (public)', () => {
+  it('returns 200 without any session cookie and finds Ramadan, Eid Fitr and Bakrid', async () => {
+    const response = await fetch(`${base}/api/hijri/events`);
+    expect(response.status).toBe(200);
+    const data = (await response.json()) as {
+      today: string;
+      adjustmentDays: number;
+      events: { key: string; gregorianDate: string; daysUntil: number; label: string }[];
+    };
+    expect(data.adjustmentDays).toBe(0);
+    const keys = data.events.map((event) => event.key);
+    expect(keys).toEqual(['ramadan', 'eid-fitr', 'eid-adha']);
+    const ramadan = data.events.find((event) => event.key === 'ramadan');
+    expect(ramadan?.gregorianDate).toBe('2027-02-08');
+    expect(ramadan?.label).toBe('1st Day of Ramadan');
+    const expectedDays = Math.round(
+      (Date.parse('2027-02-08') - Date.parse(data.today)) / 86400000,
+    );
+    expect(ramadan?.daysUntil).toBe(expectedDays);
+    expect(ramadan?.daysUntil).toBeGreaterThan(0);
+    const adha = data.events.find((event) => event.key === 'eid-adha');
+    expect(adha?.gregorianDate).toBe('2027-05-27');
+  });
+
+  it('never leaks the raw 401 string to a guest', async () => {
+    const response = await fetch(`${base}/api/hijri/events`);
     const text = await response.text();
     expect(text).not.toContain('Authentication required');
   });

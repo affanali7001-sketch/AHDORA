@@ -278,6 +278,150 @@ hijriRouter.get('/month', optionalAuth, async (req, res, next) => {
   }
 });
 
+export type HijriEventKey =
+  | 'ramadan'
+  | 'eid-fitr'
+  | 'eid-adha'
+  | 'qadr'
+  | 'arafah'
+  | 'new-year'
+  | 'ashura'
+  | 'mawlid'
+  | 'miraj'
+  | 'barat';
+
+export type HijriEvent = {
+  key: HijriEventKey;
+  /** Raw Aladhan holiday name, e.g. "1st Day of Ramadan". */
+  label: string;
+  hijriDay: string;
+  hijriMonth: string;
+  hijriYear: string;
+  /** ISO YYYY-MM-DD Gregorian date of the event. */
+  gregorianDate: string;
+  /** Whole days from `today` until the event (0 = today). */
+  daysUntil: number;
+};
+
+/**
+ * Map one Aladhan holiday name to a key event, or null when it is
+ * not one of the big days the app tracks. Order matters: the
+ * specific names (Fitr, Adha, Qadr, Arafah...) are checked before
+ * the broad "ramadan" match, so "Lailat-ul-Qadr" never becomes
+ * Ramadan and "Eid al-Fitr" never becomes Ramadan either.
+ * Matching is by substring so upstream wording changes ("1st Day
+ * of Ramadan", "Beginning of Ramadan", "Ramadan") still map.
+ */
+export function matchHijriEventKey(holiday: string): HijriEventKey | null {
+  const h = holiday.toLowerCase();
+  if (h.includes('fitr')) return 'eid-fitr';
+  if (h.includes('adha')) return 'eid-adha';
+  if (h.includes('qadr')) return 'qadr';
+  if (h.includes('arafah')) return 'arafah';
+  if (h.includes('islamic new year')) return 'new-year';
+  if (h.includes('ashura')) return 'ashura';
+  if (h.includes("prophet's birthday") || h.includes('mawlid')) return 'mawlid';
+  if (h.includes("mi'raj") || h.includes('miraj') || h.includes('isra')) return 'miraj';
+  if (h.includes("bara'at") || h.includes('baraat')) return 'barat';
+  if (h.includes('ramadan')) return 'ramadan';
+  return null;
+}
+
+/**
+ * From a flat list of normalised Aladhan days (any span, sorted or
+ * not), return the NEXT occurrence of each key event on or after
+ * `today` (ISO), one entry per key, sorted by date. The user's day
+ * offset is applied the same way /month does it: the event is
+ * dated on the Gregorian day whose SHIFTED Hijri day carries the
+ * holiday. Days before today are skipped, and a key is recorded
+ * only at its first occurrence (Eid spans are not repeated).
+ * Pure function — no fetch, no DB — so it is unit-testable.
+ */
+export function collectHijriEvents(
+  days: AladhanDay[],
+  today: string,
+  offset: number,
+): HijriEvent[] {
+  const sorted = [...days].sort((a, b) => a.gregorian.date.localeCompare(b.gregorian.date));
+  const found = new Map<HijriEventKey, HijriEvent>();
+  for (const day of sorted) {
+    if (day.gregorian.date < today) continue;
+    const shifted = shiftedLookup(sorted, day.gregorian.date, offset) ?? day;
+    for (const holiday of shifted.hijri.holidays) {
+      const key = matchHijriEventKey(holiday);
+      if (!key || found.has(key)) continue;
+      const daysUntil = Math.round(
+        (Date.parse(day.gregorian.date) - Date.parse(today)) / 86400000,
+      );
+      found.set(key, {
+        key,
+        label: holiday,
+        hijriDay: shifted.hijri.day,
+        hijriMonth: shifted.hijri.month.en,
+        hijriYear: shifted.hijri.year,
+        gregorianDate: day.gregorian.date,
+        daysUntil,
+      });
+    }
+  }
+  return [...found.values()].sort((a, b) => a.gregorianDate.localeCompare(b.gregorianDate));
+}
+
+/**
+ * GET /api/hijri/events — the next occurrence of each big Islamic
+ * day (Ramadan, Eid-ul-Fitr, Eid-ul-Adha/Bakrid, Shab-e-Qadr,
+ * Arafah, Islamic New Year, Ashura, Mawlid, Shab-e-Miraj,
+ * Shab-e-Barat) with its Hijri + Gregorian date and days-until
+ * countdown. PUBLIC (optionalAuth) — same reason as /today and
+ * /month: calendar info, not per-user data (the signed-in user's
+ * timezone and moon-sighting offset still apply).
+ *
+ * Why this endpoint exists: the Hijri screen only scanned the
+ * current month + 2 ahead, so Ramadan/Eid/Bakrid — months away —
+ * never appeared at all. This scans 14 Gregorian months forward
+ * (a full Hijri year is ~354 days, so every key event's next
+ * occurrence is inside the window) using the same 1-hour cached
+ * month fetches as /month, and returns only real Aladhan markers —
+ * nothing is computed or invented.
+ */
+hijriRouter.get('/events', optionalAuth, async (req, res) => {
+  try {
+    const profile = await getProfile(req);
+    const timezone = profile?.timezone?.trim() || 'Asia/Kolkata';
+    const offset = profile?.hijriDayOffset ?? 0;
+    const today = dateKeyInTimezone(timezone);
+    const [todayYear = 2026, todayMonth = 1] = today.split('-').map(Number);
+    const months: { year: number; month: number }[] = [];
+    for (let i = 0; i < 14; i++) {
+      const total = todayYear * 12 + (todayMonth - 1) + i;
+      months.push({ year: Math.floor(total / 12), month: (total % 12) + 1 });
+    }
+    // allSettled: one failed month must not hide the events in the
+    // months that did load. If every month fails, there is nothing
+    // to answer from and the route 502s like /month does.
+    const settled = await Promise.allSettled(
+      months.map((m) => fetchGregorianMonthCalendar(m.month, m.year)),
+    );
+    const allDays = settled.flatMap((result) =>
+      result.status === 'fulfilled' ? result.value : [],
+    );
+    if (allDays.length === 0) {
+      res.status(502).json({ error: 'Hijri events could not be loaded from Aladhan. Please try again later.' });
+      return;
+    }
+    const events = collectHijriEvents(allDays, today, offset);
+    res.json({
+      source: SOURCE,
+      convention: CONVENTION,
+      today,
+      adjustmentDays: offset,
+      events,
+    });
+  } catch {
+    res.status(502).json({ error: 'Hijri events could not be loaded from Aladhan. Please try again later.' });
+  }
+});
+
 /** GET /api/hijri/settings — the user's Hijri day adjustment. AUTHED (per-user data). */
 hijriRouter.get('/settings', requireAuth, async (req, res, next) => {
   try {
