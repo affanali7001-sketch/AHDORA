@@ -32,6 +32,8 @@ export type ScreenId =
   | 'tasbeeh'
   | 'hifz'
   | 'khatmah'
+  | 'qibla'
+  | 'fasting'
   | 'mosque'
   | 'study'
   | 'focus'

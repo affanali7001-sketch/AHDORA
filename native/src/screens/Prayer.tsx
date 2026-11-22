@@ -14,6 +14,14 @@
  * (fire-and-forget, only when the user switched them on in the
  * Notifications screen — see src/lib/prayerNotifications.ts). It
  * never blocks this screen and never fails it.
+ *
+ * Below the card, a small source line shows where today's times came
+ * from — straight from the /api/prayer/times response: `source`
+ * ('aladhan' or 'manual'), `method` (the user's saved calculation
+ * method name), the Asr method from the profile, and the city. When
+ * Aladhan failed and the times are the user's own manual times, the
+ * method is NOT shown as the producer and the server's own notice is
+ * shown instead. No accuracy claims anywhere.
  */
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -53,6 +61,28 @@ function statusToPill(status: SalahStatus): PrayerStatus {
 }
 
 type Row = { name: string; time: string; prayer: PrayerName | null };
+
+/**
+ * Source-line strings — kept local to this screen (strings.ts untouched).
+ * 'AlAdhan' and 'Method'/'Asr' are used as-is in Hinglish, matching how
+ * the rest of the app already shows the Asr method ('Hanafi'/'Shafi').
+ */
+const SOURCE_STRINGS = {
+  en: {
+    source: 'Source',
+    method: 'Method',
+    asr: 'Asr',
+    aladhan: 'AlAdhan',
+    manualTimes: 'Your manual times',
+  },
+  hi: {
+    source: 'Source',
+    method: 'Method',
+    asr: 'Asr',
+    aladhan: 'AlAdhan',
+    manualTimes: 'Aapke manual time',
+  },
+} as const;
 
 export default function PrayerScreen({ lang, user, goTo }: ScreenProps) {
   const s = stringsFor(lang);
@@ -151,6 +181,34 @@ export default function PrayerScreen({ lang, user, goTo }: ScreenProps) {
   const subParts = [times?.city, asrMethod].filter(Boolean);
   const sub = subParts.length > 0 ? subParts.join(' · ') : s.prayerSub;
 
+  // Honest source line, built ONLY from values the app actually has:
+  // - times.source / times.method / times.city: from GET /api/prayer/times
+  //   (server: source is 'aladhan' normally, 'manual' when Aladhan failed
+  //   and the user's own manual times are served instead; method is the
+  //   user's saved prayerCalculationMethod, default
+  //   'University of Islamic Sciences, Karachi').
+  // - asrMethod: from the saved profile ('Hanafi' / 'Shafi').
+  // The method is shown only when Aladhan produced the times — with
+  // manual times it did not, so it is left out rather than mislabelled.
+  // Any value that is missing is omitted, never invented.
+  const src = SOURCE_STRINGS[lang];
+  const sourceParts: string[] = [];
+  if (times) {
+    const sourceLabel =
+      times.source === 'manual'
+        ? src.manualTimes
+        : times.source === 'aladhan'
+          ? src.aladhan
+          : times.source;
+    sourceParts.push(`${src.source}: ${sourceLabel}`);
+    if (times.source === 'aladhan' && times.method) {
+      sourceParts.push(`${src.method}: ${times.method}`);
+    }
+    if (asrMethod) sourceParts.push(`${src.asr}: ${asrMethod}`);
+    if (times.city) sourceParts.push(times.city);
+  }
+  const sourceLine = sourceParts.join(' · ');
+
   return (
     <ScrollView contentContainerStyle={L.scroll} showsVerticalScrollIndicator={false}>
       <Text style={T.title}>{s.namazTitle}</Text>
@@ -199,6 +257,17 @@ export default function PrayerScreen({ lang, user, goTo }: ScreenProps) {
           <Text style={[T.note, { marginBottom: 16, textAlign: 'left' }]}>
             {s.namazHint}
           </Text>
+
+          {sourceLine ? (
+            <Text style={[T.note, { marginBottom: 16, textAlign: 'left' }]}>
+              {sourceLine}
+            </Text>
+          ) : null}
+          {times.notice ? (
+            <Text style={[T.note, { marginBottom: 16, textAlign: 'left' }]}>
+              {times.notice}
+            </Text>
+          ) : null}
 
           <PillButton
             label={s.dashEditTimes}
