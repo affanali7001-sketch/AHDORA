@@ -89,6 +89,10 @@ jobs:
         with:
           packages: platform-tools
 
+      - name: Update lockfile for SDK-compatible audio module
+        working-directory: native
+        run: npm install --package-lock-only --ignore-scripts
+
       - name: Install dependencies
         working-directory: native
         run: npm ci
