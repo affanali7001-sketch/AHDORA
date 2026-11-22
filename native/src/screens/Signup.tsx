@@ -6,8 +6,10 @@
  * form says so upfront and validates client-side. On success the
  * user is logged in immediately and routed to onboarding.
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,6 +17,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import type { ScrollViewInstance } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
 import { signup } from '../lib/api';
 import { stringsFor } from '../lib/strings';
@@ -26,10 +29,19 @@ export default function SignupScreen({ lang, goTo, onLoginSuccess }: ScreenProps
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // When the keyboard opens over the password fields, scroll the
+  // form so the focused field stays visible (the user reported the
+  // password field hiding behind the keyboard, 2026-11-22).
+  const scrollRef = useRef<ScrollViewInstance | null>(null);
+  function scrollPasswordIntoView() {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150);
+  }
 
   async function submit() {
     if (busy) return;
@@ -49,10 +61,18 @@ export default function SignupScreen({ lang, goTo, onLoginSuccess }: ScreenProps
       setError(s.passwordHint);
       return;
     }
+    // Confirmation password: the password is entered twice at signup
+    // (the user asked where the confirmation is, 2026-11-22) and
+    // both entries must match, so a typo cannot lock the user out.
+    if (password !== confirmPassword) {
+      setError(s.passwordsNoMatch);
+      return;
+    }
     setBusy(true);
     try {
       const result = await signup(cleanName, cleanEmail, password);
       setPassword('');
+      setConfirmPassword('');
       if (result.notice) setNotice(result.notice);
       onLoginSuccess(result.user);
     } catch (e) {
@@ -63,7 +83,16 @@ export default function SignupScreen({ lang, goTo, onLoginSuccess }: ScreenProps
   }
 
   return (
-    <ScrollView contentContainerStyle={L.scrollNoNav} showsVerticalScrollIndicator={false}>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+    <ScrollView
+      ref={scrollRef}
+      contentContainerStyle={L.scrollNoNav}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+    >
       <Pressable onPress={() => goTo('welcome')} accessibilityRole="button">
         <Text style={styles.back}>← {s.back}</Text>
       </Pressable>
@@ -113,6 +142,7 @@ export default function SignupScreen({ lang, goTo, onLoginSuccess }: ScreenProps
           autoCorrect={false}
           autoComplete="password-new"
           editable={!busy}
+          onFocus={scrollPasswordIntoView}
           onSubmitEditing={submit}
         />
         <Pressable onPress={() => setShowPassword((v) => !v)} accessibilityRole="button">
@@ -120,6 +150,27 @@ export default function SignupScreen({ lang, goTo, onLoginSuccess }: ScreenProps
         </Pressable>
       </View>
       <Text style={T.note}>{s.passwordHint}</Text>
+
+      <Text style={T.label}>{s.confirmPassword}</Text>
+      <View style={styles.passwordRow}>
+        <TextInput
+          style={styles.passwordInput}
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          placeholder="••••••••••••"
+          placeholderTextColor={C.muted}
+          secureTextEntry={!showConfirmPassword}
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="password-new"
+          editable={!busy}
+          onFocus={scrollPasswordIntoView}
+          onSubmitEditing={submit}
+        />
+        <Pressable onPress={() => setShowConfirmPassword((v) => !v)} accessibilityRole="button">
+          <Text style={styles.showToggle}>{showConfirmPassword ? s.hide : s.show}</Text>
+        </Pressable>
+      </View>
 
       {error ? <Text style={T.error}>{error}</Text> : null}
       {notice ? <Text style={T.note}>{notice}</Text> : null}
@@ -133,6 +184,7 @@ export default function SignupScreen({ lang, goTo, onLoginSuccess }: ScreenProps
         <Text style={styles.loginLink}>{s.alreadyHaveAccount}</Text>
       </Pressable>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

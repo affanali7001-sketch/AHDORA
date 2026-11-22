@@ -1,11 +1,21 @@
 /**
  * Notifications — rebuilt to the approved preview (§23 in the preview file).
- * SETTINGS-ONLY screen, no inbox. One card with 5 labelled switches:
- * Namaz reminders, Missed-namaz Quran teaching, Study reminders,
- * Dost aur challenge, Sleep reminders. Quiet-hours card shows the
- * REAL quiet hours from the server settings (falling back to the
- * profile sleep window when none are set). A dark sample-notification
- * card, honestly labelled as a sample.
+ * SETTINGS-ONLY screen, no inbox. One card with 4 labelled switches:
+ * Missed-namaz Quran teaching, Study reminders, Dost aur challenge,
+ * Sleep reminders. Quiet-hours card shows the REAL quiet hours from
+ * the server settings (falling back to the profile sleep window when
+ * none are set). A dark sample-notification card, honestly labelled
+ * as a sample.
+ *
+ * SYSTEM NOTIFICATIONS (added 2026-11-22): the top card is the
+ * prayer-alert master switch. When it is ON, real local notifications
+ * are scheduled in the Android notification bar (see
+ * src/lib/prayerNotifications.ts) — they arrive even when the app is
+ * closed. Turning it on asks for OS permission first, then schedules
+ * today's alerts from the real prayer times; turning it off cancels
+ * them. The permission status is shown honestly, and the note under
+ * the card says what actually happened (how many alerts were set,
+ * or why none were).
  *
  * Saving: prayer/study/friend+challenge/sleep map to the server's
  * /api/notifications/settings categories and are saved on every
@@ -28,6 +38,15 @@ import {
   type NotificationSettings,
 } from '../lib/apiSocial';
 import { formatTime12h } from '../lib/apiCore';
+import {
+  cancelPrayerNotifications,
+  getNotificationPermissionStatus,
+  refreshPrayerNotifications,
+  requestNotificationPermission,
+  setPrayerNotificationsEnabled,
+  type PermissionStatus,
+  type RefreshResult,
+} from '../lib/prayerNotifications';
 
 const MISSED_KEY = '@ahdora/notif/missedTeaching';
 
@@ -39,21 +58,32 @@ export default function NotificationsScreen({ lang }: ScreenProps) {
   const [missedTeaching, setMissedTeaching] = useState(true);
   const [sleepFallback, setSleepFallback] = useState<{ start: string; end: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [permStatus, setPermStatus] = useState<PermissionStatus>('undetermined');
+  const [schedNote, setSchedNote] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const [prefs, missedRaw, { profile }] = await Promise.all([
+      const [prefs, missedRaw, { profile }, perm] = await Promise.all([
         getNotificationSettings(),
         AsyncStorage.getItem(MISSED_KEY),
         getProfile(),
+        getNotificationPermissionStatus(),
       ]);
       setSettings(prefs);
+      setPermStatus(perm);
       if (missedRaw !== null) setMissedTeaching(missedRaw === 'true');
       const start = typeof profile?.sleepStartTime === 'string' ? profile.sleepStartTime : null;
       const end = typeof profile?.sleepEndTime === 'string' ? profile.sleepEndTime : null;
       setSleepFallback(start && end ? { start, end } : null);
+      // Keep the on-phone system-alert flag in step with the server:
+      // if prayer reminders were switched off elsewhere, stale local
+      // alerts must not keep firing.
+      await setPrayerNotificationsEnabled(prefs.categories.prayer);
+      if (!prefs.categories.prayer) {
+        void cancelPrayerNotifications();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : s.errorGeneric);
     } finally {
@@ -64,6 +94,60 @@ export default function NotificationsScreen({ lang }: ScreenProps) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  function noteFor(result: RefreshResult): string {
+    if (result.status === 'ok') {
+      return result.scheduled > 0
+        ? s.ntSchedOk.replace('{n}', String(result.scheduled))
+        : s.ntSchedNone;
+    }
+    if (result.status === 'no-times') return s.ntSchedNoTimes;
+    if (result.status === 'no-permission') return s.ntSchedNoPerm;
+    return '';
+  }
+
+  async function requestPermission() {
+    const granted = await requestNotificationPermission();
+    const status = granted ? 'granted' : await getNotificationPermissionStatus();
+    setPermStatus(status);
+    if (granted && settings?.categories.prayer) {
+      setSchedNote(noteFor(await refreshPrayerNotifications()));
+    }
+  }
+
+  async function togglePrayerSystem(value: boolean) {
+    if (!settings || saving) return;
+    const prev = settings.categories.prayer;
+    setSettings({ ...settings, categories: { ...settings.categories, prayer: value } });
+    setSaving(true);
+    try {
+      await updateNotificationSettings({ categories: { ...settings.categories, prayer: value } });
+      await setPrayerNotificationsEnabled(value);
+      if (!value) {
+        await cancelPrayerNotifications();
+        setSchedNote('');
+        return;
+      }
+      let status = permStatus;
+      if (status !== 'granted') {
+        const granted = await requestNotificationPermission();
+        status = granted ? 'granted' : await getNotificationPermissionStatus();
+        setPermStatus(status);
+      }
+      if (status !== 'granted') {
+        setSchedNote(s.ntSchedNoPerm);
+        return;
+      }
+      setSchedNote(noteFor(await refreshPrayerNotifications()));
+    } catch (e) {
+      setSettings((cur) =>
+        cur ? { ...cur, categories: { ...cur.categories, prayer: prev } } : cur,
+      );
+      setError(e instanceof Error ? e.message : s.errorGeneric);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function toggleCategory(key: keyof NotificationCategories, value: boolean) {
     if (!settings || saving) return;
@@ -157,7 +241,26 @@ export default function NotificationsScreen({ lang }: ScreenProps) {
           {error ? <Text style={T.error}>{error}</Text> : null}
 
           <Card>
-            {row(s.ntPrayerT, s.ntPrayerS, settings.categories.prayer, (v) => void toggleCategory('prayer', v))}
+            <Text style={T.cardTitle}>{s.ntSysT}</Text>
+            <Text style={[T.cardBody, { marginTop: 6 }]}>{s.ntSysS}</Text>
+            <Text
+              style={[
+                styles.permLine,
+                permStatus === 'granted' ? styles.permOn : styles.permOff,
+              ]}
+            >
+              {permStatus === 'granted' ? s.ntPermOn : s.ntPermOff}
+            </Text>
+            {permStatus !== 'granted' ? (
+              <View style={{ marginTop: 10 }}>
+                <PillButton label={s.ntPermBtn} small onPress={() => void requestPermission()} />
+              </View>
+            ) : null}
+            {row(s.ntPrayerT, s.ntPrayerS, settings.categories.prayer, (v) => void togglePrayerSystem(v), true)}
+          </Card>
+          {schedNote ? <Text style={styles.note}>{schedNote}</Text> : null}
+
+          <Card>
             {row(s.ntMissedT, s.ntMissedS, missedTeaching, (v) => void toggleMissedTeaching(v))}
             {row(s.ntStudyT, s.ntStudyS, settings.categories.study, (v) => void toggleCategory('study', v))}
             {row(
@@ -200,6 +303,9 @@ const styles = StyleSheet.create({
   switchText: { flex: 1 },
   switchLabel: { fontFamily: 'PlusJakartaSans', fontSize: 14.5, fontWeight: '700', color: C.ink },
   switchSub: { fontFamily: 'PlusJakartaSans', fontSize: 12.5, color: C.muted, lineHeight: 18, marginTop: 2 },
+  permLine: { fontFamily: 'PlusJakartaSans', fontSize: 13.5, fontWeight: '700', marginTop: 10 },
+  permOn: { color: C.teal700 },
+  permOff: { color: C.red },
   note: { fontFamily: 'PlusJakartaSans', fontSize: 13, color: C.muted, lineHeight: 18, marginBottom: 12 },
   sampleCard: { backgroundColor: C.teal900, borderRadius: 20, padding: 14, marginTop: 10 },
   sampleApp: { fontFamily: 'PlusJakartaSans', fontSize: 13, fontWeight: '800', color: C.white },

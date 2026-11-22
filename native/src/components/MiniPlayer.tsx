@@ -3,9 +3,10 @@
  *
  * Visible on EVERY screen while Quran audio is active (the audio
  * manager is a module singleton, so playback survives navigation).
- * Left side (tappable) returns to the Quran reader; right side has
- * prev ayah / play-pause / next ayah / off controls.
- * Renders nothing when no audio is active.
+ * The WHOLE bar is tappable — tapping anywhere on it (except the
+ * prev / play / next / stop buttons, which keep their own actions)
+ * calls onOpenReader, which the parent points at the Now Playing
+ * screen ('now-playing'). Renders nothing when no audio is active.
  */
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -36,7 +37,12 @@ export default function MiniPlayer({ onOpenReader }: { onOpenReader: () => void 
     state.duration > 0 ? Math.min(1, Math.max(0, state.time / state.duration)) : 0;
 
   return (
-    <View style={styles.wrap}>
+    <Pressable
+      onPress={onOpenReader}
+      style={styles.wrap}
+      accessibilityRole="button"
+      accessibilityLabel="Open now playing"
+    >
       <View style={styles.progressTrack}>
         <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
       </View>
@@ -91,7 +97,7 @@ export default function MiniPlayer({ onOpenReader }: { onOpenReader: () => void 
           <Text style={styles.btnText}>✕</Text>
         </Pressable>
       </View>
-    </View>
+    </Pressable>
   );
 }
 

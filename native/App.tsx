@@ -35,12 +35,13 @@ import {
   PlusJakartaSans_800ExtraBold,
 } from '@expo-google-fonts/plus-jakarta-sans';
 import { Amiri_400Regular, Amiri_700Bold } from '@expo-google-fonts/amiri';
-import { logout, type AuthUser } from './src/lib/api';
+import { logout, restoreSession, setOnUnauthorized, type AuthUser } from './src/lib/api';
 import { loadProfileWithCompletion } from './src/lib/apiCore';
 import { PILL_NAV, type ScreenId, type ScreenProps } from './src/lib/nav';
 import { stringsFor, type AppLanguage } from './src/lib/strings';
 import { C, F, S } from './src/lib/theme';
 import MiniPlayer from './src/components/MiniPlayer';
+import NowPlayingScreen from './src/screens/NowPlaying';
 import WelcomeScreen from './src/screens/Welcome';
 import LanguageScreen from './src/screens/Language';
 import LoginScreen from './src/screens/Login';
@@ -66,6 +67,7 @@ import ChallengesScreen from './src/screens/Challenges';
 import FriendsScreen from './src/screens/Friends';
 import AnalyticsScreen from './src/screens/Analytics';
 import NotificationsScreen from './src/screens/Notifications';
+import SupportScreen from './src/screens/Support';
 import ProfileScreen from './src/screens/Profile';
 import PlaceholderScreen from './src/screens/Placeholder';
 
@@ -99,6 +101,9 @@ export default function App() {
   const [lang, setLang] = useState<AppLanguage>('hi');
   const [user, setUser] = useState<AuthUser | null>(null);
   const [checkingOnboarding, setCheckingOnboarding] = useState(false);
+  // True while the saved session is being validated on startup
+  // (Instagram-style: a stored token logs the user straight in).
+  const [restoringSession, setRestoringSession] = useState(true);
   // True only when Onboarding opens fresh after signup/login (not when
   // editing the profile) — Onboarding shows the details-video popup.
   const [onboardingFresh, setOnboardingFresh] = useState(false);
@@ -131,6 +136,38 @@ export default function App() {
       SplashScreen.hideAsync().catch(() => {});
     }
   }, [fontsLoaded, fontError]);
+
+  // Restore a saved session on startup (login once, stay logged
+  // in) and register the global 401 handler: when any API call
+  // finds the session dead, drop local state and show login
+  // instead of leaving every screen on "Authentication required".
+  useEffect(() => {
+    setOnUnauthorized(() => {
+      void logout().finally(() => {
+        setUser(null);
+        setHistory([]);
+        setScreen('welcome');
+      });
+    });
+    let cancelled = false;
+    restoreSession()
+      .then((u) => {
+        if (cancelled) return;
+        if (u) {
+          void handleLoginSuccess(u);
+        }
+        setRestoringSession(false);
+      })
+      .catch(() => {
+        if (!cancelled) setRestoringSession(false);
+      });
+    return () => {
+      cancelled = true;
+      setOnUnauthorized(null);
+    };
+    // Runs once on mount; handleLoginSuccess only uses stable setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Android hardware back button: go back through the history stack
   // instead of exiting the app. When there is no history, the system
@@ -227,7 +264,7 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safe}>
       <ExpoStatusBar style="dark" />
-      {checkingOnboarding ? (
+      {checkingOnboarding || restoringSession ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={C.teal700} />
           <Text style={styles.loadingText}>{s.loading}</Text>
@@ -245,7 +282,7 @@ export default function App() {
             </Pressable>
           ) : null}
           <View style={styles.screenWrap}>{renderScreen(screen, props)}</View>
-          {user !== null ? <MiniPlayer onOpenReader={() => goTo('reader')} /> : null}
+          {user !== null ? <MiniPlayer onOpenReader={() => goTo('now-playing')} /> : null}
           {showPillNav ? (
             <View style={styles.pillNav}>
               {PILL_NAV.map((id) => {
@@ -306,6 +343,8 @@ function renderScreen(screen: ScreenId, props: ScreenProps) {
       return <QuranBookScreen {...props} />;
     case 'reader':
       return <QuranReaderScreen {...props} />;
+    case 'now-playing':
+      return <NowPlayingScreen {...props} />;
     case 'para':
       return <ParaBookScreen {...props} />;
     case 'lifeAyahs':
@@ -336,6 +375,8 @@ function renderScreen(screen: ScreenId, props: ScreenProps) {
       return <AnalyticsScreen {...props} />;
     case 'notifications':
       return <NotificationsScreen {...props} />;
+    case 'support':
+      return <SupportScreen {...props} />;
     case 'profile':
       return <ProfileScreen {...props} />;
     default:

@@ -7,6 +7,12 @@
  * Bakrid and every other big day live in the same place as the
  * month view. The old Hijri screen/route is retired.
  *
+ * Order (user request 2026-11-22): the MONTH GRID — the Hijri
+ * calendar itself — is FIRST at the top, and the big days live
+ * BELOW it. Every cell is bilingual: the Hijri day in Urdu
+ * numerals (big) AND in English numerals (clearly visible),
+ * plus the Gregorian date.
+ *
  * BILINGUAL (user correction 2026-11-22): every line is shown in
  * Urdu AND in English/Hinglish, so a reader who does not know
  * Urdu can still read it. Hijri month names, dates and numbers in
@@ -376,6 +382,123 @@ export default function IslamicCalendarScreen({ lang }: ScreenProps) {
       <Text style={T.title}>{s.islamicCalTitle}</Text>
       <Text style={[T.sub, { marginBottom: 14 }]}>{s.islamicCalSub}</Text>
 
+      {/* Month grid FIRST at the top (user request 2026-11-22):
+          this Hijri/Islamic calendar grid IS the calendar —
+          the big days live below it. */}
+      {loading && !monthData ? (
+        <ActivityIndicator color={C.teal} style={{ marginVertical: 24 }} />
+      ) : error && !monthData ? (
+        <View>
+          <EmptyState title={s.islamicCalTitle} body={error} />
+          <PillButton label={s.retry} onPress={load} />
+        </View>
+      ) : monthData ? (
+        <View>
+          <Card>
+            {/* Tap the header to jump to any year + month. */}
+            <Pressable onPress={openJump} accessibilityRole="button" accessibilityLabel={s.icJumpTitle}>
+              <Text style={styles.hijriHeader}>{hijriHeader}</Text>
+              <Text style={styles.gregHeader}>{gregHeader}</Text>
+              <Text style={styles.headerEn}>
+                {hijriHeaderEn} · {gregHeaderEn}
+              </Text>
+              <Text style={styles.jumpHint}>▼ {s.icJumpTitle}</Text>
+            </Pressable>
+            <View style={styles.weekRow}>
+              {URDU_WEEKDAYS.map((day) => (
+                <Text key={day} style={styles.weekDay}>
+                  {day}
+                </Text>
+              ))}
+            </View>
+            <View style={styles.weekRowEn}>
+              {EN_WEEKDAYS.map((day) => (
+                <Text key={day} style={styles.weekDayEn}>
+                  {day}
+                </Text>
+              ))}
+            </View>
+            <View style={styles.grid}>
+              {cells.map((dayNum, index) => {
+                if (dayNum === null) {
+                  return <View key={`blank-${index}`} style={styles.cellEmpty} />;
+                }
+                const iso = `${view.year}-${String(view.month).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                const hijriDay = dayByIso.get(iso);
+                const isToday = iso === todayIso;
+                const isJuma = new Date(view.year, view.month - 1, dayNum).getDay() === 5;
+                const hasEvent = (hijriDay?.hijri.holidays.length ?? 0) > 0;
+                return (
+                  <View
+                    key={iso}
+                    style={[
+                      styles.cell,
+                      isJuma && !isToday && styles.cellJuma,
+                      isToday && styles.cellToday,
+                    ]}
+                  >
+                    <Text style={[styles.hijriNum, isToday && styles.textToday]}>
+                      {hijriDay ? urduNum(hijriDay.hijri.day) : ''}
+                    </Text>
+                    {/* English Hijri day, clearly visible (user request
+                        2026-11-22): the cell must read bilingual at a
+                        glance, not all-Urdu — Urdu numeral big above,
+                        English numeral right below it. */}
+                    <Text style={[styles.hijriNumEn, isToday && styles.textToday]}>
+                      {hijriDay ? String(hijriDay.hijri.day) : ''}
+                    </Text>
+                    <Text style={[styles.gregNum, isToday && styles.gregToday]}>
+                      {urduNum(dayNum)}
+                    </Text>
+                    <Text style={[styles.gregNumEn, isToday && styles.gregToday]}>
+                      {`${EN_GREG_MONTHS[view.month - 1]?.slice(0, 3)} ${dayNum}`}
+                    </Text>
+                    {hasEvent && !isToday ? <View style={styles.eventDot} /> : null}
+                  </View>
+                );
+              })}
+            </View>
+            <Text style={[T.cardBody, { marginTop: 12 }]}>{s.hijriLiveNote}</Text>
+          </Card>
+
+          <View style={styles.navRow}>
+            <Pressable onPress={() => goMonth(-1)} style={styles.navBtn}>
+              <Text style={styles.navBtnText}>← {lang === 'hi' ? 'Pichhla' : 'Previous'}</Text>
+            </Pressable>
+            {!isCurrentMonth ? (
+              <Pressable onPress={goToday} style={[styles.navBtn, styles.navBtnToday]}>
+                <Text style={[styles.navBtnText, styles.navBtnTodayText]}>
+                  آج · {lang === 'hi' ? 'Aaj' : 'Today'}
+                </Text>
+              </Pressable>
+            ) : null}
+            <Pressable onPress={() => goMonth(1)} style={styles.navBtn}>
+              <Text style={styles.navBtnText}>{lang === 'hi' ? 'Agla' : 'Next'} →</Text>
+            </Pressable>
+          </View>
+
+          {monthEvents.length > 0 ? (
+            <Card>
+              <Text style={T.cardTitle}>{s.hijriEvents}</Text>
+              <View style={{ marginTop: 8 }}>
+                {monthEvents.map((event) => (
+                  <View key={event.key} style={styles.eventRow}>
+                    <Text style={styles.eventName}>{event.name}</Text>
+                    <Text style={styles.eventNameEn}>{event.nameEn}</Text>
+                    <Text style={styles.eventDetail}>
+                      {event.hijriDate} · {event.gregDate}
+                    </Text>
+                    <Text style={styles.eventDetailEn}>
+                      {event.hijriDateEn} · {event.gregDateEn}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </Card>
+          ) : null}
+        </View>
+      ) : null}
+
       {/* Next big day — hero (from the old Hijri screen). */}
       {nextEvent ? (
         <Card>
@@ -436,115 +559,6 @@ export default function IslamicCalendarScreen({ lang }: ScreenProps) {
             ))
           )}
         </Card>
-      ) : null}
-
-      {loading && !monthData ? (
-        <ActivityIndicator color={C.teal} style={{ marginVertical: 24 }} />
-      ) : error && !monthData ? (
-        <View>
-          <EmptyState title={s.islamicCalTitle} body={error} />
-          <PillButton label={s.retry} onPress={load} />
-        </View>
-      ) : monthData ? (
-        <View>
-          <Card>
-            {/* Tap the header to jump to any year + month. */}
-            <Pressable onPress={openJump} accessibilityRole="button" accessibilityLabel={s.icJumpTitle}>
-              <Text style={styles.hijriHeader}>{hijriHeader}</Text>
-              <Text style={styles.gregHeader}>{gregHeader}</Text>
-              <Text style={styles.headerEn}>
-                {hijriHeaderEn} · {gregHeaderEn}
-              </Text>
-              <Text style={styles.jumpHint}>▼ {s.icJumpTitle}</Text>
-            </Pressable>
-            <View style={styles.weekRow}>
-              {URDU_WEEKDAYS.map((day) => (
-                <Text key={day} style={styles.weekDay}>
-                  {day}
-                </Text>
-              ))}
-            </View>
-            <View style={styles.weekRowEn}>
-              {EN_WEEKDAYS.map((day) => (
-                <Text key={day} style={styles.weekDayEn}>
-                  {day}
-                </Text>
-              ))}
-            </View>
-            <View style={styles.grid}>
-              {cells.map((dayNum, index) => {
-                if (dayNum === null) {
-                  return <View key={`blank-${index}`} style={styles.cellEmpty} />;
-                }
-                const iso = `${view.year}-${String(view.month).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-                const hijriDay = dayByIso.get(iso);
-                const isToday = iso === todayIso;
-                const isJuma = new Date(view.year, view.month - 1, dayNum).getDay() === 5;
-                const hasEvent = (hijriDay?.hijri.holidays.length ?? 0) > 0;
-                return (
-                  <View
-                    key={iso}
-                    style={[
-                      styles.cell,
-                      isJuma && !isToday && styles.cellJuma,
-                      isToday && styles.cellToday,
-                    ]}
-                  >
-                    <Text style={[styles.hijriNum, isToday && styles.textToday]}>
-                      {hijriDay ? urduNum(hijriDay.hijri.day) : ''}
-                    </Text>
-                    <Text style={[styles.gregNum, isToday && styles.gregToday]}>
-                      {urduNum(dayNum)}
-                    </Text>
-                    <Text style={[styles.gregNumEn, isToday && styles.gregToday]}>
-                      {hijriDay
-                        ? `${hijriDay.hijri.day} · ${EN_GREG_MONTHS[view.month - 1]?.slice(0, 3)} ${dayNum}`
-                        : ''}
-                    </Text>
-                    {hasEvent && !isToday ? <View style={styles.eventDot} /> : null}
-                  </View>
-                );
-              })}
-            </View>
-            <Text style={[T.cardBody, { marginTop: 12 }]}>{s.hijriLiveNote}</Text>
-          </Card>
-
-          <View style={styles.navRow}>
-            <Pressable onPress={() => goMonth(-1)} style={styles.navBtn}>
-              <Text style={styles.navBtnText}>← {lang === 'hi' ? 'Pichhla' : 'Previous'}</Text>
-            </Pressable>
-            {!isCurrentMonth ? (
-              <Pressable onPress={goToday} style={[styles.navBtn, styles.navBtnToday]}>
-                <Text style={[styles.navBtnText, styles.navBtnTodayText]}>
-                  آج · {lang === 'hi' ? 'Aaj' : 'Today'}
-                </Text>
-              </Pressable>
-            ) : null}
-            <Pressable onPress={() => goMonth(1)} style={styles.navBtn}>
-              <Text style={styles.navBtnText}>{lang === 'hi' ? 'Agla' : 'Next'} →</Text>
-            </Pressable>
-          </View>
-
-          {monthEvents.length > 0 ? (
-            <Card>
-              <Text style={T.cardTitle}>{s.hijriEvents}</Text>
-              <View style={{ marginTop: 8 }}>
-                {monthEvents.map((event) => (
-                  <View key={event.key} style={styles.eventRow}>
-                    <Text style={styles.eventName}>{event.name}</Text>
-                    <Text style={styles.eventNameEn}>{event.nameEn}</Text>
-                    <Text style={styles.eventDetail}>
-                      {event.hijriDate} · {event.gregDate}
-                    </Text>
-                    <Text style={styles.eventDetailEn}>
-                      {event.hijriDateEn} · {event.gregDateEn}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            </Card>
-          ) : null}
-        </View>
       ) : null}
 
       {loading && monthData ? <ActivityIndicator color={C.teal} style={{ marginVertical: 16 }} /> : null}
@@ -687,7 +701,7 @@ const styles = StyleSheet.create({
   cell: {
     width: '13.4%',
     flexGrow: 1,
-    aspectRatio: 1 / 1.3,
+    aspectRatio: 1 / 1.9, // tall enough for 4 number lines + event dot
     borderRadius: 10,
     backgroundColor: C.white,
     borderWidth: 1,
@@ -700,25 +714,33 @@ const styles = StyleSheet.create({
   cellEmpty: {
     width: '13.4%',
     flexGrow: 1,
-    aspectRatio: 1 / 1.3,
+    aspectRatio: 1 / 1.9,
   },
   cellJuma: { borderColor: C.peachMid, backgroundColor: C.peach2 },
   cellToday: { backgroundColor: C.teal700, borderColor: C.teal700 },
   hijriNum: {
     fontFamily: F.arabic,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
+    color: C.ink,
+  },
+  /* English Hijri day — same number as hijriNum, in English
+   * numerals, clearly visible (not a tiny footnote). */
+  hijriNumEn: {
+    fontFamily: F.sans,
+    fontSize: 12,
+    fontWeight: '800',
     color: C.ink,
   },
   gregNum: {
     fontFamily: F.arabic,
-    fontSize: 10.5,
+    fontSize: 10,
     fontWeight: '600',
     color: C.muted,
   },
   gregNumEn: {
     fontFamily: F.sans,
-    fontSize: 9,
+    fontSize: 9.5,
     fontWeight: '600',
     color: C.muted,
   },

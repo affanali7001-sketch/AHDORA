@@ -22,6 +22,25 @@
  * - urdu queue finished -> record the page as listened + mark it read,
  *   then start tilawat for page+1 (or stop at page 604).
  * - autoPlay off -> stop when the current queue ends.
+ * - A Life Ayah queue (startLifeAyah) never runs the chain: when it
+ *   ends it just stops.
+ *
+ * Seeking (fixed 2026-11-22): seekQuranTo NEVER seeks into the last
+ * second of a track. Seeking to the exact end made ExoPlayer fire
+ * didJustFinish while the old player was still audible — expo-audio
+ * releases the native player asynchronously (GlobalScope.launch in
+ * BaseAudioPlayer.sharedObjectDidRelease), so the next ayah's player
+ * started before the old one stopped, and a rapid repeat tap could
+ * re-seek the not-yet-released old player out of its ENDED state and
+ * resume the old audio. Instead, a seek that lands in the end zone
+ * advances cleanly to the next ayah (old player paused + removed
+ * first, synchronously), and removePlayer() now pauses before
+ * removing so the old audio stops immediately.
+ *
+ * Sleep timer (setQuranSleepTimer): minutes (a timeout that stops
+ * playback) or 'para-end' (the auto-play chain stops after the
+ * current Juz's last page instead of advancing). Applies to page
+ * playback AND Life Ayahs (same player, same stop path).
  *
  * All recording calls (recordListened / recordRead) are wrapped in
  * try/catch — they need login and must never break playback.
@@ -52,11 +71,32 @@ export type QuranAudioState = {
   autoPlay: boolean;
   title: string;
   hasAudio: boolean;
+  /** Human label for the active sleep timer, or null. */
+  sleepTimer: string | null;
 };
+
+/** Sleep timer option: stop after N minutes, or when the current Para (Juz) ends. */
+export type QuranSleepTimerOption =
+  | null
+  | { kind: 'minutes'; minutes: number }
+  | { kind: 'para-end' };
+
+/** Minute choices offered by the UI for the sleep timer. */
+export const QURAN_SLEEP_TIMER_MINUTES = [15, 30, 60] as const;
 
 const AUDIO_FAILED = 'Audio nahi chal paya. Dobara try karo.';
 const PAGE_FAILED = 'Page load nahi ho paya. Dobara try karo.';
 const TOTAL_PAGES = 604;
+/** Seeking to within this many seconds of a track's end advances to
+ * the next ayah instead (see the header note on the seek bug). */
+const END_ZONE_SECONDS = 1;
+/** Last mushaf page of each Juz (1–30), from the same ranges as
+ * ParaBook.tsx's JUZ table (verified live against AlQuran Cloud
+ * /v1/juz/{n}). Used by the 'para-end' sleep timer. */
+const JUZ_END_PAGES = [
+  21, 41, 62, 81, 101, 121, 141, 161, 181, 201, 221, 241, 261, 281, 301, 321,
+  341, 361, 381, 401, 421, 441, 461, 481, 502, 521, 541, 561, 581, 604,
+];
 
 type AudioItem = { uri: string; fallbackUri?: string; globalAyah: number };
 
@@ -84,8 +124,20 @@ let generation = 0;
  * durations of finished tracks) — reported to recordListened. */
 let pageSeconds = 0;
 let lastNotifiedSecond = -1;
+/** True while the current queue is a Life Ayah (startLifeAyah) rather
+ * than a mushaf page — the auto-play chain never runs for Life Ayahs. */
+let lifeAyah = false;
+/** Active sleep timer (minutes timeout or 'para-end' flag). */
+let sleepTimer: QuranSleepTimerOption = null;
+let sleepTimerHandle: ReturnType<typeof setTimeout> | null = null;
 
 const listeners = new Set<(s: QuranAudioState) => void>();
+
+function sleepTimerLabel(): string | null {
+  if (!sleepTimer) return null;
+  if (sleepTimer.kind === 'minutes') return `${sleepTimer.minutes} min`;
+  return 'Para khatm';
+}
 
 function snapshot(): QuranAudioState {
   return {
@@ -100,6 +152,7 @@ function snapshot(): QuranAudioState {
     autoPlay,
     title,
     hasAudio,
+    sleepTimer: sleepTimerLabel(),
   };
 }
 
@@ -138,6 +191,50 @@ export function setQuranAutoPlay(on: boolean): void {
   emit(true);
 }
 
+/** Clear the sleep timer (timeout + flag). Called on every real stop. */
+function clearSleepTimer(): void {
+  if (sleepTimerHandle !== null) {
+    clearTimeout(sleepTimerHandle);
+    sleepTimerHandle = null;
+  }
+  sleepTimer = null;
+}
+
+/**
+ * Sleep timer. Minutes: stops playback when the timeout fires (the
+ * timeout is cleared when a new timer is set or playback stops).
+ * 'para-end': the auto-play chain stops after the current Juz's last
+ * page instead of advancing (checked in onQueueFinished). Setting
+ * null cancels the timer. Applies to page playback and Life Ayahs
+ * alike — both go through the same stop path.
+ */
+export function setQuranSleepTimer(option: QuranSleepTimerOption): void {
+  clearSleepTimer();
+  sleepTimer = option;
+  if (option && option.kind === 'minutes') {
+    const handle = setTimeout(() => {
+      stopQuranAudio();
+    }, option.minutes * 60 * 1000);
+    sleepTimerHandle = handle;
+  }
+  emit(true);
+}
+
+export function getQuranSleepTimer(): QuranSleepTimerOption {
+  return sleepTimer;
+}
+
+/** Last mushaf page of the Juz the given page starts in (from the
+ * first ayah's juz — a boundary page starts with the Juz that is
+ * ending on it). Null when the page is unknown (Life Ayah mode). */
+function juzEndPageFor(m: MushafPage | null): number | null {
+  const first = m?.ayahs[0];
+  if (!first) return null;
+  const juz = first.juz;
+  if (juz < 1 || juz > 30) return null;
+  return JUZ_END_PAGES[juz - 1] ?? null;
+}
+
 function buildQueue(m: MushafPage, md: 'tilawat' | 'urdu'): AudioItem[] {
   return md === 'tilawat'
     ? m.ayahs.map((a) => ({
@@ -158,6 +255,15 @@ function removePlayer(): void {
   const p = player;
   player = null;
   if (p) {
+    // Pause FIRST, synchronously: expo-audio releases the native
+    // player asynchronously (GlobalScope.launch in its
+    // sharedObjectDidRelease), so remove() alone leaves the old
+    // audio audible for a moment — pause stops it immediately.
+    try {
+      p.pause();
+    } catch {
+      /* Already paused or gone — ignore. */
+    }
     try {
       p.remove();
     } catch {
@@ -168,10 +274,12 @@ function removePlayer(): void {
 
 /** Clear playback state (keeps page/title/autoPlay/error). Never throws. */
 function stopInternal(): void {
+  clearSleepTimer();
   removePlayer();
   queue = [];
   queueIndex = 0;
   mode = null;
+  lifeAyah = false;
   isPlaying = false;
   busy = false;
   playingAyah = null;
@@ -240,7 +348,25 @@ async function playAt(index: number, gen: number): Promise<void> {
       if (isPlaying !== prevPlaying || busy !== prevBusy) emit(true);
       else emit(false);
     });
-    p.play();
+    try {
+      p.play();
+    } catch (e) {
+      // The player was created (and may already be audible) but
+      // could not be started — remove it before rethrowing so it
+      // can never keep playing as an orphan no one holds a
+      // reference to (that would be two audible players at once).
+      try {
+        p.pause();
+      } catch {
+        /* Ignore. */
+      }
+      try {
+        p.remove();
+      } catch {
+        /* Ignore. */
+      }
+      throw e;
+    }
     return p;
   };
 
@@ -271,6 +397,12 @@ async function playAt(index: number, gen: number): Promise<void> {
  */
 async function onQueueFinished(gen: number): Promise<void> {
   if (gen !== generation) return;
+  // A Life Ayah queue ends here: just stop. No tarjuma auto-start,
+  // no next-page advance, no recording (the screen never recorded).
+  if (lifeAyah) {
+    stopInternal();
+    return;
+  }
   const finishedMode = mode;
   const finishedPage = page;
   const finishedMushaf = mushaf;
@@ -316,6 +448,16 @@ async function onQueueFinished(gen: number): Promise<void> {
       /* Never break playback. */
     }
     if (gen !== generation) return;
+    // 'para-end' sleep timer: stop after this Juz's last page
+    // instead of advancing to the next page.
+    if (
+      sleepTimer?.kind === 'para-end' &&
+      finishedMushaf &&
+      finishedPage >= (juzEndPageFor(finishedMushaf) ?? Number.POSITIVE_INFINITY)
+    ) {
+      stopInternal();
+      return;
+    }
     if (finishedPage < TOTAL_PAGES) {
       await startQuranPage(finishedPage + 1, 'tilawat');
     } else {
@@ -341,6 +483,7 @@ export async function startQuranPage(pg: number, md: 'tilawat' | 'urdu'): Promis
   pageSeconds = 0;
   mode = md;
   page = pg;
+  lifeAyah = false;
   title = pageTitle(md, pg, null);
   hasAudio = true;
   emit(true);
@@ -356,6 +499,79 @@ export async function startQuranPage(pg: number, md: 'tilawat' | 'urdu'): Promis
   } catch {
     if (gen !== generation) return;
     error = PAGE_FAILED;
+    stopInternal();
+  }
+}
+
+/** One queue item per ayah in a Life Ayah range. Tilawat uses
+ * EveryAyah + the AlQuran Cloud fallback (same as the page queue);
+ * tarjuma uses the Urdu audio only (no fallback host exists — the
+ * playAt retry rule retries the same URI once). */
+function buildLifeQueue(
+  surahNumber: number,
+  ayahStart: number,
+  ayahEnd: number,
+  globalAyahStart: number,
+  md: 'tilawat' | 'urdu',
+): AudioItem[] {
+  const items: AudioItem[] = [];
+  for (let a = ayahStart; a <= ayahEnd; a += 1) {
+    const globalAyah = globalAyahStart + (a - ayahStart);
+    if (md === 'tilawat') {
+      items.push({
+        uri: everyAyahUrl(surahNumber, a),
+        fallbackUri: tilawatFallbackUrl(globalAyah),
+        globalAyah,
+      });
+    } else {
+      items.push({ uri: urduAudioUrl(globalAyah), globalAyah });
+    }
+  }
+  return items;
+}
+
+/**
+ * Play one Life Ayah (curated ayah range) through the SAME global
+ * manager as the Quran Book — so it shows in the MiniPlayer, keeps
+ * playing in the background, obeys the sleep timer, and gets the
+ * seek fix. `globalAyahStart` is the global number (1..6236) of
+ * `ayahStart` (surah starts: Al-Baqarah 8, Ar-Ra'd 1708, Taha 2349,
+ * Al-Mu'minun 2674). When the queue ends it just stops — the
+ * auto-play chain never runs for a Life Ayah.
+ */
+export async function startLifeAyah(
+  surahNumber: number,
+  ayahStart: number,
+  ayahEnd: number,
+  globalAyahStart: number,
+  md: 'tilawat' | 'urdu',
+  titleText: string,
+): Promise<void> {
+  const gen = ++generation;
+  error = null;
+  busy = true;
+  // Stop any current playback immediately.
+  removePlayer();
+  queue = [];
+  queueIndex = 0;
+  isPlaying = false;
+  playingAyah = null;
+  time = 0;
+  duration = 0;
+  pageSeconds = 0;
+  mode = md;
+  lifeAyah = true;
+  mushaf = null;
+  title = titleText;
+  hasAudio = true;
+  emit(true);
+  try {
+    queue = buildLifeQueue(surahNumber, ayahStart, ayahEnd, globalAyahStart, md);
+    queueIndex = 0;
+    await playAt(0, gen);
+  } catch {
+    if (gen !== generation) return;
+    error = AUDIO_FAILED;
     stopInternal();
   }
 }
@@ -410,6 +626,19 @@ export function seekQuranBy(seconds: number): void {
 export function seekQuranTo(seconds: number): void {
   if (!player) return;
   try {
+    // Never seek into the last second of a track: seeking to the
+    // exact end makes ExoPlayer fire didJustFinish while the old
+    // player is still audible (its native release is async), so
+    // the old audio and the next ayah play at the same time. A
+    // seek that lands in the end zone advances cleanly instead —
+    // playAt pauses + removes the old player BEFORE starting the
+    // next ayah, so only one player is ever audible. On the last
+    // ayah of the queue, playAt runs the normal queue-end path
+    // (auto-play chain / stop).
+    if (duration > 0 && seconds >= duration - END_ZONE_SECONDS) {
+      void playAt(queueIndex + 1, generation);
+      return;
+    }
     const target =
       duration > 0 ? Math.min(Math.max(0, seconds), duration) : Math.max(0, seconds);
     player.seekTo(target);

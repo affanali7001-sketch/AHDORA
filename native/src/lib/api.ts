@@ -35,6 +35,68 @@ export type AuthUser = {
   role: string;
 };
 
+/**
+ * Session token (Bearer) transport — the fix for the 2026-11-22
+ * "Authentication required" bug (see extractSessionToken in
+ * api/src/lib/session.ts).
+ *
+ * React Native fetch (Hermes) HIDES Set-Cookie, so the
+ * `ahdora_session` cookie set by login was never captured by the
+ * manual jar and no session was ever sent back — every
+ * authenticated call 401'd after a fresh login, while curl and the
+ * browser worked fine. The server now also returns the token in the
+ * login/signup body, and this client sends it as
+ * `Authorization: Bearer <token>` on every request. The token is
+ * kept in SecureStore (encrypted on-device storage) so it survives
+ * app restarts — login once, stay logged in like Instagram. The
+ * cookie jar is kept as a fallback (it helps if Set-Cookie IS
+ * visible in some runtime) but the Bearer token is the primary
+ * transport.
+ */
+import * as SecureStore from 'expo-secure-store';
+
+const SESSION_TOKEN_KEY = 'ahdora_session_token';
+
+let sessionToken: string | null = null;
+
+async function loadSessionToken(): Promise<string | null> {
+  if (sessionToken) return sessionToken;
+  try {
+    sessionToken = await SecureStore.getItemAsync(SESSION_TOKEN_KEY);
+  } catch {
+    sessionToken = null;
+  }
+  return sessionToken;
+}
+
+async function saveSessionToken(token: string): Promise<void> {
+  sessionToken = token;
+  try {
+    await SecureStore.setItemAsync(SESSION_TOKEN_KEY, token);
+  } catch {
+    /* In-memory token still works for this session. */
+  }
+}
+
+async function clearSessionToken(): Promise<void> {
+  sessionToken = null;
+  try {
+    await SecureStore.deleteItemAsync(SESSION_TOKEN_KEY);
+  } catch {
+    /* Already gone. */
+  }
+}
+
+/**
+ * Called when any API request gets a 401 (session expired/revoked).
+ * App.tsx sets this to log the user out and show the login screen
+ * instead of leaving every screen stuck on "Authentication required".
+ */
+let onUnauthorized: (() => void) | null = null;
+export function setOnUnauthorized(handler: (() => void) | null): void {
+  onUnauthorized = handler;
+}
+
 let csrfToken: string | null = null;
 let csrfPromise: Promise<string | null> | null = null;
 
@@ -130,6 +192,13 @@ async function doRequest(path: string, init: RequestInit): Promise<Response> {
     const jar = cookieHeader();
     if (jar) headers['Cookie'] = jar;
   }
+  // Send the Bearer session token (primary auth transport — see the
+  // note above). Loaded lazily so the first call restores it from
+  // SecureStore without every caller having to initialise it.
+  if (!headers['Authorization']) {
+    const token = await loadSessionToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+  }
   let response: Response;
   try {
     response = await fetch(resolveUrl(path), { ...init, headers });
@@ -143,6 +212,19 @@ async function doRequest(path: string, init: RequestInit): Promise<Response> {
   }
   // Persist any cookies the response set (session + CSRF).
   storeCookies(response.headers);
+  // A 401 means the stored session is dead (expired/revoked) — hand
+  // it to the app shell so it logs the user out cleanly instead of
+  // leaving every screen on "Authentication required". The logout
+  // call itself is exempt: its 401 is expected when the session is
+  // already dead, and firing the handler there would loop
+  // (handler -> logout -> 401 -> handler ...).
+  if (response.status === 401 && path !== '/api/auth/logout' && onUnauthorized) {
+    try {
+      onUnauthorized();
+    } catch {
+      /* The handler must never break the response. */
+    }
+  }
   return response;
 }
 
@@ -234,13 +316,21 @@ export async function login(email: string, password: string): Promise<AuthUser> 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
   });
-  const data = await parseJson<{ user?: AuthUser; error?: unknown }>(response);
+  const data = await parseJson<{ user?: AuthUser; sessionToken?: unknown; error?: unknown }>(
+    response,
+  );
   if (!response.ok || !data.user) {
     const message =
       typeof data.error === 'string' && data.error.length > 0
         ? data.error
         : 'Request failed. Please try again.';
     throw new Error(message);
+  }
+  // The server returns the session token in the body (the native app
+  // cannot read it from Set-Cookie) — persist it so the session
+  // survives app restarts.
+  if (typeof data.sessionToken === 'string' && data.sessionToken.length > 0) {
+    await saveSessionToken(data.sessionToken);
   }
   return data.user;
 }
@@ -271,6 +361,7 @@ export async function signup(
   const data = await parseJson<{
     user?: AuthUser;
     verificationEmailSent?: boolean;
+    sessionToken?: unknown;
     notice?: string;
     error?: unknown;
   }>(response);
@@ -280,6 +371,10 @@ export async function signup(
         ? data.error
         : 'Request failed. Please try again.';
     throw new Error(message);
+  }
+  // Persist the session token (same reason as login above).
+  if (typeof data.sessionToken === 'string' && data.sessionToken.length > 0) {
+    await saveSessionToken(data.sessionToken);
   }
   return {
     user: data.user,
@@ -299,4 +394,34 @@ export async function logout(): Promise<void> {
   csrfToken = null;
   csrfPromise = null;
   cookieJar.clear();
+  await clearSessionToken();
+}
+
+/**
+ * GET /api/auth/me — the logged-in user for the stored session token.
+ * Returns null when there is no token or the session is dead.
+ */
+export async function fetchMe(): Promise<AuthUser | null> {
+  const token = await loadSessionToken();
+  if (!token) return null;
+  try {
+    const response = await apiFetch('/api/auth/me', { method: 'GET' });
+    if (!response.ok) return null;
+    const data = await parseJson<{ user?: AuthUser }>(response);
+    return data.user ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Restore a saved session on app start (Instagram-style: login once,
+ * stay logged in). Loads the token from SecureStore and validates it
+ * against /me. Returns the user when the session is alive, else null
+ * (and the dead token is cleared so a stale value never lingers).
+ */
+export async function restoreSession(): Promise<AuthUser | null> {
+  const user = await fetchMe();
+  if (!user) await clearSessionToken();
+  return user;
 }

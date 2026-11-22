@@ -25,6 +25,7 @@ import type { ScreenProps } from '../lib/nav';
 import { stringsFor } from '../lib/strings';
 import { C, F, L, T } from '../lib/theme';
 import { Card, Chip, Field, Input, PillButton, ProgressBar } from '../components/ui';
+import TimePickerField from '../components/TimePickerField';
 import TutorialVideo from '../components/TutorialVideo';
 import { SIGNUP_VIDEO_URL } from '../lib/videos';
 import {
@@ -66,6 +67,14 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
   // The popup text itself follows the user's language choice.
   const [videoPopup, setVideoPopup] = useState<'prompt' | 'video' | null>(
     freshOnboarding ? 'prompt' : null,
+  );
+  // Verify-mail popup — shown FIRST (before the video popup) on a
+  // fresh signup when the email is not verified yet. The user asked
+  // for this (2026-11-22): after signup, before the details video,
+  // tell them to go to their mail to verify. Dismissing it reveals
+  // the video popup underneath (videoPopup is already 'prompt').
+  const [verifyPopup, setVerifyPopup] = useState(
+    freshOnboarding === true && user?.emailVerified === false,
   );
   const [step, setStep] = useState(0);
   // School (Class 1–12, no semester) vs Diploma/Degree (Semester
@@ -374,22 +383,20 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
       {step === 2 && (
         <View>
           <Field label={s.obFrom ?? 'Shuru'}>
-            <Input
+            <TimePickerField
               value={form.collegeStart}
-              onChangeText={(v) => update('collegeStart', v)}
+              onChange={(v) => update('collegeStart', v)}
               placeholder="09:00"
-              autoCapitalize="none"
-              autoCorrect={false}
+              editable={!busy}
             />
           </Field>
           {fieldError('collegeStart')}
           <Field label={s.obTo ?? 'Khatam'}>
-            <Input
+            <TimePickerField
               value={form.collegeEnd}
-              onChangeText={(v) => update('collegeEnd', v)}
+              onChange={(v) => update('collegeEnd', v)}
               placeholder="16:30"
-              autoCapitalize="none"
-              autoCorrect={false}
+              editable={!busy}
             />
           </Field>
           {fieldError('collegeEnd')}
@@ -451,22 +458,20 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
       {step === 5 && (
         <View>
           <Field label="Fajr">
-            <Input
+            <TimePickerField
               value={form.prayerSettings.Fajr.timeOverride}
-              onChangeText={(v) => updatePrayerTime('Fajr', v)}
+              onChange={(v) => updatePrayerTime('Fajr', v)}
               placeholder="05:32"
-              autoCapitalize="none"
-              autoCorrect={false}
+              editable={!busy}
             />
           </Field>
           {fieldError('prayer:Fajr')}
           <Field label="Maghrib">
-            <Input
+            <TimePickerField
               value={form.prayerSettings.Maghrib.timeOverride}
-              onChangeText={(v) => updatePrayerTime('Maghrib', v)}
+              onChange={(v) => updatePrayerTime('Maghrib', v)}
               placeholder="17:47"
-              autoCapitalize="none"
-              autoCorrect={false}
+              editable={!busy}
             />
           </Field>
           {fieldError('prayer:Maghrib')}
@@ -476,22 +481,20 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
       {step === 6 && (
         <View>
           <Field label={s.obSleep}>
-            <Input
+            <TimePickerField
               value={form.sleepStartTime}
-              onChangeText={(v) => update('sleepStartTime', v)}
+              onChange={(v) => update('sleepStartTime', v)}
               placeholder="22:30"
-              autoCapitalize="none"
-              autoCorrect={false}
+              editable={!busy}
             />
           </Field>
           {fieldError('sleepStartTime')}
           <Field label={s.obWake}>
-            <Input
+            <TimePickerField
               value={form.sleepEndTime}
-              onChangeText={(v) => update('sleepEndTime', v)}
+              onChange={(v) => update('sleepEndTime', v)}
               placeholder="05:00"
-              autoCapitalize="none"
-              autoCorrect={false}
+              editable={!busy}
             />
           </Field>
           {fieldError('sleepEndTime')}
@@ -535,16 +538,31 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
         block
       />
 
-      {/* Details-video popup — fresh signup only, once per visit. */}
+      {/* Verify-mail popup (fresh signup, unverified) — shown BEFORE
+          the details-video popup. Dismissing it reveals the video
+          popup underneath. */}
       <Modal
-        visible={!loading && videoPopup !== null}
+        visible={!loading && (verifyPopup || videoPopup !== null)}
         transparent
         animationType="fade"
-        onRequestClose={() => setVideoPopup(null)}
+        onRequestClose={() => {
+          setVerifyPopup(false);
+          setVideoPopup(null);
+        }}
       >
         <View style={styles.modalWrap}>
           <View style={styles.modalCard}>
-            {videoPopup === 'prompt' ? (
+            {verifyPopup ? (
+              <>
+                <Text style={styles.modalTitle}>{s.obVerifyMailT}</Text>
+                <Text style={styles.modalBody}>{s.obVerifyMailB}</Text>
+                <PillButton
+                  label={s.obVerifyMailOk}
+                  onPress={() => setVerifyPopup(false)}
+                  block
+                />
+              </>
+            ) : videoPopup === 'prompt' ? (
               <>
                 <Text style={styles.modalTitle}>{s.obVideoPopT}</Text>
                 <Text style={styles.modalBody}>{s.obVideoPopB}</Text>

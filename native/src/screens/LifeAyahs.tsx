@@ -8,22 +8,29 @@
  * 2:286 shows ONLY the selected portion, labelled as such.
  * No other verse is added — the full Quran lives in Quran Book.
  *
- * Voice is REAL: tapping "Voice suno" plays that ayah's tilawat
- * (EveryAyah, Mishary Rashid Alafasy, AlQuran Cloud CDN fallback),
- * reusing the same retry-once player pattern as QuranBook.
+ * Voice is REAL and now plays through the GLOBAL audio manager
+ * (quranAudio.ts, same as Quran Book): tapping "Voice suno" plays
+ * that ayah's tilawat (EveryAyah, Mishary Rashid Alafasy, AlQuran
+ * Cloud CDN fallback), tapping "Tarjuma suno" plays the Urdu
+ * tarjuma (Shamshad Ali Khan). The audio shows in the MiniPlayer,
+ * keeps playing in the background, obeys the sleep timer, and gets
+ * the manager's seek fix. When a queue ends it just stops — no
+ * auto-advance to the next page or tarjuma.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
 import type { ScreenProps } from '../lib/nav';
 import { stringsFor } from '../lib/strings';
 import { C, F, L, T } from '../lib/theme';
 import { Card, PillButton } from '../components/ui';
+import { everyAyahUrl } from '../lib/apiWorship';
 import {
-  everyAyahUrl,
-  tilawatFallbackUrl,
-  urduAudioUrl,
-} from '../lib/apiWorship';
+  getQuranAudioState,
+  startLifeAyah,
+  stopQuranAudio,
+  subscribeQuranAudio,
+  type QuranAudioState,
+} from '../lib/quranAudio';
 
 /** The four curated ayahs — verbatim curated text, preview order. */
 const CURATED_AYAHS = [
@@ -94,178 +101,115 @@ const CURATED_AYAHS = [
   },
 ];
 
-type AudioItem = { uri: string; fallbackUri: string };
+/**
+ * Global ayah number of each curated surah's first ayah (verified:
+ * surah starts — Al-Baqarah 8, Ar-Ra'd 1708, Taha 2349,
+ * Al-Mu'minun 2674 — from AlQuran Cloud's 1..6236 numbering).
+ * The fallback CDN and the Urdu audio both need the global number.
+ */
+const GLOBAL_START: Record<number, number> = {
+  2: 8,
+  13: 1708,
+  20: 2349,
+  23: 2674,
+};
 
 export default function LifeAyahsScreen({ lang }: ScreenProps) {
   const s = stringsFor(lang);
+  /** Global audio state (MiniPlayer shares the same manager). */
+  const [audio, setAudio] = useState<QuranAudioState>(() => getQuranAudioState());
+  /** Which card the user tapped here (the manager does not track it). */
   const [playingRef, setPlayingRef] = useState<string | null>(null);
   /** Which voice is playing for playingRef: tilawat or Urdu tarjuma. */
   const [playingMode, setPlayingMode] = useState<'tilawat' | 'tarjuma' | null>(null);
-  const [audioBusy, setAudioBusy] = useState(false);
-  const [audioError, setAudioError] = useState<string | null>(null);
-
-  const soundRef = useRef<AudioPlayer | null>(null);
-  const queueRef = useRef<AudioItem[]>([]);
-  const queueIndexRef = useRef(0);
-  const mountedRef = useRef(true);
 
   useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      void stopAudio();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const unsubscribe = subscribeQuranAudio(setAudio);
+    // Warm up the first tilawat audio (Ar-Ra'd 13:28) so the first
+    // tap starts faster: a HEAD request warms the connection
+    // without downloading audio on slow mobile data.
+    // Fire-and-forget — a failure here must never affect the screen.
+    void (async () => {
+      try {
+        await fetch(everyAyahUrl(13, 28), {
+          method: 'HEAD',
+          signal: AbortSignal.timeout(5000),
+        });
+      } catch {
+        /* Prefetch is best-effort only. */
+      }
+    })();
+    // Unsubscribe only — do NOT stop the audio on unmount. The
+    // global manager keeps playing in the background (MiniPlayer).
+    return unsubscribe;
   }, []);
 
-  async function stopAudio(): Promise<void> {
-    queueRef.current = [];
-    queueIndexRef.current = 0;
-    setPlayingRef(null);
-    setPlayingMode(null);
-    setAudioBusy(false);
-    const sound = soundRef.current;
-    soundRef.current = null;
-    if (sound) sound.remove();
-  }
-
-  async function playAt(index: number): Promise<void> {
-    const queue = queueRef.current;
-    if (index >= queue.length) {
-      await stopAudio();
-      return;
-    }
-    const item = queue[index];
-    if (!item) return;
-    queueIndexRef.current = index;
-    const old = soundRef.current;
-    soundRef.current = null;
-    if (old) old.remove();
-    const tryLoad = (uri: string): AudioPlayer => {
-      const player = createAudioPlayer({ uri }, { updateInterval: 500 });
-      let retried = false;
-      player.addListener('playbackStatusUpdate', (status) => {
-        if (status.error) {
-          // Tilawat has a real fallback (EveryAyah → AlQuran Cloud).
-          // Tarjuma has none (ur.khan only) — retry the same URI once.
-          if (item.fallbackUri && uri === item.uri) {
-            player.replace({ uri: item.fallbackUri });
-            player.play();
-          } else if (!retried) {
-            retried = true;
-            player.replace({ uri });
-            player.play();
-          } else {
-            setAudioError(
-              lang === 'hi'
-                ? 'Audio nahi chal paya. Dobara try karo.'
-                : 'Audio could not play. Try again.',
-            );
-            void stopAudio();
-          }
-          return;
-        }
-        if (status.isLoaded) setAudioBusy(false);
-        if (status.didJustFinish) void playAt(queueIndexRef.current + 1);
-      });
-      player.play();
-      return player;
-    };
-    try {
-      soundRef.current = tryLoad(item.uri);
-    } catch {
-      try {
-        soundRef.current = tryLoad(item.fallbackUri);
-      } catch {
-        setAudioError(
-          lang === 'hi'
-            ? 'Audio nahi chal paya. Dobara try karo.'
-            : 'Audio could not play. Try again.',
-        );
-        await stopAudio();
-      }
-    }
-  }
-
   async function toggleVoice(ayah: (typeof CURATED_AYAHS)[number]): Promise<void> {
-    if (playingRef === ayah.reference) {
-      await stopAudio();
+    // Tapping the playing card's own Voice button stops it.
+    if (playingRef === ayah.reference && playingMode === 'tilawat' && audio.hasAudio) {
+      stopQuranAudio();
       return;
     }
-    setAudioError(null);
-    setAudioBusy(true);
-    await stopAudio();
-    // Global ayah number = ayahs before this surah + ayah-in-surah.
-    // The fallback CDN needs the global number; EveryAyah needs
-    // surah + ayah-in-surah. Exact global numbers for these four
-    // ayahs (verified: surah starts — Al-Baqarah 8, Ar-Ra'd 1708,
-    // Taha 2349, Al-Mu'minun 2674 — from AlQuran Cloud's 1..6236
-    // numbering).
-    const GLOBAL_START: Record<number, number> = {
-      2: 8,
-      13: 1708,
-      20: 2349,
-      23: 2674,
-    };
-    const start = GLOBAL_START[ayah.surahNumber] ?? 0;
-    const queue: AudioItem[] = [];
-    for (let a = ayah.ayahStart; a <= ayah.ayahEnd; a += 1) {
-      queue.push({
-        uri: everyAyahUrl(ayah.surahNumber, a),
-        fallbackUri: tilawatFallbackUrl(start + a - 1),
-      });
-    }
-    queueRef.current = queue;
     setPlayingRef(ayah.reference);
     setPlayingMode('tilawat');
-    await playAt(0);
+    await startLifeAyah(
+      ayah.surahNumber,
+      ayah.ayahStart,
+      ayah.ayahEnd,
+      GLOBAL_START[ayah.surahNumber] ?? 0,
+      'tilawat',
+      `Life Ayah · ${ayah.surah} ${ayah.reference}`,
+    );
   }
 
   /**
    * Tarjuma voice (user request 2026-11-22): the Urdu tarjuma of
    * the same ayahs, Shamshad Ali Khan (ur.khan, Islamic Network
    * CDN, 64 kbps only — verified 200), one Urdu mp3 per ayah in
-   * the range, played back-to-back. No fallback host exists for
-   * ur.khan, so a failure retries the same URI once (playAt).
+   * the range, played back-to-back through the global manager.
+   * No fallback host exists for ur.khan, so a failure retries the
+   * same URI once (the manager's playAt rule).
    * The 2:286 card shows only the selected portion of the Arabic,
    * but the tarjuma audio is the full ayah's tarjuma — that is
    * the real tarjuma of the ayah, not a cut.
    */
   async function toggleTarjuma(ayah: (typeof CURATED_AYAHS)[number]): Promise<void> {
-    if (playingRef === ayah.reference && playingMode === 'tarjuma') {
-      await stopAudio();
+    // Tapping the playing card's own Tarjuma button stops it.
+    if (playingRef === ayah.reference && playingMode === 'tarjuma' && audio.hasAudio) {
+      stopQuranAudio();
       return;
     }
-    setAudioError(null);
-    setAudioBusy(true);
-    await stopAudio();
-    const GLOBAL_START: Record<number, number> = {
-      2: 8,
-      13: 1708,
-      20: 2349,
-      23: 2674,
-    };
-    const start = GLOBAL_START[ayah.surahNumber] ?? 0;
-    const queue: AudioItem[] = [];
-    for (let a = ayah.ayahStart; a <= ayah.ayahEnd; a += 1) {
-      queue.push({ uri: urduAudioUrl(start + a - 1), fallbackUri: '' });
-    }
-    queueRef.current = queue;
     setPlayingRef(ayah.reference);
     setPlayingMode('tarjuma');
-    await playAt(0);
+    await startLifeAyah(
+      ayah.surahNumber,
+      ayah.ayahStart,
+      ayah.ayahEnd,
+      GLOBAL_START[ayah.surahNumber] ?? 0,
+      'urdu',
+      `Life Ayah (Tarjuma) · ${ayah.surah} ${ayah.reference}`,
+    );
   }
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={L.scroll}>
       <Text style={T.title}>{s.lifeTitle}</Text>
       <Text style={T.sub}>{s.lifeSub}</Text>
-      {audioError ? <Text style={T.error}>{audioError}</Text> : null}
+      {playingRef !== null && audio.error ? (
+        <Text style={T.error}>{audio.error}</Text>
+      ) : null}
 
       {CURATED_AYAHS.map((ayah) => {
         const theme = lang === 'hi' ? ayah.themeHi : ayah.themeEn;
-        const playingTilawat = playingRef === ayah.reference && playingMode === 'tilawat';
-        const playingTarjuma = playingRef === ayah.reference && playingMode === 'tarjuma';
+        // A card counts as playing only while THIS screen's tap is
+        // the active global audio — the hasAudio gate keeps a
+        // Quran Book page from lighting up a card here, and a stop
+        // from the MiniPlayer clears the display without any
+        // extra state juggling.
+        const playingTilawat =
+          playingRef === ayah.reference && playingMode === 'tilawat' && audio.hasAudio;
+        const playingTarjuma =
+          playingRef === ayah.reference && playingMode === 'tarjuma' && audio.hasAudio;
         const playing = playingTilawat || playingTarjuma;
         return (
           <Card key={ayah.reference}>
@@ -288,12 +232,12 @@ export default function LifeAyahsScreen({ lang }: ScreenProps) {
               <View style={{ flex: 1 }}>
                 <PillButton
                   label={
-                    playingTilawat ? '■ Roko' : audioBusy && playing ? '…' : '▶ Voice suno'
+                    playingTilawat ? '■ Roko' : audio.busy && playing ? '…' : '▶ Voice suno'
                   }
                   variant="ghost"
                   small
                   block
-                  busy={audioBusy && playingTilawat}
+                  busy={audio.busy && playingTilawat}
                   onPress={() => void toggleVoice(ayah)}
                 />
               </View>
@@ -303,11 +247,14 @@ export default function LifeAyahsScreen({ lang }: ScreenProps) {
                   variant="peach"
                   small
                   block
-                  busy={audioBusy && playingTarjuma}
+                  busy={audio.busy && playingTarjuma}
                   onPress={() => void toggleTarjuma(ayah)}
                 />
               </View>
             </View>
+            {audio.busy && playing ? (
+              <Text style={styles.loadingText}>{s.audioLoading}</Text>
+            ) : null}
           </Card>
         );
       })}
@@ -381,6 +328,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     marginTop: 10,
+  },
+  loadingText: {
+    fontFamily: F.sans,
+    fontSize: 12.5,
+    color: C.muted,
+    marginTop: 8,
+    textAlign: 'center',
   },
   ref: { fontFamily: F.sans, fontSize: 12.5, color: C.muted, flex: 1 },
 });

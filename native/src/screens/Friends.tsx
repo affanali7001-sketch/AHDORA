@@ -154,6 +154,7 @@ export default function FriendsScreen({ lang, goTo }: ScreenProps) {
   }
 
   const friendIds = new Set(friends.map((f) => f.id));
+  const pendingCount = incoming.length + invites.length;
   const shownDiscover = (results !== null ? results : discover).filter((p) => !friendIds.has(p.id));
 
   const discoverRow = (person: PublicUser, index: number) => {
@@ -217,19 +218,11 @@ export default function FriendsScreen({ lang, goTo }: ScreenProps) {
         <View>
           {error ? <Text style={T.error}>{error}</Text> : null}
 
-          {/* Discover — first */}
+          {/* Pending FIRST — incoming requests + challenge invites. The
+              user asked (2026-11-22) that requests be visible at once
+              (see / accept / reject), not buried under Discover. */}
           <Card>
-            <Text style={T.cardTitle}>{s.frDiscover}</Text>
-            {shownDiscover.length === 0 ? (
-              <Text style={[T.cardBody, { marginTop: 6 }]}>{s.frNoDiscover}</Text>
-            ) : (
-              shownDiscover.map((person, i) => discoverRow(person, i))
-            )}
-          </Card>
-
-          {/* Pending — incoming requests + challenge invites */}
-          <Card>
-            <Text style={T.cardTitle}>{s.frPending}</Text>
+            <Text style={T.cardTitle}>{pendingCount > 0 ? `${s.frPending} (${pendingCount})` : s.frPending}</Text>
             {incoming.length === 0 && invites.length === 0 ? (
               <Text style={[T.cardBody, { marginTop: 6 }]}>{s.frNoPending}</Text>
             ) : (
@@ -293,6 +286,16 @@ export default function FriendsScreen({ lang, goTo }: ScreenProps) {
                   </View>
                 ))}
               </>
+            )}
+          </Card>
+
+          {/* Discover — after Pending */}
+          <Card>
+            <Text style={T.cardTitle}>{s.frDiscover}</Text>
+            {shownDiscover.length === 0 ? (
+              <Text style={[T.cardBody, { marginTop: 6 }]}>{s.frNoDiscover}</Text>
+            ) : (
+              shownDiscover.map((person, i) => discoverRow(person, i))
             )}
           </Card>
 

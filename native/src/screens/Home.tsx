@@ -141,21 +141,23 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
 
   return (
     <ScrollView contentContainerStyle={L.scroll} showsVerticalScrollIndicator={false}>
-      <TealHead>
-        {/* WhatsApp-style top bar (user request 2026-11-22): AHDORA
-            on the left, search on the right, above the salam. The
-            rest of the header (salam, date, next prayer) is unchanged. */}
-        <View style={styles.topBar}>
-          <Text style={styles.brand}>AHDORA</Text>
-          <Pressable
-            onPress={() => goTo('search')}
-            style={styles.searchBtn}
-            accessibilityRole="button"
-            accessibilityLabel={s.searchTitle}
-          >
-            <Text style={styles.searchIcon}>🔍</Text>
-          </Pressable>
-        </View>
+      {/* AHDORA + search bar on a WHITE bar above the teal header
+          (user request 2026-11-22): the brand sits on white, in dark
+          teal — NOT inside the green where the salam is. */}
+      <View style={styles.topBar}>
+        <Text style={styles.brand}>AHDORA</Text>
+        <Pressable
+          onPress={() => goTo('search')}
+          style={styles.searchBtn}
+          accessibilityRole="button"
+          accessibilityLabel={s.searchTitle}
+        >
+          <Text style={styles.searchIcon}>🔍</Text>
+        </Pressable>
+      </View>
+      {/* Extra top padding (+10px over the default 20) so the salam
+          and the rest of the header sit a bit lower (user request). */}
+      <TealHead style={styles.tealHeadPad}>
         <Text style={styles.arabic}>{s.salamArabic}</Text>
         <Text style={styles.greeting}>
           {s.homeGreeting} {user?.name ?? ''}
@@ -226,20 +228,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    backgroundColor: C.white,
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginBottom: 12,
   },
+  tealHeadPad: { paddingTop: 30 },
   brand: {
     fontFamily: F.sans,
     fontSize: 20,
     fontWeight: '800',
     letterSpacing: 2.5,
-    color: C.white,
+    color: C.teal900,
   },
   searchBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: C.teal100,
     alignItems: 'center',
     justifyContent: 'center',
   },

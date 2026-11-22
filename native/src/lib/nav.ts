@@ -25,6 +25,7 @@ export type ScreenId =
   | 'search'
   | 'quran'
   | 'reader'
+  | 'now-playing'
   | 'para'
   | 'lifeAyahs'
   | 'duas'
@@ -38,6 +39,7 @@ export type ScreenId =
   | 'friends'
   | 'analytics'
   | 'notifications'
+  | 'support'
   | 'profile';
 
 export type ScreenProps = {

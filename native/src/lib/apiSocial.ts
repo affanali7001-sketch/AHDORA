@@ -507,3 +507,39 @@ export async function salahCalendar(
   );
   return { days: data.days ?? [], totals: data.totals ?? {} };
 }
+
+/* ------------------------------------------------------------------ */
+/* Support & feedback (Profile → Support & Feedback). The server      */
+/* endpoint is real (repo api/src/routes/feedback.ts): POST creates    */
+/* one row (status 'open'), GET lists only the caller's own rows,     */
+/* newest first. Subject 3–140 chars, message 3–2000 chars.           */
+/* ------------------------------------------------------------------ */
+
+export type FeedbackType = 'feedback' | 'complaint';
+
+export type FeedbackItem = {
+  id: string;
+  type: FeedbackType;
+  subject: string;
+  message: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export async function submitFeedback(input: {
+  type: FeedbackType;
+  subject: string;
+  message: string;
+}): Promise<FeedbackItem> {
+  const data = await call<{ feedback: FeedbackItem }>('/api/feedback', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return data.feedback;
+}
+
+export async function listFeedback(): Promise<FeedbackItem[]> {
+  const data = await call<{ feedback: FeedbackItem[] }>('/api/feedback?limit=20');
+  return data.feedback ?? [];
+}

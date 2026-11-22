@@ -18,6 +18,7 @@ import {
   listFriends,
   listSubjects,
   listTasks,
+  sendFriendRequest,
   setTaskStatus,
   studyStats,
   type PublicUser,
@@ -37,6 +38,12 @@ export default function StudyScreen({ lang, goTo }: ScreenProps) {
   const [tasks, setTasks] = useState<StudyTask[]>([]);
   const [stats, setStats] = useState<StudyStats | null>(null);
   const [allUsers, setAllUsers] = useState<PublicUser[]>([]);
+  // Which of the listed users are already friends (friends get only
+  // the Challenge button; everyone else ALSO gets a Send request
+  // button — the user asked for both on every name row, 2026-11-22).
+  const [friendIds, setFriendIds] = useState<Set<string>>(new Set());
+  const [reqSentIds, setReqSentIds] = useState<Set<string>>(new Set());
+  const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [challengeQuery, setChallengeQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -60,6 +67,7 @@ export default function StudyScreen({ lang, goTo }: ScreenProps) {
       setSubjects(subs);
       setTasks(tks);
       setStats(st);
+      setFriendIds(new Set(frs.map((f) => f.id)));
       // Challenge card shows EVERYONE (friends + new people), not
       // just friends — a non-friend gets a request first, then an
       // invite (see Challenges). Dedupe by id.
@@ -83,6 +91,21 @@ export default function StudyScreen({ lang, goTo }: ScreenProps) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /** Send a friend request to a non-friend from the challenge card. */
+  async function sendRequest(userId: string) {
+    if (busyUserId) return;
+    setBusyUserId(userId);
+    setError('');
+    try {
+      await sendFriendRequest(userId);
+      setReqSentIds((prev) => new Set(prev).add(userId));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : s.errorGeneric);
+    } finally {
+      setBusyUserId(null);
+    }
+  }
 
   async function addSubject() {
     const name = newSubject.trim();
@@ -247,7 +270,10 @@ export default function StudyScreen({ lang, goTo }: ScreenProps) {
                   <Text style={[T.cardBody, { marginTop: 8 }]}>{s.studyNoFriendsCh}</Text>
                 );
               }
-              return rows.slice(0, 5).map((f) => (
+              return rows.slice(0, 5).map((f) => {
+                const isFriend = friendIds.has(f.id);
+                const reqSent = reqSentIds.has(f.id);
+                return (
                 <View key={f.id} style={styles.friendRow}>
                   <View style={styles.friendAvatar}>
                     <Text style={styles.friendAvatarText}>{f.initial}</Text>
@@ -258,16 +284,29 @@ export default function StudyScreen({ lang, goTo }: ScreenProps) {
                       ⭐ {typeof f.points === 'number' ? f.points : 0} {s.frPoints}
                     </Text>
                   </View>
-                  <PillButton
-                    label={s.frChallenge}
-                    small
-                    onPress={() => {
-                      setChallengeUserTarget({ id: f.id, name: f.name });
-                      goTo('challenges');
-                    }}
-                  />
+                  <View style={styles.userBtns}>
+                    {!isFriend ? (
+                      <PillButton
+                        label={reqSent ? s.frSent : s.frReq}
+                        small
+                        variant={reqSent ? 'ghost' : 'primary'}
+                        disabled={reqSent || busyUserId === f.id}
+                        onPress={() => void sendRequest(f.id)}
+                      />
+                    ) : null}
+                    <PillButton
+                      label={s.frChallenge}
+                      small
+                      variant="ghost"
+                      onPress={() => {
+                        setChallengeUserTarget({ id: f.id, name: f.name });
+                        goTo('challenges');
+                      }}
+                    />
+                  </View>
                 </View>
-              ));
+                );
+              });
             })()}
             <View style={{ marginTop: 12 }}>
               <PillButton
@@ -319,6 +358,7 @@ const styles = StyleSheet.create({
   },
   friendAvatarText: { fontFamily: 'PlusJakartaSans', fontSize: 15, fontWeight: '800', color: C.white },
   friendName: { fontFamily: 'PlusJakartaSans', fontSize: 14.5, fontWeight: '700', color: C.ink },
+  userBtns: { flexDirection: 'column', gap: 6, alignItems: 'flex-end' },
   statGrid: { flexDirection: 'row', gap: 10, marginBottom: 14 },
   stat: {
     flex: 1,

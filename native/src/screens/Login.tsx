@@ -9,8 +9,17 @@
  * reset link itself goes to the user's email and opens the web app,
  * where the token is redeemed (POST /api/auth/reset-password).
  */
-import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useRef, useState } from 'react';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import type { ScrollViewInstance } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
 import { apiFetch, login } from '../lib/api';
 import { stringsFor } from '../lib/strings';
@@ -27,6 +36,12 @@ export default function LoginScreen({ lang, goTo, onLoginSuccess }: ScreenProps)
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resetSent, setResetSent] = useState<string | null>(null);
+  // When the keyboard opens over the password field, scroll the form
+  // so the field stays visible (same fix as Signup, 2026-11-22).
+  const scrollRef = useRef<ScrollViewInstance | null>(null);
+  function scrollPasswordIntoView() {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150);
+  }
 
   async function submitLogin() {
     if (busy) return;
@@ -91,7 +106,16 @@ export default function LoginScreen({ lang, goTo, onLoginSuccess }: ScreenProps)
   }
 
   return (
-    <ScrollView contentContainerStyle={L.scrollNoNav} showsVerticalScrollIndicator={false}>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+    <ScrollView
+      ref={scrollRef}
+      contentContainerStyle={L.scrollNoNav}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+    >
       <Text style={styles.arabic}>{s.salamArabic}</Text>
       <Text style={styles.salam}>{s.salam}</Text>
       <Text style={styles.welcome}>
@@ -134,6 +158,7 @@ export default function LoginScreen({ lang, goTo, onLoginSuccess }: ScreenProps)
               autoCorrect={false}
               autoComplete="password"
               editable={!busy}
+              onFocus={scrollPasswordIntoView}
               onSubmitEditing={submitLogin}
             />
           </Field>
@@ -214,6 +239,7 @@ export default function LoginScreen({ lang, goTo, onLoginSuccess }: ScreenProps)
         </>
       )}
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

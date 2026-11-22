@@ -683,6 +683,86 @@ export default function QuranBookScreen({
       </View>
       {readerSub ? <Text style={styles.readerSub}>{readerSub}</Text> : null}
 
+      {/* Audio controls at the TOP of the reader (user request
+          2026-11-22): the play buttons sit right under the page
+          label, above the mushaf page — visible without scrolling. */}
+      <PlayerCard
+        dark
+        title={shared.playerTitle}
+        note={s.playerNote}
+        time={audio.mode === 'tilawat' && audio.page === page ? audio.time : 0}
+        duration={audio.mode === 'tilawat' && audio.page === page ? audio.duration : 0}
+        timeLabel={
+          audio.mode === 'tilawat' && audio.page === page && audio.duration > 0
+            ? `${fmtTime(audio.duration)} · Page ${page}`
+            : `Page ${page}`
+        }
+        playing={audio.mode === 'tilawat' && audio.page === page && audio.playing}
+        busy={audio.busy && audio.mode === 'tilawat' && audio.page === page}
+        onToggle={() => {
+          if (audio.mode === 'tilawat' && audio.page === page) {
+            toggleQuranAudio();
+          } else {
+            void startQuranPage(page, 'tilawat');
+          }
+        }}
+      />
+      <PlayerCard
+        title={shared.urduTitle}
+        note={s.urduNote}
+        time={audio.mode === 'urdu' && audio.page === page ? audio.time : 0}
+        duration={audio.mode === 'urdu' && audio.page === page ? audio.duration : 0}
+        timeLabel={
+          audio.mode === 'urdu' && audio.page === page && audio.duration > 0
+            ? `${fmtTime(audio.duration)} · Page ${page}`
+            : `Page ${page}`
+        }
+        playing={audio.mode === 'urdu' && audio.page === page && audio.playing}
+        busy={audio.busy && audio.mode === 'urdu' && audio.page === page}
+        onToggle={() => {
+          if (audio.mode === 'urdu' && audio.page === page) {
+            toggleQuranAudio();
+          } else {
+            void startQuranPage(page, 'urdu');
+          }
+        }}
+      />
+      {audio.busy && audio.mode ? (
+        <Text style={styles.audioLoading}>{s.audioLoading}</Text>
+      ) : null}
+      {audio.error ? <Text style={T.error}>{audio.error}</Text> : null}
+
+      {/* Auto-play: tilawat → tarjuma → next page, and mark done. */}
+      <View style={styles.autoRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.autoTitle}>{s.autoPlay}</Text>
+          <Text style={styles.autoNote}>{s.autoPlayNote}</Text>
+        </View>
+        <Switch value={audio.autoPlay} onValueChange={setQuranAutoPlay} />
+      </View>
+
+      {/* Seek + prev/next ayah + stop — works even off this page. */}
+      {audio.hasAudio ? (
+        <View style={styles.seekRow}>
+          <PillButton label="−10s" small variant="ghost" onPress={() => seekQuranBy(-10)} />
+          <PillButton label="⏮" small variant="ghost" onPress={() => prevQuranAyah()} />
+          <PillButton label="⏭" small variant="ghost" onPress={() => nextQuranAyah()} />
+          <PillButton label="+10s" small variant="ghost" onPress={() => seekQuranBy(10)} />
+          <PillButton
+            label={s.stopAudio}
+            small
+            variant="ghost"
+            onPress={() => stopQuranAudio()}
+          />
+        </View>
+      ) : null}
+      <Text style={T.note}>
+        {s.tilawatCredit} · {TILAWAT_RECITER.bitrate}
+      </Text>
+      <Text style={T.note}>
+        {s.urduAudioCredit} · {URDU_AUDIO.bitrate}
+      </Text>
+
       {pageLoading ? (
         <ActivityIndicator color={C.teal500} size="large" style={styles.loader} />
       ) : pageError ? (
@@ -754,115 +834,8 @@ export default function QuranBookScreen({
             </View>
           </View>
 
-          <PlayerCard
-            dark
-            title={shared.playerTitle}
-            note={s.playerNote}
-            time={audio.mode === 'tilawat' && audio.page === page ? audio.time : 0}
-            duration={audio.mode === 'tilawat' && audio.page === page ? audio.duration : 0}
-            timeLabel={
-              audio.mode === 'tilawat' && audio.page === page && audio.duration > 0
-                ? `${fmtTime(audio.duration)} · Page ${page}`
-                : `Page ${page}`
-            }
-            playing={audio.mode === 'tilawat' && audio.page === page && audio.playing}
-            busy={audio.busy && audio.mode === 'tilawat' && audio.page === page}
-            onToggle={() => {
-              if (audio.mode === 'tilawat' && audio.page === page) {
-                toggleQuranAudio();
-              } else {
-                void startQuranPage(page, 'tilawat');
-              }
-            }}
-          />
-          <PlayerCard
-            title={shared.urduTitle}
-            note={s.urduNote}
-            time={audio.mode === 'urdu' && audio.page === page ? audio.time : 0}
-            duration={audio.mode === 'urdu' && audio.page === page ? audio.duration : 0}
-            timeLabel={
-              audio.mode === 'urdu' && audio.page === page && audio.duration > 0
-                ? `${fmtTime(audio.duration)} · Page ${page}`
-                : `Page ${page}`
-            }
-            playing={audio.mode === 'urdu' && audio.page === page && audio.playing}
-            busy={audio.busy && audio.mode === 'urdu' && audio.page === page}
-            onToggle={() => {
-              if (audio.mode === 'urdu' && audio.page === page) {
-                toggleQuranAudio();
-              } else {
-                void startQuranPage(page, 'urdu');
-              }
-            }}
-          />
-          {audio.busy && audio.mode ? (
-            <Text style={styles.audioLoading}>{s.audioLoading}</Text>
-          ) : null}
-          {audio.error ? <Text style={T.error}>{audio.error}</Text> : null}
-
-          {/* Auto-play: tilawat → tarjuma → next page, and mark done. */}
-          <View style={styles.autoRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.autoTitle}>{s.autoPlay}</Text>
-              <Text style={styles.autoNote}>{s.autoPlayNote}</Text>
-            </View>
-            <Switch value={audio.autoPlay} onValueChange={setQuranAutoPlay} />
-          </View>
-
-          {/* Seek + prev/next ayah + stop — works even off this page. */}
-          {audio.hasAudio ? (
-            <View style={styles.seekRow}>
-              <PillButton label="−10s" small variant="ghost" onPress={() => seekQuranBy(-10)} />
-              <PillButton label="⏮" small variant="ghost" onPress={() => prevQuranAyah()} />
-              <PillButton label="⏭" small variant="ghost" onPress={() => nextQuranAyah()} />
-              <PillButton label="+10s" small variant="ghost" onPress={() => seekQuranBy(10)} />
-              <PillButton
-                label={s.stopAudio}
-                small
-                variant="ghost"
-                onPress={() => stopQuranAudio()}
-              />
-            </View>
-          ) : null}
-          <Text style={T.note}>
-            {s.tilawatCredit} · {TILAWAT_RECITER.bitrate}
-          </Text>
-          <Text style={T.note}>
-            {s.urduAudioCredit} · {URDU_AUDIO.bitrate}
-          </Text>
-
-          <Text style={styles.sectionTitle}>{shared.rdTarjumaH}</Text>
-          {tarjumaFailed ? <Text style={T.error}>{s.tarjumaUnavailable}</Text> : null}
-          {mushaf.ayahs.map((a) => (
-            <View
-              key={a.number}
-              style={[
-                styles.ayahRow,
-                audio.playingAyah === a.number && styles.ayahRowPlaying,
-              ]}
-            >
-              <Text style={styles.ayahArabic}>{a.text.trim()}</Text>
-              {translitByGlobal.get(a.number) ? (
-                <Text style={styles.translit}>{translitByGlobal.get(a.number)}</Text>
-              ) : null}
-              {urduByGlobal.get(a.number) ? (
-                <Text style={styles.urduText}>{urduByGlobal.get(a.number)}</Text>
-              ) : null}
-              {englishByGlobal.get(a.number) ? (
-                <Text style={styles.english}>{englishByGlobal.get(a.number)}</Text>
-              ) : null}
-            </View>
-          ))}
-
-          <PillButton
-            label={shared.markRead}
-            variant="peach"
-            block
-            busy={markBusy}
-            onPress={() => void markPageRead()}
-          />
-          {markMsg ? <Text style={styles.infoMsg}>{markMsg}</Text> : null}
-
+          {/* Prev/Next + page jump directly below the page
+              (user request 2026-11-22) — not at the bottom. */}
           <View style={styles.navRow}>
             <PillButton
               label={shared.prevPage}
@@ -909,6 +882,38 @@ export default function QuranBookScreen({
             />
           </View>
           {pageJumpMsg ? <Text style={T.error}>{pageJumpMsg}</Text> : null}
+
+          <Text style={styles.sectionTitle}>{shared.rdTarjumaH}</Text>
+          {tarjumaFailed ? <Text style={T.error}>{s.tarjumaUnavailable}</Text> : null}
+          {mushaf.ayahs.map((a) => (
+            <View
+              key={a.number}
+              style={[
+                styles.ayahRow,
+                audio.playingAyah === a.number && styles.ayahRowPlaying,
+              ]}
+            >
+              <Text style={styles.ayahArabic}>{a.text.trim()}</Text>
+              {translitByGlobal.get(a.number) ? (
+                <Text style={styles.translit}>{translitByGlobal.get(a.number)}</Text>
+              ) : null}
+              {urduByGlobal.get(a.number) ? (
+                <Text style={styles.urduText}>{urduByGlobal.get(a.number)}</Text>
+              ) : null}
+              {englishByGlobal.get(a.number) ? (
+                <Text style={styles.english}>{englishByGlobal.get(a.number)}</Text>
+              ) : null}
+            </View>
+          ))}
+
+          <PillButton
+            label={shared.markRead}
+            variant="peach"
+            block
+            busy={markBusy}
+            onPress={() => void markPageRead()}
+          />
+          {markMsg ? <Text style={styles.infoMsg}>{markMsg}</Text> : null}
 
           <Text style={styles.pageFooter}>
             Page {page} of {TOTAL_PAGES} · Surah {firstSeg?.surah.englishName ?? ''}

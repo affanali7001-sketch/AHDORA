@@ -234,6 +234,13 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
               </View>
               <PillButton label={s.pfOpen} small variant="ghost" onPress={() => goTo('notifications')} />
             </View>
+            <View style={styles.row}>
+              <View style={styles.rowText}>
+                <Text style={styles.rowLabel}>{s.pfSupportT}</Text>
+                <Text style={styles.rowSub}>{s.pfSupportS}</Text>
+              </View>
+              <PillButton label={s.pfSupportBtn} small variant="ghost" onPress={() => goTo('support')} />
+            </View>
             <View style={[styles.row, { borderBottomWidth: 0 }]}>
               <View style={styles.rowText}>
                 <Text style={styles.rowLabel}>{s.pfPassT}</Text>
@@ -289,9 +296,21 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
             )}
           </Pressable>
 
-          {/* Account delete — real export + delete */}
-          <Pressable onPress={() => setShowDelete((v) => !v)} accessibilityRole="button">
-            <Text style={styles.deleteNote}>{s.pfDelete}</Text>
+          {/* Account delete — a VISIBLE button next to Log out, not a
+              tiny note. The user (2026-11-22) only saw Log out and
+              asked where permanent delete is — it was hidden behind
+              a small muted text link. Tapping opens the real
+              export + password-confirm delete section below. */}
+          <Pressable
+            onPress={() => setShowDelete((v) => !v)}
+            style={({ pressed }) => [
+              styles.logoutBtn,
+              styles.deleteBtn,
+              pressed && styles.logoutBtnDisabled,
+            ]}
+            accessibilityRole="button"
+          >
+            <Text style={styles.deleteBtnText}>{s.pfDeleteOpen}</Text>
           </Pressable>
           {showDelete ? (
             <Card>
@@ -366,4 +385,6 @@ const styles = StyleSheet.create({
   logoutBtnDisabled: { opacity: 0.55 },
   logoutText: { fontFamily: 'PlusJakartaSans', fontSize: 15, fontWeight: '800', color: C.red },
   deleteNote: { fontFamily: 'PlusJakartaSans', fontSize: 12.5, color: C.muted, textAlign: 'center', marginTop: 12, lineHeight: 18 },
+  deleteBtn: { marginTop: 0, borderColor: C.red, backgroundColor: '#FDF0ED' },
+  deleteBtnText: { fontFamily: 'PlusJakartaSans', fontSize: 15, fontWeight: '800', color: C.red },
 });

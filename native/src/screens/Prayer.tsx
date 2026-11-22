@@ -9,6 +9,11 @@
  * prayer row is highlighted peach with the "Agli" tag. The
  * "Namaz ke time badlo" button goes to Onboarding (per preview),
  * not to an inline editor.
+ *
+ * After the times load, today's system prayer alerts are refreshed
+ * (fire-and-forget, only when the user switched them on in the
+ * Notifications screen — see src/lib/prayerNotifications.ts). It
+ * never blocks this screen and never fails it.
  */
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -21,6 +26,7 @@ import {
   fetchSalahDay,
   formatTime12h,
   loadProfileWithCompletion,
+  PRAYER_NAMES,
   todayKey,
   updateSalahStatus,
   type PrayerName,
@@ -28,6 +34,10 @@ import {
   type PrayerTimesResponse,
   type SalahStatus,
 } from '../lib/apiCore';
+import {
+  isPrayerNotificationsEnabled,
+  schedulePrayerNotifications,
+} from '../lib/prayerNotifications';
 
 const CYCLE: Record<'prayed' | 'missed' | 'qaza', SalahStatus> = {
   prayed: 'missed',
@@ -64,7 +74,20 @@ export default function PrayerScreen({ lang, user, goTo }: ScreenProps) {
       loadProfileWithCompletion(user?.name ?? ''),
     ]).then(([timesResult, dayResult, profileResult]) => {
       if (!active) return;
-      if (timesResult.status === 'fulfilled') setTimes(timesResult.value);
+      if (timesResult.status === 'fulfilled') {
+        const loaded = timesResult.value;
+        setTimes(loaded);
+        // Keep today's system prayer alerts scheduled whenever this
+        // screen loads (fire-and-forget; the helpers never throw).
+        void (async () => {
+          if (!(await isPrayerNotificationsEnabled())) return;
+          const enabled: { [key: string]: boolean } = {};
+          for (const prayer of PRAYER_NAMES) {
+            enabled[prayer] = loaded.perPrayer[prayer]?.reminder ?? true;
+          }
+          await schedulePrayerNotifications(loaded, enabled);
+        })();
+      }
       if (dayResult.status === 'fulfilled') setDay(dayResult.value);
       if (
         profileResult.status === 'fulfilled' &&
