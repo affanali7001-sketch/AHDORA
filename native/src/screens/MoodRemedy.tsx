@@ -14,6 +14,7 @@ import * as Clipboard from 'expo-clipboard';
 import type { ScreenProps } from '../lib/nav';
 import type { AppLanguage } from '../lib/strings';
 import { C, F, L, T } from '../lib/theme';
+import { DARK, useAppTheme } from '../lib/appTheme';
 import { Card, Chip, EmptyState, PillButton } from '../components/ui';
 import {
   MOODS,
@@ -138,6 +139,7 @@ function remedyCopyText(r: MoodRemedy): string {
 
 export default function MoodRemedyScreen({ lang, user }: ScreenProps) {
   const s = STRINGS[lang];
+  const th = useAppTheme();
   const uid = user?.id ?? 'anon';
   const today = todayDateKey();
 
@@ -247,10 +249,10 @@ export default function MoodRemedyScreen({ lang, user }: ScreenProps) {
     const playingThis = isAyah && audio.playing && audio.title === remedyTitle(r);
     const ref = isAyah ? r.reference : r.source;
     return (
-      <Card key={r.id} style={styles.remedyCard}>
+      <Card key={r.id} style={[styles.remedyCard, th.dark && styles.cardDark]}>
         <View style={styles.remedyHead}>
           <Chip label={tag} tone="teal" />
-          <Text style={styles.refText}>{ref}</Text>
+          <Text style={[styles.refText, th.dark && styles.accentDark]}>{ref}</Text>
           <Pressable
             onPress={() => toggleFavorite(r.id)}
             accessibilityRole="button"
@@ -260,24 +262,32 @@ export default function MoodRemedyScreen({ lang, user }: ScreenProps) {
             <Text style={[styles.heart, isFav && styles.heartOn]}>{isFav ? '♥' : '♡'}</Text>
           </Pressable>
         </View>
-        {isAyah && r.quoteNote ? <Text style={styles.quoteNote}>{r.quoteNote}</Text> : null}
-        <Text style={styles.arabicText}>{r.arabic}</Text>
-        {!isAyah ? <Text style={styles.translit}>{r.transliteration}</Text> : null}
-        <Text style={styles.translation}>{isAyah ? r.translation : r.meaning}</Text>
+        {isAyah && r.quoteNote ? (
+          <Text style={[styles.quoteNote, th.dark && styles.accentDark]}>{r.quoteNote}</Text>
+        ) : null}
+        <Text style={[styles.arabicText, th.dark && styles.textDark]}>{r.arabic}</Text>
+        {!isAyah ? (
+          <Text style={[styles.translit, th.dark && styles.mutedDark]}>{r.transliteration}</Text>
+        ) : null}
+        <Text style={[styles.translation, th.dark && styles.accentDark]}>
+          {isAyah ? r.translation : r.meaning}
+        </Text>
         {isAyah && r.fullArabic ? (
           <View>
             <Pressable
               onPress={() => setShowFullId((cur) => (cur === r.id ? null : r.id))}
               hitSlop={6}
             >
-              <Text style={styles.fullToggle}>
+              <Text style={[styles.fullToggle, th.dark && styles.accentDark]}>
                 {showFullId === r.id ? s.hideFull : s.fullAyah}
               </Text>
             </Pressable>
             {showFullId === r.id ? (
               <View>
-                <Text style={styles.arabicText}>{r.fullArabic}</Text>
-                <Text style={styles.translation}>{r.fullTranslation}</Text>
+                <Text style={[styles.arabicText, th.dark && styles.textDark]}>{r.fullArabic}</Text>
+                <Text style={[styles.translation, th.dark && styles.accentDark]}>
+                  {r.fullTranslation}
+                </Text>
               </View>
             ) : null}
           </View>
@@ -309,26 +319,29 @@ export default function MoodRemedyScreen({ lang, user }: ScreenProps) {
   }
 
   return (
-    <ScrollView style={styles.scroll} contentContainerStyle={L.scroll}>
-      <Text style={T.title}>{s.title}</Text>
-      <Text style={T.sub}>{s.subtitle}</Text>
+    <ScrollView
+      style={[styles.scroll, th.dark && { backgroundColor: DARK.bg }]}
+      contentContainerStyle={L.scroll}
+    >
+      <Text style={[T.title, th.dark && styles.textDark]}>{s.title}</Text>
+      <Text style={[T.sub, th.dark && styles.mutedDark]}>{s.subtitle}</Text>
 
       {!loaded ? (
         <ActivityIndicator color={C.teal700} style={{ marginTop: 24 }} />
       ) : (
         <View>
-          <Card style={styles.todayCard}>
-            <Text style={T.label}>{s.todayCard}</Text>
+          <Card style={[styles.todayCard, th.dark && styles.cardDark]}>
+            <Text style={[T.label, th.dark && styles.accentDark]}>{s.todayCard}</Text>
             {todayEntry ? (
-              <Text style={styles.todayText}>
+              <Text style={[styles.todayText, th.dark && styles.textDark]}>
                 {moodById(todayEntry.mood).emoji} {s.checkedInToday(moodLabel(moodById(todayEntry.mood)))}
               </Text>
             ) : (
-              <Text style={T.cardBody}>{s.notCheckedIn}</Text>
+              <Text style={[T.cardBody, th.dark && styles.mutedDark]}>{s.notCheckedIn}</Text>
             )}
           </Card>
 
-          <Text style={[T.h2, styles.sectionTitle]}>{s.chooseMood}</Text>
+          <Text style={[T.h2, styles.sectionTitle, th.dark && styles.textDark]}>{s.chooseMood}</Text>
           <View style={styles.moodGrid}>
             {MOODS.map((m) => {
               const active = selectedMood === m.id;
@@ -354,29 +367,33 @@ export default function MoodRemedyScreen({ lang, user }: ScreenProps) {
 
           {mood && remedy ? (
             <View>
-              <Text style={[T.h2, styles.sectionTitle]}>{s.remedyFor(moodLabel(mood))}</Text>
+              <Text style={[T.h2, styles.sectionTitle, th.dark && styles.textDark]}>
+                {s.remedyFor(moodLabel(mood))}
+              </Text>
               {renderRemedyCard(remedy, { showNext: true })}
             </View>
           ) : null}
 
-          <Text style={[T.h2, styles.sectionTitle]}>{s.favorites}</Text>
+          <Text style={[T.h2, styles.sectionTitle, th.dark && styles.textDark]}>{s.favorites}</Text>
           {favoriteRemedies.length === 0 ? (
-            <EmptyState title={s.favorites} body={s.noFavorites} />
+            <EmptyState title={s.favorites} body={s.noFavorites} dark={th.dark} />
           ) : (
             favoriteRemedies.map((r) => renderRemedyCard(r, { showNext: false }))
           )}
 
-          <Text style={[T.h2, styles.sectionTitle]}>{s.history}</Text>
+          <Text style={[T.h2, styles.sectionTitle, th.dark && styles.textDark]}>{s.history}</Text>
           {checkins.length === 0 ? (
-            <EmptyState title={s.history} body={s.noHistory} />
+            <EmptyState title={s.history} body={s.noHistory} dark={th.dark} />
           ) : (
             checkins.map((c) => {
               const m = moodById(c.mood);
               return (
-                <Card key={c.date} style={styles.historyRow}>
+                <Card key={c.date} style={[styles.historyRow, th.dark && styles.cardDark]}>
                   <Text style={styles.historyEmoji}>{m.emoji}</Text>
-                  <Text style={styles.historyLabel}>{moodLabel(m)}</Text>
-                  <Text style={styles.historyDate}>{formatDateKey(c.date)}</Text>
+                  <Text style={[styles.historyLabel, th.dark && styles.textDark]}>{moodLabel(m)}</Text>
+                  <Text style={[styles.historyDate, th.dark && styles.mutedDark]}>
+                    {formatDateKey(c.date)}
+                  </Text>
                 </Card>
               );
             })
@@ -435,4 +452,8 @@ const styles = StyleSheet.create({
   historyEmoji: { fontSize: 20 },
   historyLabel: { flex: 1, fontFamily: F.sans, fontSize: 14.5, fontWeight: '700', color: C.ink },
   historyDate: { fontFamily: F.sans, fontSize: 12.5, color: C.muted },
+  cardDark: { backgroundColor: DARK.card, borderColor: DARK.border },
+  textDark: { color: DARK.text },
+  mutedDark: { color: DARK.muted },
+  accentDark: { color: DARK.accent },
 });

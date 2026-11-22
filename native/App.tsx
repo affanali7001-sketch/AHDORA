@@ -38,6 +38,7 @@ import { Amiri_400Regular, Amiri_700Bold } from '@expo-google-fonts/amiri';
 import { logout, restoreSession, setOnUnauthorized, type AuthUser } from './src/lib/api';
 import { loadProfileWithCompletion } from './src/lib/apiCore';
 import { refreshPrayerNotifications } from './src/lib/prayerNotifications';
+import { DARK, initAppTheme, useAppTheme } from './src/lib/appTheme';
 import { PILL_NAV, type ScreenId, type ScreenProps } from './src/lib/nav';
 import { stringsFor, type AppLanguage } from './src/lib/strings';
 import { C, F, S } from './src/lib/theme';
@@ -113,6 +114,16 @@ export default function App() {
   // True only when Onboarding opens fresh after signup/login (not when
   // editing the profile) — Onboarding shows the details-video popup.
   const [onboardingFresh, setOnboardingFresh] = useState(false);
+
+  // Display prefs (theme / animations / greetings): reactive — the
+  // shell background below follows the resolved theme.
+  const th = useAppTheme();
+
+  // Load this user's display prefs (per-user AsyncStorage) whenever
+  // the signed-in user changes; 'anon' before login / after logout.
+  useEffect(() => {
+    initAppTheme(user?.id ?? 'anon');
+  }, [user?.id]);
 
   // One family name per typeface; fontWeight selects the face (SDK 58
   // expo-font FontFamilyDefinition array form). Family names must match
@@ -262,8 +273,8 @@ export default function App() {
   // (or loading failed, in which case the system font is the fallback).
   if (!fontsLoaded && !fontError) {
     return (
-      <SafeAreaView style={styles.safe}>
-        <ExpoStatusBar style="dark" />
+      <SafeAreaView style={[styles.safe, th.dark && { backgroundColor: DARK.bg }]}>
+        <ExpoStatusBar style={th.dark ? 'light' : 'dark'} />
         <View style={styles.center}>
           <ActivityIndicator size="large" color={C.teal700} />
         </View>
@@ -272,8 +283,8 @@ export default function App() {
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <ExpoStatusBar style="dark" />
+    <SafeAreaView style={[styles.safe, th.dark && { backgroundColor: DARK.bg }]}>
+      <ExpoStatusBar style={th.dark ? 'light' : 'dark'} />
       {checkingOnboarding || restoringSession ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={C.teal700} />

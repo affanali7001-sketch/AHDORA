@@ -7,6 +7,7 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
 import { MEANING, stringsFor } from '../lib/strings';
+import { DARK, useAppTheme } from '../lib/appTheme';
 import { C, F, L, T } from '../lib/theme';
 import { PillButton } from '../components/ui';
 import TutorialVideo from '../components/TutorialVideo';
@@ -14,21 +15,26 @@ import { SIGNUP_VIDEO_URL } from '../lib/videos';
 
 export default function WelcomeScreen({ lang, goTo }: ScreenProps) {
   const s = stringsFor(lang);
+  const th = useAppTheme();
   return (
     <ScrollView contentContainerStyle={L.scrollNoNav} showsVerticalScrollIndicator={false}>
-      <Text style={styles.arabic}>{s.salamArabic}</Text>
-      <Text style={styles.salam}>{s.salam}</Text>
+      {th.splashGreeting ? (
+        <View>
+          <Text style={[styles.arabic, th.dark && styles.accentDark]}>{s.salamArabic}</Text>
+          <Text style={[styles.salam, th.dark && styles.textDark]}>{s.salam}</Text>
+        </View>
+      ) : null}
 
-      <Text style={[T.eyebrow, styles.eyebrow]}>{s.eyebrow}</Text>
-      <Text style={styles.title}>{s.welTitle}</Text>
-      <Text style={styles.sub}>{s.welSub}</Text>
+      <Text style={[T.eyebrow, styles.eyebrow, th.dark && styles.mutedDark]}>{s.eyebrow}</Text>
+      <Text style={[styles.title, th.dark && styles.textDark]}>{s.welTitle}</Text>
+      <Text style={[styles.sub, th.dark && styles.mutedDark]}>{s.welSub}</Text>
 
       <View style={styles.meaning}>
         {MEANING.map((m) => (
           <View key={`${m.letter}-${m.word}`} style={styles.meaningRow}>
-            <Text style={styles.meaningLetter}>{m.letter}</Text>
-            <Text style={styles.meaningDash}>—</Text>
-            <Text style={styles.meaningWord}>{m.word}</Text>
+            <Text style={[styles.meaningLetter, th.dark && styles.accentDark]}>{m.letter}</Text>
+            <Text style={[styles.meaningDash, th.dark && styles.mutedDark]}>—</Text>
+            <Text style={[styles.meaningWord, th.dark && styles.mutedDark]}>{m.word}</Text>
           </View>
         ))}
       </View>
@@ -94,4 +100,7 @@ const styles = StyleSheet.create({
   meaningDash: { fontFamily: F.sans, fontSize: 16.5, color: C.muted },
   meaningWord: { fontFamily: F.sans, fontSize: 16.5, color: C.muted },
   note: { marginTop: 12 },
+  textDark: { color: DARK.text },
+  mutedDark: { color: DARK.muted },
+  accentDark: { color: DARK.accent },
 });

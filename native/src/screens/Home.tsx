@@ -12,6 +12,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import type { ScreenId, ScreenProps } from '../lib/nav';
 import { stringsFor, type AppLanguage } from '../lib/strings';
 import { loadMinimal } from '../lib/minimal';
+import { DARK, useAppTheme } from '../lib/appTheme';
 import { C, F, L, T } from '../lib/theme';
 import { Card, Chip, EmptyState, PillButton, TealHead, Tile, TileGrid } from '../components/ui';
 import {
@@ -73,6 +74,7 @@ const STRINGS: Record<
 export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
   const s = stringsFor(lang);
   const ms = STRINGS[lang];
+  const th = useAppTheme();
   const uid = user?.id ?? 'anon';
   const [times, setTimes] = useState<PrayerTimesResponse | null>(null);
   // Tomorrow's Fajr, only when every prayer today is done — the
@@ -203,10 +205,14 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
   // same header instead of duplicating it.
   const tealHead = (
     <TealHead style={styles.tealHeadPad}>
-      <Text style={styles.arabic}>{s.salamArabic}</Text>
-      <Text style={styles.greeting}>
-        {s.homeGreeting} {user?.name ?? ''}
-      </Text>
+      {th.homeGreeting ? (
+        <View>
+          <Text style={styles.arabic}>{s.salamArabic}</Text>
+          <Text style={styles.greeting}>
+            {s.homeGreeting} {user?.name ?? ''}
+          </Text>
+        </View>
+      ) : null}
       <Text style={styles.dateLine}>
         {dateLine}
         {hijriDate ? ` · ${hijriDate}` : ''}
@@ -241,7 +247,7 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
       <ScrollView contentContainerStyle={L.scroll} showsVerticalScrollIndicator={false}>
         {tealHead}
         {times ? (
-          <Card>
+          <Card style={th.dark ? styles.cardDark : undefined}>
             <Pressable
               onPress={() => setTimesOpen((v) => !v)}
               style={styles.timesHead}
@@ -249,12 +255,14 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
               accessibilityState={{ expanded: timesOpen }}
             >
               <View style={{ flex: 1 }}>
-                <Text style={T.cardTitle}>{ms.todayTimes}</Text>
-                <Text style={[T.cardBody, { marginTop: 2 }]}>
+                <Text style={[T.cardTitle, th.dark && styles.textDark]}>{ms.todayTimes}</Text>
+                <Text style={[T.cardBody, { marginTop: 2 }, th.dark && styles.mutedDark]}>
                   {timesOpen ? ms.tapToHide : ms.tapToSee}
                 </Text>
               </View>
-              <Text style={styles.chevron}>{timesOpen ? '▾' : '▸'}</Text>
+              <Text style={[styles.chevron, th.dark && styles.accentDark]}>
+                {timesOpen ? '▾' : '▸'}
+              </Text>
             </Pressable>
             {timesOpen
               ? PRAYER_NAMES.map((name, i) => (
@@ -262,14 +270,19 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
                     key={name}
                     style={[
                       styles.timeRow,
+                      th.dark && styles.timeRowDark,
                       i === PRAYER_NAMES.length - 1 && { borderBottomWidth: 0 },
                     ]}
                   >
-                    <Text style={styles.timeName}>{name}</Text>
+                    <Text style={[styles.timeName, th.dark && styles.textDark]}>{name}</Text>
                     {day?.[name]?.status === 'prayed' ? (
-                      <Text style={styles.timePrayed}>✓ {ms.prayed}</Text>
+                      <Text style={[styles.timePrayed, th.dark && styles.accentDark]}>
+                        ✓ {ms.prayed}
+                      </Text>
                     ) : null}
-                    <Text style={styles.timeValue}>{formatTime12h(times.timings[name])}</Text>
+                    <Text style={[styles.timeValue, th.dark && styles.textDark]}>
+                      {formatTime12h(times.timings[name])}
+                    </Text>
                   </View>
                 ))
               : null}
@@ -285,11 +298,11 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
       {/* AHDORA + search bar on a WHITE bar above the teal header
           (user request 2026-11-22): the brand sits on white, in dark
           teal — NOT inside the green where the salam is. */}
-      <View style={styles.topBar}>
-        <Text style={styles.brand}>AHDORA</Text>
+      <View style={[styles.topBar, th.dark && styles.topBarDark]}>
+        <Text style={[styles.brand, th.dark && styles.textDark]}>AHDORA</Text>
         <Pressable
           onPress={() => goTo('search')}
-          style={styles.searchBtn}
+          style={[styles.searchBtn, th.dark && styles.searchBtnDark]}
           accessibilityRole="button"
           accessibilityLabel={s.searchTitle}
         >
@@ -306,9 +319,16 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
             key={tile.id}
             label={tile.label}
             peach={tile.peach}
+            dark={th.dark}
             onPress={() => goTo(tile.id)}
             icon={
-              <Text style={[styles.tileIcon, tile.peach && styles.tileIconPeach]}>
+              <Text
+                style={[
+                  styles.tileIcon,
+                  tile.peach && styles.tileIconPeach,
+                  th.dark && !tile.peach && styles.tileIconDark,
+                ]}
+              >
                 {tile.icon}
               </Text>
             }
@@ -318,12 +338,12 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
 
       {error && !times && !day && !stats && !challengeLoaded ? (
         <View style={{ marginTop: 14 }}>
-          <EmptyState title={s.homeToday} body={error} />
+          <EmptyState title={s.homeToday} body={error} dark={th.dark} />
         </View>
       ) : (
-        <Card>
-          <Text style={T.cardTitle}>{s.homeToday}</Text>
-          <Text style={[T.cardBody, { marginTop: 6 }]}>{summary}</Text>
+        <Card style={th.dark ? styles.cardDark : undefined}>
+          <Text style={[T.cardTitle, th.dark && styles.textDark]}>{s.homeToday}</Text>
+          <Text style={[T.cardBody, { marginTop: 6 }, th.dark && styles.mutedDark]}>{summary}</Text>
           <View style={{ marginTop: 12 }}>
             <PillButton
               label={s.homeDashBtn}
@@ -353,6 +373,14 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     marginBottom: 12,
   },
+  topBarDark: { backgroundColor: DARK.card, borderColor: DARK.border },
+  searchBtnDark: { backgroundColor: DARK.chip },
+  cardDark: { backgroundColor: DARK.card, borderColor: DARK.border },
+  textDark: { color: DARK.text },
+  mutedDark: { color: DARK.muted },
+  accentDark: { color: DARK.accent },
+  tileIconDark: { color: DARK.accent },
+  timeRowDark: { borderBottomColor: DARK.border },
   tealHeadPad: { paddingTop: 30 },
   brand: {
     fontFamily: F.sans,

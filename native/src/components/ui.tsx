@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { C, F, S } from '../lib/theme';
+import { DARK, useAppTheme } from '../lib/appTheme';
 
 export function Card({
   children,
@@ -68,6 +69,7 @@ export function PillButton({
   block?: boolean;
   style?: object;
 }) {
+  const { animations } = useAppTheme();
   const btnStyle =
     variant === 'primary'
       ? styles.btnPrimary
@@ -94,7 +96,7 @@ export function PillButton({
         block && styles.btnBlock,
         btnStyle,
         (disabled || busy) && styles.btnDisabled,
-        pressed && styles.btnPressed,
+        pressed && animations && styles.btnPressed,
         style,
       ]}
       accessibilityRole="button"
@@ -137,6 +139,7 @@ export function Chip({
   tone?: 'teal' | 'peach' | 'red' | 'muted';
 }) {
   const isOn = !!selected;
+  const { animations } = useAppTheme();
   const toneBg =
     tone === 'peach' ? C.peach : tone === 'red' ? C.missedBg : tone === 'muted' ? C.ice : C.white;
   const toneText =
@@ -149,7 +152,7 @@ export function Chip({
         styles.chip,
         { backgroundColor: isOn ? C.teal700 : toneBg },
         isOn && styles.chipOn,
-        pressed && onPress && styles.pressed,
+        pressed && onPress && animations && styles.pressed,
       ]}
       accessibilityRole={onPress ? 'button' : undefined}
       accessibilityState={selected !== undefined ? { selected } : undefined}
@@ -217,20 +220,32 @@ export function Tile({
   icon,
   onPress,
   peach = false,
+  dark = false,
 }: {
   label: string;
   icon: ReactNode;
   onPress: () => void;
   peach?: boolean;
+  /** Dark-theme variant: dark teal card, light label. */
+  dark?: boolean;
 }) {
+  const { animations } = useAppTheme();
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.tile, pressed && styles.tilePressed]}
+      style={({ pressed }) => [
+        styles.tile,
+        dark && styles.tileDark,
+        pressed && animations && styles.tilePressed,
+      ]}
       accessibilityRole="button"
     >
-      <View style={[styles.tileIcon, peach && styles.tileIconPeach]}>{icon}</View>
-      <Text style={styles.tileLabel}>{label}</Text>
+      <View
+        style={[styles.tileIcon, peach && styles.tileIconPeach, dark && !peach && styles.tileIconDark]}
+      >
+        {icon}
+      </View>
+      <Text style={[styles.tileLabel, dark && styles.tileLabelDark]}>{label}</Text>
     </Pressable>
   );
 }
@@ -277,6 +292,7 @@ export function StatusPill({
   label?: string;
   onPress?: () => void;
 }) {
+  const { animations } = useAppTheme();
   const norm = state === 'none' ? 'not-yet' : state;
   const text =
     label ??
@@ -307,7 +323,7 @@ export function StatusPill({
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.statusPill, style, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.statusPill, style, pressed && animations && styles.pressed]}
       accessibilityRole="button"
     >
       <Text style={textStyle}>{text}</Text>
@@ -342,11 +358,11 @@ export function Input(props: TextInputProps) {
   );
 }
 
-export function EmptyState({ title, body }: { title: string; body?: string }) {
+export function EmptyState({ title, body, dark = false }: { title: string; body?: string; dark?: boolean }) {
   return (
     <View style={styles.empty}>
-      <Text style={styles.emptyTitle}>{title}</Text>
-      {body ? <Text style={styles.emptyBody}>{body}</Text> : null}
+      <Text style={[styles.emptyTitle, dark && styles.emptyTitleDark]}>{title}</Text>
+      {body ? <Text style={[styles.emptyBody, dark && styles.emptyBodyDark]}>{body}</Text> : null}
     </View>
   );
 }
@@ -446,6 +462,9 @@ const styles = StyleSheet.create({
     minHeight: 86,
   },
   tilePressed: { transform: [{ scale: 0.94 }] },
+  tileDark: { backgroundColor: DARK.card, borderColor: DARK.border },
+  tileIconDark: { backgroundColor: DARK.chip },
+  tileLabelDark: { color: DARK.text },
   tileIcon: {
     width: 42,
     height: 42,
@@ -528,5 +547,7 @@ const styles = StyleSheet.create({
     marginBottom: S.gap,
   },
   emptyTitle: { fontFamily: F.sans, fontSize: 15, fontWeight: '700', color: C.ink },
+  emptyTitleDark: { color: DARK.text },
   emptyBody: { fontFamily: F.sans, fontSize: 13, color: C.muted, marginTop: 4, lineHeight: 18 },
+  emptyBodyDark: { color: DARK.muted },
 });

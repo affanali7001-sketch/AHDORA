@@ -22,8 +22,17 @@ import { apiFetch, changePassword } from '../lib/api';
 import type { ScreenProps } from '../lib/nav';
 import { stringsFor, type AppLanguage } from '../lib/strings';
 import { loadMinimal, saveMinimal } from '../lib/minimal';
+import {
+  DARK,
+  setAnimationsPref,
+  setHomeGreetingPref,
+  setSplashGreetingPref,
+  setThemePref,
+  useAppTheme,
+  type ThemePref,
+} from '../lib/appTheme';
 import { C, L, T } from '../lib/theme';
-import { Card, Input, PillButton, Switch } from '../components/ui';
+import { Card, Input, PillButton, SegmentedControl, Switch } from '../components/ui';
 import TutorialVideo from '../components/TutorialVideo';
 import { HOW_TO_USE_VIDEO_URL } from '../lib/videos';
 import {
@@ -78,6 +87,7 @@ function eduDetail(profile: ProfileData | null): string {
 export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProps) {
   const s = stringsFor(lang);
   const ms = STRINGS[lang];
+  const th = useAppTheme();
   const uid = user?.id ?? 'anon';
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -238,8 +248,10 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
           <Text style={styles.avatarText}>{initial}</Text>
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={T.h2}>{user?.name ?? ''}</Text>
-          {subParts.length > 0 ? <Text style={T.sub}>{subParts.join(' · ')}</Text> : null}
+          <Text style={[T.h2, th.dark && styles.textDark]}>{user?.name ?? ''}</Text>
+          {subParts.length > 0 ? (
+            <Text style={[T.sub, th.dark && styles.mutedDark]}>{subParts.join(' · ')}</Text>
+          ) : null}
         </View>
       </View>
 
@@ -253,50 +265,86 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
           <PillButton label={s.pfNamazEdit} variant="ghost" block onPress={() => goTo('prayer')} />
 
           {/* Settings */}
-          <Card>
-            <Text style={T.cardTitle}>{s.pfSettings}</Text>
-            <View style={styles.row}>
+          <Card style={th.dark ? styles.cardDark : undefined}>
+            <Text style={[T.cardTitle, th.dark && styles.textDark]}>{s.pfSettings}</Text>
+            <View style={[styles.row, th.dark && styles.rowDark]}>
               <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>{s.pfUninstallT}</Text>
-                <Text style={styles.rowSub}>{s.pfUninstallS}</Text>
+                <Text style={[styles.rowLabel, th.dark && styles.textDark]}>{s.pfUninstallT}</Text>
+                <Text style={[styles.rowSub, th.dark && styles.mutedDark]}>{s.pfUninstallS}</Text>
               </View>
               <Switch value={uninstall} onValueChange={(v) => void toggleUninstall(v)} />
             </View>
-            <Text style={styles.honestNote}>{s.pfUninstallNote}</Text>
-            <View style={styles.row}>
+            <Text style={[styles.honestNote, th.dark && styles.mutedDark]}>{s.pfUninstallNote}</Text>
+            <View style={[styles.row, th.dark && styles.rowDark]}>
               <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>{ms.minimalT}</Text>
-                <Text style={styles.rowSub}>{ms.minimalS}</Text>
+                <Text style={[styles.rowLabel, th.dark && styles.textDark]}>{ms.minimalT}</Text>
+                <Text style={[styles.rowSub, th.dark && styles.mutedDark]}>{ms.minimalS}</Text>
               </View>
               <Switch value={minimal} onValueChange={(v) => void toggleMinimal(v)} />
             </View>
-            <View style={styles.row}>
+            {/* Display — theme, animations, greetings */}
+            <Text style={[styles.sectionLabel, th.dark && styles.textDark]}>{s.setDisplay}</Text>
+            <View style={[styles.row, styles.columnRow, th.dark && styles.rowDark]}>
+              <Text style={[styles.rowLabel, th.dark && styles.textDark]}>{s.setTheme}</Text>
+              <Text style={[styles.rowSub, th.dark && styles.mutedDark]}>{s.setThemeSub}</Text>
+              <SegmentedControl<ThemePref>
+                options={[
+                  { label: s.setThemeLight, value: 'light' },
+                  { label: s.setThemeSystem, value: 'system' },
+                  { label: s.setThemeDark, value: 'dark' },
+                ]}
+                value={th.pref}
+                onChange={(v) => setThemePref(uid, v)}
+              />
+            </View>
+            <View style={[styles.row, th.dark && styles.rowDark]}>
               <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>{s.pfLangT}</Text>
-                <Text style={styles.rowSub}>
+                <Text style={[styles.rowLabel, th.dark && styles.textDark]}>{s.setAnim}</Text>
+                <Text style={[styles.rowSub, th.dark && styles.mutedDark]}>{s.setAnimSub}</Text>
+              </View>
+              <Switch value={th.animations} onValueChange={(v) => setAnimationsPref(uid, v)} />
+            </View>
+            <View style={[styles.row, th.dark && styles.rowDark]}>
+              <View style={styles.rowText}>
+                <Text style={[styles.rowLabel, th.dark && styles.textDark]}>{s.setSplash}</Text>
+                <Text style={[styles.rowSub, th.dark && styles.mutedDark]}>{s.setSplashSub}</Text>
+              </View>
+              <Switch value={th.splashGreeting} onValueChange={(v) => setSplashGreetingPref(uid, v)} />
+            </View>
+            <View style={[styles.row, th.dark && styles.rowDark]}>
+              <View style={styles.rowText}>
+                <Text style={[styles.rowLabel, th.dark && styles.textDark]}>{s.setHomeGreet}</Text>
+                <Text style={[styles.rowSub, th.dark && styles.mutedDark]}>{s.setHomeGreetSub}</Text>
+              </View>
+              <Switch value={th.homeGreeting} onValueChange={(v) => setHomeGreetingPref(uid, v)} />
+            </View>
+            <View style={[styles.row, th.dark && styles.rowDark]}>
+              <View style={styles.rowText}>
+                <Text style={[styles.rowLabel, th.dark && styles.textDark]}>{s.pfLangT}</Text>
+                <Text style={[styles.rowSub, th.dark && styles.mutedDark]}>
                   {lang === 'hi' ? 'Abhi: Hinglish · Badalne ke liye dabao.' : 'Currently: English · Tap to change.'}
                 </Text>
               </View>
               <PillButton label={s.pfLangBtn} small variant="ghost" onPress={() => goTo('language')} />
             </View>
-            <View style={styles.row}>
+            <View style={[styles.row, th.dark && styles.rowDark]}>
               <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>{s.pfNotifT}</Text>
-                <Text style={styles.rowSub}>{s.pfNotifS}</Text>
+                <Text style={[styles.rowLabel, th.dark && styles.textDark]}>{s.pfNotifT}</Text>
+                <Text style={[styles.rowSub, th.dark && styles.mutedDark]}>{s.pfNotifS}</Text>
               </View>
               <PillButton label={s.pfOpen} small variant="ghost" onPress={() => goTo('notifications')} />
             </View>
-            <View style={styles.row}>
+            <View style={[styles.row, th.dark && styles.rowDark]}>
               <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>{s.pfSupportT}</Text>
-                <Text style={styles.rowSub}>{s.pfSupportS}</Text>
+                <Text style={[styles.rowLabel, th.dark && styles.textDark]}>{s.pfSupportT}</Text>
+                <Text style={[styles.rowSub, th.dark && styles.mutedDark]}>{s.pfSupportS}</Text>
               </View>
               <PillButton label={s.pfSupportBtn} small variant="ghost" onPress={() => goTo('support')} />
             </View>
             <View style={[styles.row, { borderBottomWidth: 0 }]}>
               <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>{s.pfPassT}</Text>
-                <Text style={styles.rowSub}>{s.pfPassS}</Text>
+                <Text style={[styles.rowLabel, th.dark && styles.textDark]}>{s.pfPassT}</Text>
+                <Text style={[styles.rowSub, th.dark && styles.mutedDark]}>{s.pfPassS}</Text>
               </View>
               <PillButton
                 label={s.pfPassOpen}
@@ -312,8 +360,10 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
               the main flow. The "Forget password" link under the old
               password sends the reset email instead. */}
           {showPass ? (
-            <Card>
-              <Text style={[T.cardBody, { marginBottom: 12 }]}>{s.pfPassS}</Text>
+            <Card style={th.dark ? styles.cardDark : undefined}>
+              <Text style={[T.cardBody, { marginBottom: 12 }, th.dark && styles.mutedDark]}>
+                {s.pfPassS}
+              </Text>
               <Input
                 value={oldPass}
                 onChangeText={setOldPass}
@@ -350,16 +400,16 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
           ) : null}
 
           {/* Points & badges — real server totals */}
-          <Card>
-            <Text style={T.cardTitle}>{s.pfPoints}</Text>
-            <Text style={[T.cardBody, { marginTop: 6, lineHeight: 26 }]}>
+          <Card style={th.dark ? styles.cardDark : undefined}>
+            <Text style={[T.cardTitle, th.dark && styles.textDark]}>{s.pfPoints}</Text>
+            <Text style={[T.cardBody, { marginTop: 6, lineHeight: 26 }, th.dark && styles.mutedDark]}>
               ⭐ {rewards ? rewards.total : '—'} points
               {rewards && rewards.badges.length > 0 ? ` · 🏅 ${rewards.badges[0].title}` : ''}
             </Text>
             {rewards && rewards.badges.length === 0 ? (
-              <Text style={[T.cardBody, { marginTop: 2 }]}>{s.pfNoBadges}</Text>
+              <Text style={[T.cardBody, { marginTop: 2 }, th.dark && styles.mutedDark]}>{s.pfNoBadges}</Text>
             ) : null}
-            <Text style={[T.cardBody, { marginTop: 6 }]}>{s.pfPointsNote}</Text>
+            <Text style={[T.cardBody, { marginTop: 6 }, th.dark && styles.mutedDark]}>{s.pfPointsNote}</Text>
           </Card>
 
           {/* Log out — soft button, red text */}
@@ -376,6 +426,7 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
             disabled={loggingOut}
             style={({ pressed }) => [
               styles.logoutBtn,
+              th.dark && styles.logoutBtnDark,
               (loggingOut || pressed) && styles.logoutBtnDisabled,
             ]}
             accessibilityRole="button"
@@ -397,6 +448,7 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
             style={({ pressed }) => [
               styles.logoutBtn,
               styles.deleteBtn,
+              th.dark && styles.deleteBtnDark,
               pressed && styles.logoutBtnDisabled,
             ]}
             accessibilityRole="button"
@@ -404,8 +456,10 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
             <Text style={styles.deleteBtnText}>{s.pfDeleteOpen}</Text>
           </Pressable>
           {showDelete ? (
-            <Card>
-              <Text style={[T.cardBody, { marginBottom: 12 }]}>{s.pfDeleteHint}</Text>
+            <Card style={th.dark ? styles.cardDark : undefined}>
+              <Text style={[T.cardBody, { marginBottom: 12 }, th.dark && styles.mutedDark]}>
+                {s.pfDeleteHint}
+              </Text>
               <PillButton
                 label={s.pfExportBtn}
                 variant="ghost"
@@ -457,6 +511,23 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: C.line,
   },
+  rowDark: { borderBottomColor: DARK.border },
+  columnRow: { flexDirection: 'column', alignItems: 'stretch' },
+  sectionLabel: {
+    fontFamily: 'PlusJakartaSans',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    color: C.muted,
+    marginTop: 18,
+    marginBottom: 2,
+  },
+  cardDark: { backgroundColor: DARK.card, borderColor: DARK.border },
+  textDark: { color: DARK.text },
+  mutedDark: { color: DARK.muted },
+  logoutBtnDark: { backgroundColor: DARK.card, borderColor: DARK.border },
+  deleteBtnDark: { backgroundColor: DARK.card, borderColor: C.red },
   rowText: { flex: 1 },
   rowLabel: { fontFamily: 'PlusJakartaSans', fontSize: 14.5, fontWeight: '700', color: C.ink },
   rowSub: { fontFamily: 'PlusJakartaSans', fontSize: 12.5, color: C.muted, lineHeight: 18, marginTop: 2 },
