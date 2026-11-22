@@ -23,12 +23,13 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 import type { ScreenProps } from '../lib/nav';
 import { stringsFor } from '../lib/strings';
 import { C, F, L, T } from '../lib/theme';
-import { Card, EmptyState, PillButton } from '../components/ui';
+import { Card, Chip, EmptyState, PillButton } from '../components/ui';
 import {
   fetchHijriEvents,
   fetchHijriMonth,
   fetchHijriToday,
   type HijriDay,
+  type HijriEvent,
   type HijriEventsResponse,
   type HijriMonth,
   type HijriToday,
@@ -81,6 +82,12 @@ export default function HijriScreen({ lang }: ScreenProps) {
   const [today, setToday] = useState<HijriToday | null>(null);
   const [months, setMonths] = useState<HijriMonth[]>([]);
   const [eventsData, setEventsData] = useState<HijriEventsResponse | null>(null);
+  // Year browsing (user request 2026-11-22): any year 2026–2050
+  // can be picked; the list below shows THAT year's big days.
+  // Defaults to the year of the next upcoming event.
+  const [eventYear, setEventYear] = useState<number | null>(null);
+  const [yearEvents, setYearEvents] = useState<HijriEvent[] | null>(null);
+  const [yearLoading, setYearLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -117,6 +124,34 @@ export default function HijriScreen({ lang }: ScreenProps) {
   }, [year, month, s.loadFailed]);
 
   useEffect(load, [load]);
+
+  // Default the year picker to the year of the next big day.
+  useEffect(() => {
+    if (eventsData && eventsData.events.length > 0 && eventYear === null) {
+      const y = Number(eventsData.events[0].gregorianDate.slice(0, 4));
+      if (Number.isInteger(y)) setEventYear(y);
+    }
+  }, [eventsData, eventYear]);
+
+  // Fetch the picked year's big days (GET /api/hijri/events?year=).
+  useEffect(() => {
+    if (eventYear === null) return;
+    let active = true;
+    setYearLoading(true);
+    fetchHijriEvents(eventYear)
+      .then((res) => {
+        if (active) setYearEvents(res.events);
+      })
+      .catch(() => {
+        if (active) setYearEvents(null);
+      })
+      .finally(() => {
+        if (active) setYearLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [eventYear]);
 
   const currentMonth = months[0] ?? null;
 
@@ -161,20 +196,21 @@ export default function HijriScreen({ lang }: ScreenProps) {
 
   const todayIso = today?.gregorian.date ?? '';
 
-  // Big days, in order. Preferred source: /api/hijri/events (14
-  // months of real Aladhan markers). Fallback: the holidays in the
-  // loaded months (current + next 2) — it can only see a few months
-  // ahead, so Ramadan/Eid/Bakrid may be missing from it.
+  const mapEvent = (event: HijriEvent): DisplayEvent => ({
+    key: event.key,
+    name: EVENT_NAMES[event.key]?.[lang] ?? event.label,
+    hijriDate: `${event.hijriDay} ${event.hijriMonth} ${event.hijriYear}`,
+    gregorianDate: gregShort(event.gregorianDate),
+    daysUntil: event.daysUntil,
+  });
+
+  // Big days, in order. Preferred source: the picked year's
+  // /api/hijri/events?year= response. Fallback: the holidays in
+  // the loaded months (current + next 2) — it can only see a few
+  // months ahead, so Ramadan/Eid/Bakrid may be missing from it.
   const displayEvents: DisplayEvent[] = useMemo(() => {
-    if (eventsData) {
-      return eventsData.events.map((event) => ({
-        key: event.key,
-        name: EVENT_NAMES[event.key]?.[lang] ?? event.label,
-        hijriDate: `${event.hijriDay} ${event.hijriMonth} ${event.hijriYear}`,
-        gregorianDate: gregShort(event.gregorianDate),
-        daysUntil: event.daysUntil,
-      }));
-    }
+    if (yearEvents) return yearEvents.map(mapEvent);
+    if (eventsData) return eventsData.events.map(mapEvent);
     const seen = new Set<string>();
     const out: DisplayEvent[] = [];
     for (const md of months) {
@@ -196,13 +232,21 @@ export default function HijriScreen({ lang }: ScreenProps) {
       }
     }
     return out.slice(0, 5);
-  }, [eventsData, months, lang, todayIso]);
+  }, [yearEvents, eventsData, months, lang, todayIso]);
 
-  const nextEvent = displayEvents[0] ?? null;
-  const followingEvents = displayEvents.slice(1);
+  // Hero: the very next big day — from the default /events call,
+  // so it never changes when the user browses another year. The
+  // list below shows the picked year's events (all of them).
+  const heroEvent: DisplayEvent | null =
+    eventsData && eventsData.events[0] ? mapEvent(eventsData.events[0]) : displayEvents[0] ?? null;
+  const yearList = displayEvents;
+
+  // Year picker: current year through 2050.
+  const yearOptions = Array.from({ length: 25 }, (_, i) => year + i);
 
   const countdownText = (daysUntil: number): string => {
-    if (daysUntil <= 0) return s.hijriTodayEvent;
+    if (daysUntil < 0) return s.hijriPast;
+    if (daysUntil === 0) return s.hijriTodayEvent;
     if (daysUntil === 1) return s.hijriTomorrow;
     return s.hijriDaysLeft.replace('{n}', String(daysUntil));
   };
@@ -223,15 +267,15 @@ export default function HijriScreen({ lang }: ScreenProps) {
       <Text style={T.title}>{s.hijriTitle}</Text>
       <Text style={[T.sub, { marginBottom: 14 }]}>{s.hijriSub}</Text>
 
-      {nextEvent ? (
+      {heroEvent ? (
         <View style={styles.hero}>
           <Text style={styles.heroLabel}>{s.hijriBigDays}</Text>
-          <Text style={styles.heroName}>{nextEvent.name}</Text>
+          <Text style={styles.heroName}>{heroEvent.name}</Text>
           <Text style={styles.heroDate}>
-            {nextEvent.hijriDate} · {nextEvent.gregorianDate}
+            {heroEvent.hijriDate} · {heroEvent.gregorianDate}
           </Text>
           <View style={styles.heroCount}>
-            <Text style={styles.heroCountText}>{countdownText(nextEvent.daysUntil)}</Text>
+            <Text style={styles.heroCountText}>{countdownText(heroEvent.daysUntil)}</Text>
           </View>
         </View>
       ) : null}
@@ -292,11 +336,29 @@ export default function HijriScreen({ lang }: ScreenProps) {
             <Text style={[T.cardBody, { marginTop: 12 }]}>{s.hijriLiveNote}</Text>
           </Card>
 
-          {displayEvents.length > 1 ? (
-            <Card>
-              <Text style={T.cardTitle}>{s.hijriEvents}</Text>
+          <Card>
+            <Text style={T.cardTitle}>
+              {eventYear ? s.hijriYearEvents.replace('{n}', String(eventYear)) : s.hijriEvents}
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.yearRow}
+            >
+              {yearOptions.map((y) => (
+                <Chip
+                  key={y}
+                  label={String(y)}
+                  selected={eventYear === y}
+                  onPress={() => setEventYear(y)}
+                />
+              ))}
+            </ScrollView>
+            {yearLoading ? (
+              <ActivityIndicator color={C.teal} style={{ marginVertical: 16 }} />
+            ) : yearList.length > 0 ? (
               <View style={{ marginTop: 8 }}>
-                {followingEvents.map((event) => (
+                {yearList.map((event) => (
                   <View key={`${event.key}|${event.gregorianDate}`} style={styles.eventRow}>
                     <View style={styles.eventLeft}>
                       <Text style={styles.eventLabel}>{event.name}</Text>
@@ -312,13 +374,10 @@ export default function HijriScreen({ lang }: ScreenProps) {
                   </View>
                 ))}
               </View>
-            </Card>
-          ) : displayEvents.length === 0 ? (
-            <Card>
-              <Text style={T.cardTitle}>{s.hijriEvents}</Text>
+            ) : (
               <Text style={[T.cardBody, { marginTop: 6 }]}>{s.hijriNoEvents}</Text>
-            </Card>
-          ) : null}
+            )}
+          </Card>
         </View>
       ) : null}
 
@@ -448,6 +507,7 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingVertical: 7,
   },
+  yearRow: { flexDirection: 'row', gap: 6, paddingVertical: 10 },
   eventLeft: { flex: 1 },
   eventLabel: {
     fontFamily: F.sans,

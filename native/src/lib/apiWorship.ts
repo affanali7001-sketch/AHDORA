@@ -300,11 +300,15 @@ export type HijriEventsResponse = {
   convention: string;
   today: string;
   adjustmentDays: number;
+  /** Present only in ?year= mode. */
+  year?: number;
   events: HijriEvent[];
 };
 
-export async function fetchHijriEvents(): Promise<HijriEventsResponse> {
-  return requestLive<HijriEventsResponse>('/api/hijri/events');
+/** No year → next occurrence of each key day. With a year → that whole Gregorian year (2028, 2029 … 2050). */
+export async function fetchHijriEvents(year?: number): Promise<HijriEventsResponse> {
+  const query = year ? `?year=${year}` : '';
+  return requestLive<HijriEventsResponse>(`/api/hijri/events${query}`);
 }
 
 export type Mosque = {

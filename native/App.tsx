@@ -56,6 +56,7 @@ import LifeAyahsScreen from './src/screens/LifeAyahs';
 import DuasScreen from './src/screens/Duas';
 import TasbeehScreen from './src/screens/Tasbeeh';
 import HijriScreen from './src/screens/Hijri';
+import IslamicCalendarScreen from './src/screens/IslamicCalendar';
 import MosqueScreen from './src/screens/Mosque';
 import StudyScreen from './src/screens/Study';
 import FocusScreen from './src/screens/Focus';
@@ -315,6 +316,8 @@ function renderScreen(screen: ScreenId, props: ScreenProps) {
       return <TasbeehScreen {...props} />;
     case 'hijri':
       return <HijriScreen {...props} />;
+    case 'islamic-calendar':
+      return <IslamicCalendarScreen {...props} />;
     case 'mosque':
       return <MosqueScreen {...props} />;
     case 'study':

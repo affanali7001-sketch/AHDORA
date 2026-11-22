@@ -126,6 +126,8 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
     { id: 'sleep', label: s.tileSleep, icon: '😴' },
     { id: 'challenges', label: s.tileChallenges, icon: '🏆', peach: true },
     { id: 'salahCalendar', label: s.calTile, icon: '📅' },
+    { id: 'hijri', label: s.tileHijri, icon: '🌙' },
+    { id: 'islamic-calendar', label: s.tileIslamicCal, icon: '🕌', peach: true },
     { id: 'analytics', label: s.tileAnalytics, icon: '📈' },
   ];
 

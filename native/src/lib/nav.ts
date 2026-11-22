@@ -22,6 +22,7 @@ export type ScreenId =
   | 'prayer'
   | 'salahCalendar'
   | 'hijri'
+  | 'islamic-calendar'
   | 'quran'
   | 'reader'
   | 'para'
