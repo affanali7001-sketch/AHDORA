@@ -8,6 +8,7 @@ import { EmailToken } from '../models/EmailToken.js';
 import {
   clearSessionCookie,
   createSession,
+  extractSessionToken,
   hashSessionToken,
   pruneExpiredSessions,
   revokeAllSessions,
@@ -101,7 +102,7 @@ authRouter.post('/signup', strictAuthLimiter, async (req, res, next) => {
     if (existing) { res.status(409).json({ error: 'Unable to create account with these details' }); return; }
     const passwordHash = await hashPassword(password);
     const user = await User.create({ name, email, passwordHash });
-    await createSession(String(user._id), req, res);
+    const sessionToken = await createSession(String(user._id), req, res);
     await createNotification(String(user._id), {
       type: 'system',
       ...welcome(name),
@@ -141,6 +142,10 @@ authRouter.post('/signup', strictAuthLimiter, async (req, res, next) => {
     }
     res.status(201).json({
       user: publicUser(user),
+      // The native app cannot read the Set-Cookie header (Hermes
+      // hides it), so it needs the token in the body — see
+      // extractSessionToken in lib/session.ts. The web app ignores it.
+      sessionToken,
       verificationEmailSent,
       notice: verificationEmailSent
         ? 'Verify your email from the link we just sent you.'
@@ -159,8 +164,11 @@ authRouter.post('/login', strictAuthLimiter, async (req, res, next) => {
     const valid = user ? await argon2.verify(user.passwordHash, parsed.data.password).catch(() => false) : false;
     if (!user || !valid) { res.status(401).json({ error: 'Invalid email or password' }); return; }
     // Session rotation: every previous session is invalidated on login.
-    await rotateSession(String(user._id), req, res);
-    res.json({ user: publicUser(user) });
+    const sessionToken = await rotateSession(String(user._id), req, res);
+    // The native app cannot read the Set-Cookie header (Hermes
+    // hides it), so it needs the token in the body — see
+    // extractSessionToken in lib/session.ts. The web app ignores it.
+    res.json({ user: publicUser(user), sessionToken });
   } catch (error) { next(error); }
 });
 
@@ -168,7 +176,9 @@ authRouter.get('/me', requireAuth, (req, res) => res.json({ user: req.authUser }
 
 authRouter.post('/logout', requireAuth, async (req, res, next) => {
   try {
-    const token = req.cookies?.[config.SESSION_COOKIE_NAME];
+    // Accept the token from either transport (cookie or Bearer),
+    // so the native app can revoke the session it holds.
+    const token = extractSessionToken(req);
     if (typeof token === 'string') await Session.deleteOne({ tokenHash: hashSessionToken(token) });
     clearSessionCookie(res);
     res.status(204).end();

@@ -1,6 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
-import { config } from '../config.js';
-import { resolveSessionUser } from '../lib/session.js';
+import { extractSessionToken, resolveSessionUser } from '../lib/session.js';
 
 declare global {
   namespace Express {
@@ -10,7 +9,7 @@ declare global {
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
-    const token = req.cookies?.[config.SESSION_COOKIE_NAME];
+    const token = extractSessionToken(req);
     if (typeof token !== 'string') {
       res.status(401).json({ error: 'Authentication required' });
       return;
@@ -38,7 +37,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
  */
 export async function optionalAuth(req: Request, res: Response, next: NextFunction) {
   try {
-    const token = req.cookies?.[config.SESSION_COOKIE_NAME];
+    const token = extractSessionToken(req);
     if (typeof token === 'string') {
       const user = await resolveSessionUser(token);
       if (user) req.authUser = user;
