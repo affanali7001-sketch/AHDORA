@@ -1,4 +1,4 @@
-# DRAFT — do NOT commit yet. Prepared 2026-11-22 ~11:00 IST.
+# Fresh APK rebuild requested 2026-11-23 — rebuild current native-app HEAD. Prepared 2026-11-22 ~11:00 IST.
 # Purpose: build the real native AHDORA APK in GitHub Actions, with NO
 # Expo account / EXPO_TOKEN and NO EAS cloud build.
 #
