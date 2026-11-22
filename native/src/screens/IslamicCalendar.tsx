@@ -1,16 +1,19 @@
 /**
  * Islamic Calendar — the Urdu Hijri calendar (user request
- * 2026-11-22): a separate section named "Islamic Calendar" where
- * everything is written in Urdu — Hijri month names, Hijri dates
- * and all numbers in Urdu numerals (۰۱۲۳۴۵۶۷۸۹), with the
- * Gregorian date alongside in Urdu too. Same live Aladhan data as
- * the Hijri screen (GET /api/hijri/month), so the dates are real,
- * never invented — only the rendering is Urdu. Prev/Next month
- * buttons browse any month (including 2028, 2029 …), and "Aaj"
- * jumps back to the current month. Today is dark teal, Juma has a
- * peach border, days with a special day get a peach dot, and the
- * month's special days are listed below the grid with Urdu names.
- * Urdu text uses Amiri (F.arabic), already loaded for the Quran.
+ * 2026-11-22), BILINGUAL (user correction 2026-11-22): every
+ * line is shown in Urdu AND in English/Hinglish, so a reader who
+ * does not know Urdu can still read it. Hijri month names, dates
+ * and numbers in Urdu numerals (۰۱۲۳۴۵۶۷۸۹) — and the same
+ * dates in English numerals (0123456789) with English/Hinglish
+ * month and day names right below. Same live Aladhan data as the
+ * Hijri screen (GET /api/hijri/month), so the dates are real,
+ * never invented — only the rendering is Urdu + English.
+ * Prev/Next month buttons browse any month (including 2028,
+ * 2029 …), and "Aaj · Today" jumps back to the current month.
+ * Today is dark teal, Juma has a peach border, days with a
+ * special day get a peach dot, and the month's special days are
+ * listed below the grid with Urdu + English names. Urdu text uses
+ * Amiri (F.arabic), already loaded for the Quran.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -65,8 +68,58 @@ const URDU_GREG_MONTHS = [
   'دسمبر',
 ];
 
+/** Gregorian months in English (for the non-Urdu reader). */
+const EN_GREG_MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
 /** Weekdays in Urdu, Sunday first (matches the grid's getDay()). */
 const URDU_WEEKDAYS = ['اتوار', 'پیر', 'منگل', 'بدھ', 'جمعرات', 'جمعہ', 'ہفتہ'];
+
+/** Weekdays in English, Sunday first. */
+const EN_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** Big-day names in English + Hinglish (same as the Hijri screen) —
+ * the non-Urdu reader reads these. */
+const EVENT_NAMES: Record<string, { en: string; hi: string }> = {
+  ramadan: { en: 'Ramadan', hi: 'Ramzan' },
+  'eid-fitr': { en: 'Eid-ul-Fitr', hi: 'Eid-ul-Fitr' },
+  'eid-adha': { en: 'Bakrid (Eid-ul-Adha)', hi: 'Bakrid (Eid-ul-Adha)' },
+  qadr: { en: 'Shab-e-Qadr', hi: 'Shab-e-Qadr' },
+  arafah: { en: 'Arafah', hi: 'Arafah' },
+  'new-year': { en: 'Islamic New Year', hi: 'Islami Naya Saal' },
+  ashura: { en: 'Ashura', hi: 'Ashura' },
+  mawlid: { en: 'Eid-e-Milad', hi: 'Eid-e-Milad' },
+  miraj: { en: 'Shab-e-Miraj', hi: 'Shab-e-Miraj' },
+  barat: { en: 'Shab-e-Barat', hi: 'Shab-e-Barat' },
+};
+
+/** Same matching as the server's matcher, returning the event key. */
+function holidayKey(holiday: string): string | null {
+  const h = holiday.toLowerCase();
+  if (h.includes('fitr')) return 'eid-fitr';
+  if (h.includes('adha')) return 'eid-adha';
+  if (h.includes('qadr')) return 'qadr';
+  if (h.includes('arafa')) return 'arafah';
+  if (h.includes('islamic new year')) return 'new-year';
+  if (h.includes('ashura')) return 'ashura';
+  if (h.includes("prophet's birthday") || h.includes('mawlid')) return 'mawlid';
+  if (h.includes("mi'raj") || h.includes('miraj') || h.includes('isra')) return 'miraj';
+  if (h.includes("bara'at") || h.includes('baraat')) return 'barat';
+  if (h.includes('ramadan')) return 'ramadan';
+  return null;
+}
 
 /** Urdu names for the big days (same matching as the server's matcher). */
 function urduHolidayName(holiday: string): string {
@@ -136,12 +189,34 @@ export default function IslamicCalendarScreen({ lang }: ScreenProps) {
   }, [monthData]);
 
   const gregHeader = `${URDU_GREG_MONTHS[view.month - 1]} ${urduNum(view.year)}`;
+  const gregHeaderEn = `${EN_GREG_MONTHS[view.month - 1]} ${view.year}`;
 
-  // Special days in this month, with Urdu names.
+  // English Hijri month(s) in this Gregorian month, for the non-Urdu reader.
+  const hijriHeaderEn = useMemo(() => {
+    if (!monthData) return '';
+    const seen: string[] = [];
+    for (const d of monthData.days) {
+      const label = `${d.hijri.month.en} ${d.hijri.year}`;
+      if (!seen.includes(label)) seen.push(label);
+    }
+    return seen.join(' – ');
+  }, [monthData]);
+
+  // Special days in this month, each with its Urdu AND its
+  // English/Hinglish name and dates — a reader who does not know
+  // Urdu must still understand the day.
   const monthEvents = useMemo(() => {
     if (!monthData) return [];
     const seen = new Set<string>();
-    const out: { key: string; name: string; hijriDate: string; gregDate: string }[] = [];
+    const out: {
+      key: string;
+      name: string;
+      nameEn: string;
+      hijriDate: string;
+      hijriDateEn: string;
+      gregDate: string;
+      gregDateEn: string;
+    }[] = [];
     for (const d of monthData.days) {
       for (const holiday of d.hijri.holidays) {
         const key = `${holiday}|${d.gregorian.date}`;
@@ -149,16 +224,20 @@ export default function IslamicCalendarScreen({ lang }: ScreenProps) {
         seen.add(key);
         const hijriMonth = URDU_HIJRI_MONTHS[d.hijri.month.number - 1] ?? d.hijri.month.en;
         const [y, m, day] = d.gregorian.date.split('-').map(Number);
+        const eventKey = holidayKey(holiday);
         out.push({
           key,
           name: urduHolidayName(holiday),
+          nameEn: eventKey && EVENT_NAMES[eventKey] ? EVENT_NAMES[eventKey][lang] : holiday,
           hijriDate: `${urduNum(d.hijri.day)} ${hijriMonth} ${urduNum(d.hijri.year)}`,
+          hijriDateEn: `${d.hijri.day} ${d.hijri.month.en} ${d.hijri.year}`,
           gregDate: `${urduNum(day)} ${URDU_GREG_MONTHS[(m ?? 1) - 1]} ${urduNum(y)}`,
+          gregDateEn: `${day} ${EN_GREG_MONTHS[(m ?? 1) - 1]} ${y}`,
         });
       }
     }
     return out;
-  }, [monthData]);
+  }, [monthData, lang]);
 
   const firstWeekday = new Date(view.year, view.month - 1, 1).getDay();
   const daysInMonth = new Date(view.year, view.month, 0).getDate();
@@ -198,9 +277,19 @@ export default function IslamicCalendarScreen({ lang }: ScreenProps) {
           <Card>
             <Text style={styles.hijriHeader}>{hijriHeader}</Text>
             <Text style={styles.gregHeader}>{gregHeader}</Text>
+            <Text style={styles.headerEn}>
+              {hijriHeaderEn} · {gregHeaderEn}
+            </Text>
             <View style={styles.weekRow}>
               {URDU_WEEKDAYS.map((day) => (
                 <Text key={day} style={styles.weekDay}>
+                  {day}
+                </Text>
+              ))}
+            </View>
+            <View style={styles.weekRowEn}>
+              {EN_WEEKDAYS.map((day) => (
+                <Text key={day} style={styles.weekDayEn}>
                   {day}
                 </Text>
               ))}
@@ -230,6 +319,11 @@ export default function IslamicCalendarScreen({ lang }: ScreenProps) {
                     <Text style={[styles.gregNum, isToday && styles.gregToday]}>
                       {urduNum(dayNum)}
                     </Text>
+                    <Text style={[styles.gregNumEn, isToday && styles.gregToday]}>
+                      {hijriDay
+                        ? `${hijriDay.hijri.day} · ${EN_GREG_MONTHS[view.month - 1]?.slice(0, 3)} ${dayNum}`
+                        : ''}
+                    </Text>
                     {hasEvent && !isToday ? <View style={styles.eventDot} /> : null}
                   </View>
                 );
@@ -244,7 +338,9 @@ export default function IslamicCalendarScreen({ lang }: ScreenProps) {
             </Pressable>
             {!isCurrentMonth ? (
               <Pressable onPress={goToday} style={[styles.navBtn, styles.navBtnToday]}>
-                <Text style={[styles.navBtnText, styles.navBtnTodayText]}>آج</Text>
+                <Text style={[styles.navBtnText, styles.navBtnTodayText]}>
+                  آج · {lang === 'hi' ? 'Aaj' : 'Today'}
+                </Text>
               </Pressable>
             ) : null}
             <Pressable onPress={() => goMonth(1)} style={styles.navBtn}>
@@ -259,8 +355,12 @@ export default function IslamicCalendarScreen({ lang }: ScreenProps) {
                 {monthEvents.map((event) => (
                   <View key={event.key} style={styles.eventRow}>
                     <Text style={styles.eventName}>{event.name}</Text>
+                    <Text style={styles.eventNameEn}>{event.nameEn}</Text>
                     <Text style={styles.eventDetail}>
                       {event.hijriDate} · {event.gregDate}
+                    </Text>
+                    <Text style={styles.eventDetailEn}>
+                      {event.hijriDateEn} · {event.gregDateEn}
                     </Text>
                   </View>
                 ))}
@@ -291,7 +391,15 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     marginTop: 2,
   },
-  weekRow: { flexDirection: 'row', marginTop: 12, marginBottom: 4 },
+  headerEn: {
+    fontFamily: F.sans,
+    fontSize: 13,
+    color: C.muted,
+    textAlign: 'right',
+    marginTop: 4,
+  },
+  weekRow: { flexDirection: 'row', marginTop: 12, marginBottom: 0 },
+  weekRowEn: { flexDirection: 'row', marginBottom: 4 },
   weekDay: {
     flex: 1,
     textAlign: 'center',
@@ -299,26 +407,35 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: C.muted,
-    paddingVertical: 4,
+    paddingVertical: 2,
+  },
+  weekDayEn: {
+    flex: 1,
+    textAlign: 'center',
+    fontFamily: F.sans,
+    fontSize: 10,
+    fontWeight: '700',
+    color: C.muted,
+    paddingVertical: 2,
   },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   cell: {
     width: '13.4%',
     flexGrow: 1,
-    aspectRatio: 1 / 1.08,
+    aspectRatio: 1 / 1.3,
     borderRadius: 10,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 1,
+    gap: 0,
     paddingVertical: 2,
   },
   cellEmpty: {
     width: '13.4%',
     flexGrow: 1,
-    aspectRatio: 1 / 1.08,
+    aspectRatio: 1 / 1.3,
   },
   cellJuma: { borderColor: C.peachMid, backgroundColor: C.peach2 },
   cellToday: { backgroundColor: C.teal700, borderColor: C.teal700 },
@@ -331,6 +448,12 @@ const styles = StyleSheet.create({
   gregNum: {
     fontFamily: F.arabic,
     fontSize: 10.5,
+    fontWeight: '600',
+    color: C.muted,
+  },
+  gregNumEn: {
+    fontFamily: F.sans,
+    fontSize: 9,
     fontWeight: '600',
     color: C.muted,
   },
@@ -383,11 +506,26 @@ const styles = StyleSheet.create({
     color: C.ink,
     textAlign: 'right',
   },
+  eventNameEn: {
+    fontFamily: F.sans,
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: C.ink,
+    textAlign: 'right',
+    marginTop: 1,
+  },
   eventDetail: {
     fontFamily: F.arabic,
     fontSize: 13,
     color: C.muted,
     marginTop: 2,
+    textAlign: 'right',
+  },
+  eventDetailEn: {
+    fontFamily: F.sans,
+    fontSize: 12.5,
+    color: C.muted,
+    marginTop: 1,
     textAlign: 'right',
   },
 });
