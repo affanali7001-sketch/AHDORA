@@ -1,10 +1,21 @@
 /**
  * Shared UI primitives for the AHDORA native app.
- * Clean, premium, spacious — Ice White / Deep Teal / Soft Peach, no gold.
+ * Rebuilt to the approved preview spec (~/workspace/ts-spaces/ahdora-ui-preview/index.html):
+ * Ice White / Deep Teal / Soft Peach, no gold. Pill buttons, chips, 52x32 switch,
+ * teal-head gradient, 3-col tile grid, segmented control, status pills, progress bar, fields.
  */
 import type { ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { C, S } from '../lib/theme';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type TextInputProps,
+} from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { C, F, S } from '../lib/theme';
 
 export function Card({
   children,
@@ -36,27 +47,37 @@ export function SectionTitle({
   );
 }
 
+export type PillButtonVariant = 'primary' | 'peach' | 'ghost' | 'soft' | 'dark';
+
 export function PillButton({
   label,
   onPress,
   variant = 'primary',
   disabled = false,
   busy = false,
+  small = false,
+  block = false,
+  style,
 }: {
   label: string;
   onPress: () => void;
-  variant?: 'primary' | 'peach' | 'ghost' | 'dark';
+  variant?: PillButtonVariant;
   disabled?: boolean;
   busy?: boolean;
+  small?: boolean;
+  block?: boolean;
+  style?: object;
 }) {
-  const style =
+  const btnStyle =
     variant === 'primary'
       ? styles.btnPrimary
       : variant === 'peach'
         ? styles.btnPeach
-        : variant === 'dark'
-          ? styles.btnDark
-          : styles.btnGhost;
+        : variant === 'ghost'
+          ? styles.btnGhost
+          : variant === 'soft'
+            ? styles.btnSoft
+            : styles.btnDark; // 'dark' kept only because Home.tsx uses it; preview has no dark button.
   const textStyle =
     variant === 'primary' || variant === 'dark'
       ? styles.btnTextLight
@@ -67,13 +88,21 @@ export function PillButton({
     <Pressable
       onPress={onPress}
       disabled={disabled || busy}
-      style={[styles.btn, style, (disabled || busy) && styles.btnDisabled]}
+      style={({ pressed }) => [
+        styles.btn,
+        small && styles.btnSmall,
+        block && styles.btnBlock,
+        btnStyle,
+        (disabled || busy) && styles.btnDisabled,
+        pressed && styles.btnPressed,
+        style,
+      ]}
       accessibilityRole="button"
     >
       {busy ? (
-        <ActivityIndicator color={variant === 'ghost' ? C.teal : C.white} />
+        <ActivityIndicator color={variant === 'ghost' || variant === 'soft' ? C.teal700 : C.white} />
       ) : (
-        <Text style={textStyle}>{label}</Text>
+        <Text style={[textStyle, small && styles.btnTextSmall]}>{label}</Text>
       )}
     </Pressable>
   );
@@ -82,7 +111,7 @@ export function PillButton({
 export function ProgressBar({
   value,
   max,
-  color = C.teal2,
+  color = C.teal500,
 }: {
   value: number;
   max: number;
@@ -107,23 +136,209 @@ export function Chip({
   onPress?: () => void;
   tone?: 'teal' | 'peach' | 'red' | 'muted';
 }) {
+  const isOn = !!selected;
   const toneBg =
-    tone === 'peach' ? C.peach2 : tone === 'red' ? '#FDECEC' : tone === 'muted' ? C.ice : '#E6F2F0';
+    tone === 'peach' ? C.peach : tone === 'red' ? C.missedBg : tone === 'muted' ? C.ice : C.white;
   const toneText =
-    tone === 'peach' ? C.peachDeep : tone === 'red' ? C.red : tone === 'muted' ? C.muted : C.teal;
+    tone === 'peach' ? C.peachInk : tone === 'red' ? C.red : tone === 'muted' ? C.muted : C.ink;
   return (
     <Pressable
       onPress={onPress}
       disabled={!onPress}
-      style={[
+      style={({ pressed }) => [
         styles.chip,
-        { backgroundColor: selected ? C.teal950 : toneBg },
+        { backgroundColor: isOn ? C.teal700 : toneBg },
+        isOn && styles.chipOn,
+        pressed && onPress && styles.pressed,
       ]}
       accessibilityRole={onPress ? 'button' : undefined}
       accessibilityState={selected !== undefined ? { selected } : undefined}
     >
-      <Text style={[styles.chipText, { color: selected ? C.white : toneText }]}>{label}</Text>
+      <Text style={[styles.chipText, { color: isOn ? C.white : toneText }]}>{label}</Text>
     </Pressable>
+  );
+}
+
+/** 52x32 switch (preview .switch): track #CBD8D1 off / teal500 on, white 26px knob. */
+export function Switch({
+  value,
+  onValueChange,
+  disabled = false,
+}: {
+  value: boolean;
+  onValueChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={() => onValueChange(!value)}
+      disabled={disabled}
+      style={[
+        styles.switchTrack,
+        { backgroundColor: value ? C.teal500 : C.switchOff },
+        disabled && styles.btnDisabled,
+      ]}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: value, disabled }}
+    >
+      <View style={[styles.switchKnob, value && styles.switchKnobOn]} />
+    </Pressable>
+  );
+}
+
+/** Dark teal header block (preview .teal-head): 160deg teal900→teal700 gradient, radius 24. */
+export function TealHead({
+  children,
+  style,
+}: {
+  children: ReactNode;
+  style?: object;
+}) {
+  return (
+    <LinearGradient
+      colors={[C.teal900, C.teal700]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 0.9, y: 1 }}
+      style={[styles.tealHead, style]}
+    >
+      {children}
+    </LinearGradient>
+  );
+}
+
+/** 3-column tile grid (preview .tiles). */
+export function TileGrid({ children }: { children: ReactNode }) {
+  return <View style={styles.tiles}>{children}</View>;
+}
+
+/** One tile (preview .tile): white card, 42px icon chip in teal100 (peach variant: peach bg). */
+export function Tile({
+  label,
+  icon,
+  onPress,
+  peach = false,
+}: {
+  label: string;
+  icon: ReactNode;
+  onPress: () => void;
+  peach?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.tile, pressed && styles.tilePressed]}
+      accessibilityRole="button"
+    >
+      <View style={[styles.tileIcon, peach && styles.tileIconPeach]}>{icon}</View>
+      <Text style={styles.tileLabel}>{label}</Text>
+    </Pressable>
+  );
+}
+
+/** Segmented control (preview .segmented): teal100 track, teal900 active pill. */
+export function SegmentedControl<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { label: string; value: T }[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <View style={styles.segmented}>
+      {options.map((opt) => {
+        const on = opt.value === value;
+        return (
+          <Pressable
+            key={opt.value}
+            onPress={() => onChange(opt.value)}
+            style={[styles.segmentBtn, on && styles.segmentBtnOn]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: on }}
+          >
+            <Text style={[styles.segmentText, on && styles.segmentTextOn]}>{opt.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+export type PrayerStatus = 'prayed' | 'missed' | 'qaza' | 'not-yet' | 'none';
+
+/** Status pill (preview .status-btn): prayed teal500/white, missed pink/red, qaza amber, not-yet plain. */
+export function StatusPill({
+  state,
+  label,
+  onPress,
+}: {
+  state: PrayerStatus;
+  label?: string;
+  onPress?: () => void;
+}) {
+  const norm = state === 'none' ? 'not-yet' : state;
+  const text =
+    label ??
+    (norm === 'prayed' ? 'Prayed' : norm === 'missed' ? 'Missed' : norm === 'qaza' ? 'Qaza' : 'Not yet');
+  const style =
+    norm === 'prayed'
+      ? styles.statusPrayed
+      : norm === 'missed'
+        ? styles.statusMissed
+        : norm === 'qaza'
+          ? styles.statusQaza
+          : styles.statusNotYet;
+  const textStyle =
+    norm === 'prayed'
+      ? styles.statusTextPrayed
+      : norm === 'missed'
+        ? styles.statusTextMissed
+        : norm === 'qaza'
+          ? styles.statusTextQaza
+          : styles.statusTextNotYet;
+  if (!onPress) {
+    return (
+      <View style={[styles.statusPill, style]}>
+        <Text style={textStyle}>{text}</Text>
+      </View>
+    );
+  }
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.statusPill, style, pressed && styles.pressed]}
+      accessibilityRole="button"
+    >
+      <Text style={textStyle}>{text}</Text>
+    </Pressable>
+  );
+}
+
+/** Field label (preview .field label): 12.5px bold teal700. */
+export function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <View style={styles.field}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      {children}
+    </View>
+  );
+}
+
+/** Text input (preview .field input): radius 16, 1.5px line border, 13px/16px padding, 15px text. */
+export function Input(props: TextInputProps) {
+  return (
+    <TextInput
+      placeholderTextColor={C.muted}
+      {...props}
+      style={[styles.input, props.style]}
+    />
   );
 }
 
@@ -142,43 +357,167 @@ const styles = StyleSheet.create({
     borderRadius: S.radius,
     borderWidth: 1,
     borderColor: C.line,
-    padding: 18,
+    padding: 16,
     marginBottom: S.gap,
   },
   sectionHead: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10, marginTop: 18 },
-  sectionTitle: { fontSize: 18, fontWeight: '800', color: C.ink },
-  sectionSub: { fontSize: 13, color: C.muted, marginTop: 2, lineHeight: 18 },
+  sectionTitle: { fontFamily: F.sans, fontSize: 19, fontWeight: '800', color: C.ink },
+  sectionSub: { fontFamily: F.sans, fontSize: 14, color: C.muted, marginTop: 4, lineHeight: 22 },
+  pressed: { transform: [{ scale: 0.96 }] },
   btn: {
     borderRadius: 999,
-    minHeight: 54,
+    minHeight: 50,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: 22,
+    paddingVertical: 13,
     marginBottom: 12,
   },
-  btnPrimary: { backgroundColor: C.teal },
-  btnPeach: { backgroundColor: C.peach },
-  btnDark: { backgroundColor: C.teal950 },
-  btnGhost: { backgroundColor: C.white, borderWidth: 1, borderColor: C.line },
+  btnSmall: { minHeight: 40, paddingHorizontal: 16, paddingVertical: 8 },
+  btnBlock: { width: '100%' },
+  btnPrimary: { backgroundColor: C.teal700 },
+  btnPeach: { backgroundColor: C.peachMid },
+  btnGhost: { backgroundColor: C.teal100 },
+  btnSoft: { backgroundColor: C.white, borderWidth: 1, borderColor: C.line },
+  btnDark: { backgroundColor: C.teal900 },
   btnDisabled: { opacity: 0.55 },
-  btnTextLight: { color: C.white, fontSize: 16, fontWeight: '800' },
-  btnTextPeach: { color: C.teal950, fontSize: 16, fontWeight: '800' },
-  btnTextGhost: { color: C.teal, fontSize: 16, fontWeight: '800' },
+  btnPressed: { transform: [{ scale: 0.96 }] },
+  btnTextLight: { fontFamily: F.sans, color: C.white, fontSize: 15, fontWeight: '800' },
+  btnTextPeach: { fontFamily: F.sans, color: C.peachText, fontSize: 15, fontWeight: '800' },
+  btnTextGhost: { fontFamily: F.sans, color: C.teal900, fontSize: 15, fontWeight: '800' },
+  btnTextSmall: { fontSize: 13.5 },
   progressTrack: {
     height: 8,
     borderRadius: 999,
-    backgroundColor: C.line,
+    backgroundColor: C.teal100,
     overflow: 'hidden',
   },
   progressFill: { height: '100%', borderRadius: 999 },
   chip: {
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: C.line,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     marginRight: 8,
     marginBottom: 8,
   },
-  chipText: { fontSize: 13, fontWeight: '700' },
+  chipOn: { borderColor: C.teal700 },
+  chipText: { fontFamily: F.sans, fontSize: 13, fontWeight: '700' },
+  switchTrack: {
+    width: 52,
+    height: 32,
+    borderRadius: 999,
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  switchKnob: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: C.white,
+    marginLeft: 3,
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  switchKnobOn: { transform: [{ translateX: 20 }] },
+  tealHead: {
+    borderRadius: S.radiusLg,
+    paddingHorizontal: 18,
+    paddingVertical: 20,
+    marginTop: 2,
+  },
+  tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
+  tile: {
+    flexGrow: 1,
+    flexBasis: '30%',
+    backgroundColor: C.white,
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 18,
+    paddingHorizontal: 8,
+    paddingTop: 14,
+    paddingBottom: 12,
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 86,
+  },
+  tilePressed: { transform: [{ scale: 0.94 }] },
+  tileIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: C.teal100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tileIconPeach: { backgroundColor: C.peach },
+  tileLabel: {
+    fontFamily: F.sans,
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: C.ink,
+    textAlign: 'center',
+  },
+  segmented: {
+    flexDirection: 'row',
+    backgroundColor: C.teal100,
+    borderRadius: 999,
+    padding: 5,
+    marginTop: 16,
+  },
+  segmentBtn: {
+    flex: 1,
+    borderRadius: 999,
+    paddingVertical: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  segmentBtnOn: { backgroundColor: C.teal900 },
+  segmentText: { fontFamily: F.sans, fontSize: 14.5, fontWeight: '800', color: C.teal900 },
+  segmentTextOn: { color: C.white },
+  statusPill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: C.line,
+    backgroundColor: C.white,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusPrayed: { backgroundColor: C.teal500, borderColor: C.teal500 },
+  statusMissed: { backgroundColor: C.missedBg, borderColor: C.missedBorder },
+  statusQaza: { backgroundColor: C.qazaBg, borderColor: C.qazaBorder },
+  statusNotYet: {},
+  statusTextPrayed: { fontFamily: F.sans, fontSize: 12, fontWeight: '800', color: C.white },
+  statusTextMissed: { fontFamily: F.sans, fontSize: 12, fontWeight: '800', color: C.red },
+  statusTextQaza: { fontFamily: F.sans, fontSize: 12, fontWeight: '800', color: C.amber },
+  statusTextNotYet: { fontFamily: F.sans, fontSize: 12, fontWeight: '800', color: C.muted },
+  field: { marginTop: 14 },
+  fieldLabel: {
+    fontFamily: F.sans,
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: C.teal700,
+    marginBottom: 6,
+    marginLeft: 4,
+  },
+  input: {
+    fontFamily: F.sans,
+    backgroundColor: C.white,
+    borderWidth: 1.5,
+    borderColor: C.line,
+    borderRadius: S.radiusSm,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    fontSize: 15,
+    color: C.ink,
+    minHeight: 50,
+  },
   empty: {
     backgroundColor: C.white,
     borderRadius: S.radius,
@@ -188,6 +527,6 @@ const styles = StyleSheet.create({
     padding: 18,
     marginBottom: S.gap,
   },
-  emptyTitle: { fontSize: 15, fontWeight: '700', color: C.ink },
-  emptyBody: { fontSize: 13, color: C.muted, marginTop: 4, lineHeight: 18 },
+  emptyTitle: { fontFamily: F.sans, fontSize: 15, fontWeight: '700', color: C.ink },
+  emptyBody: { fontFamily: F.sans, fontSize: 13, color: C.muted, marginTop: 4, lineHeight: 18 },
 });

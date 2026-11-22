@@ -1,71 +1,161 @@
 /**
  * Design system for the AHDORA native app.
  *
- * Palette (exact, approved): Ice White / Deep Teal / Soft Peach.
- * NO gold anywhere.
+ * Palette — EXACT preview tokens (~/workspace/ts-spaces/ahdora-ui-preview/index.html,
+ * phone vars, lines 84-86). Ice White / Deep Teal / Soft Peach. NO gold anywhere.
  */
 import { StyleSheet } from 'react-native';
 
 export const C = {
-  ice: '#F5F7F6',
+  ice: '#F4F8F6',
   white: '#FFFFFF',
-  ink: '#0E1A17',
-  muted: '#687A75',
-  teal950: '#06231F',
-  teal900: '#0A352F',
-  teal: '#0B4F4A',
-  teal2: '#0F766E',
-  peach: '#FFD9BE',
-  peach2: '#FFF1E3',
-  peachDeep: '#B45309',
-  red: '#E11D2E',
-  line: '#E6ECE9',
+  ink: '#152420',
+  muted: '#5E7267',
+  teal950: '#06302A',
+  teal900: '#07332E',
+  teal700: '#0B4A41',
+  teal500: '#0E7A64',
+  teal100: '#DDEEE8',
+  peach: '#FBD9BE',
+  peachMid: '#F6A96B',
+  peachInk: '#8A4416',
+  red: '#C2402E',
+  amber: '#B97A12',
+  line: '#E0EAE4',
+  // Preview extras.
+  switchOff: '#CBD8D1',
+  navInactive: '#BFD8CF',
+  peachText: '#4A2405',
+  missedBg: '#FADFD9',
+  missedBorder: '#F0B7AA',
+  qazaBg: '#FCE9C8',
+  qazaBorder: '#EBCB8B',
+  // Aliases kept for screens written before the redesign — same preview values.
+  teal: '#0B4A41', // = teal700
+  teal2: '#0E7A64', // = teal500
+  peach2: '#FDEBD9', // preview peach-soft
+  peachDeep: '#8A4416', // = peachInk
 } as const;
 
 export const S = {
-  pad: 20,
-  radius: 24,
-  radiusSm: 16,
+  pad: 18,
+  radius: 20, // card radius (preview .card)
+  radiusSm: 16, // input radius (preview .field input)
+  radiusLg: 24, // teal-head radius
   gap: 12,
+  screenTop: 52,
+  screenBottom: 108, // space for the pill nav
 } as const;
 
-/** Shared text styles. */
+/**
+ * Font families. Loaded in App.tsx via expo-font `useFonts` with the
+ * FontFamilyDefinition array form (SDK 58 docs), so one family name covers
+ * all weights and `fontWeight` selects the face.
+ * - sans: Plus Jakarta Sans 400/500/600/700/800 (@expo-google-fonts/plus-jakarta-sans)
+ * - arabic: Amiri 400/700 (@expo-google-fonts/amiri)
+ */
+export const F = {
+  sans: 'PlusJakartaSans',
+  arabic: 'Amiri',
+} as const;
+
+/** Shared text styles (preview typography: H1 26/800, H2 19/800, sub 14/1.55). */
 export const T = StyleSheet.create({
   eyebrow: {
+    fontFamily: F.sans,
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 2,
     color: C.muted,
     textTransform: 'uppercase',
   },
-  title: { fontSize: 28, fontWeight: '800', color: C.ink, letterSpacing: -0.5 },
-  sub: { fontSize: 15, color: C.muted, marginTop: 6, lineHeight: 21 },
-  cardTitle: { fontSize: 17, fontWeight: '800', color: C.ink },
-  cardBody: { fontSize: 14, color: C.muted, lineHeight: 20 },
-  label: { fontSize: 13, fontWeight: '700', color: C.ink, marginBottom: 6 },
-  error: { fontSize: 13, color: C.red, marginTop: 10, lineHeight: 18 },
-  note: { fontSize: 13, color: C.muted, textAlign: 'center', marginTop: 10, lineHeight: 18 },
+  title: {
+    fontFamily: F.sans,
+    fontSize: 26,
+    fontWeight: '800',
+    color: C.ink,
+    letterSpacing: -0.5,
+    lineHeight: 31,
+  },
+  h2: {
+    fontFamily: F.sans,
+    fontSize: 19,
+    fontWeight: '800',
+    color: C.ink,
+    letterSpacing: -0.2,
+  },
+  sub: {
+    fontFamily: F.sans,
+    fontSize: 14,
+    color: C.muted,
+    marginTop: 6,
+    lineHeight: 22, // 14 * 1.55
+  },
+  cardTitle: {
+    fontFamily: F.sans,
+    fontSize: 15.5,
+    fontWeight: '800',
+    color: C.ink,
+  },
+  cardBody: {
+    fontFamily: F.sans,
+    fontSize: 14,
+    color: C.muted,
+    lineHeight: 20,
+  },
+  label: {
+    fontFamily: F.sans,
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: C.teal700,
+    marginBottom: 6,
+  },
+  arabic: { fontFamily: F.arabic },
+  error: {
+    fontFamily: F.sans,
+    fontSize: 13,
+    color: C.red,
+    marginTop: 10,
+    lineHeight: 18,
+  },
+  note: {
+    fontFamily: F.sans,
+    fontSize: 13,
+    color: C.muted,
+    textAlign: 'center',
+    marginTop: 10,
+    lineHeight: 18,
+  },
 });
 
-/** Shared container / surface styles. */
+/** Shared container / surface styles (preview .screen / .card / .field input). */
 export const L = StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.ice },
-  scroll: { paddingHorizontal: S.pad, paddingTop: 24, paddingBottom: 120 },
-  scrollNoNav: { paddingHorizontal: S.pad, paddingTop: 24, paddingBottom: 40 },
+  scroll: {
+    paddingHorizontal: S.pad,
+    paddingTop: S.screenTop,
+    paddingBottom: S.screenBottom,
+  },
+  scrollNoNav: {
+    paddingHorizontal: S.pad,
+    paddingTop: S.screenTop,
+    paddingBottom: 40,
+  },
   card: {
     backgroundColor: C.white,
     borderRadius: S.radius,
     borderWidth: 1,
     borderColor: C.line,
-    padding: 18,
+    padding: 16,
   },
   input: {
+    fontFamily: F.sans,
     backgroundColor: C.white,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: C.line,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    borderRadius: S.radiusSm,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
     fontSize: 15,
     color: C.ink,
     marginBottom: 4,

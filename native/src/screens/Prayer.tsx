@@ -1,87 +1,102 @@
 /**
- * Prayer — today's prayer times from the live API, with
- * Prayed / Missed / Qaza marking (PUT /api/salah/day/:date) and the
- * manual time editor (per-prayer overrides + deadlines, saved to
- * the profile). Never assumes a prayer was prayed.
+ * Prayer — rebuilt to the approved preview (§7): title + real
+ * city · Asr method, ONE white card with 6 rows (Fajr, Sunrise,
+ * Dhuhr, Asr, Maghrib, Isha). Sunrise is displayed with no status
+ * button. Each prayer row has ONE small status pill that cycles on
+ * tap: Not yet → Prayed → Missed → Qaza → Prayed. (The server
+ * rejects a reset to "pending", so the cycle wraps from Qaza back
+ * to Prayed — exactly as the preview hint describes.) The next
+ * prayer row is highlighted peach with the "Agli" tag. The
+ * "Namaz ke time badlo" button goes to Onboarding (per preview),
+ * not to an inline editor.
  */
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
 import { stringsFor } from '../lib/strings';
-import { C, L, S, T } from '../lib/theme';
-import { Card, Chip, EmptyState, PillButton, SectionTitle } from '../components/ui';
+import { C, F, L, T } from '../lib/theme';
+import { Card, EmptyState, PillButton, StatusPill, type PrayerStatus } from '../components/ui';
 import {
-  fetchPrayerSettings,
   fetchPrayerTimes,
   fetchSalahDay,
   formatTime12h,
-  savePrayerSettings,
+  loadProfileWithCompletion,
   todayKey,
   updateSalahStatus,
-  PRAYER_NAMES,
   type PrayerName,
   type PrayerRecord,
-  type PrayerSettings,
   type PrayerTimesResponse,
   type SalahStatus,
 } from '../lib/apiCore';
 
-export default function PrayerScreen({ lang }: ScreenProps) {
+const CYCLE: Record<'prayed' | 'missed' | 'qaza', SalahStatus> = {
+  prayed: 'missed',
+  missed: 'qaza',
+  qaza: 'prayed',
+};
+
+function statusToPill(status: SalahStatus): PrayerStatus {
+  if (status === 'prayed') return 'prayed';
+  if (status === 'missed') return 'missed';
+  if (status === 'qaza') return 'qaza';
+  return 'not-yet';
+}
+
+type Row = { name: string; time: string; prayer: PrayerName | null };
+
+export default function PrayerScreen({ lang, user, goTo }: ScreenProps) {
   const s = stringsFor(lang);
   const today = todayKey();
   const [times, setTimes] = useState<PrayerTimesResponse | null>(null);
   const [day, setDay] = useState<PrayerRecord | null>(null);
+  const [asrMethod, setAsrMethod] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState<PrayerName | null>(null);
-
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [draft, setDraft] = useState<PrayerSettings | null>(null);
-  const [settingsLoading, setSettingsLoading] = useState(false);
-  const [savingTimes, setSavingTimes] = useState(false);
-  const [timesMessage, setTimesMessage] = useState('');
 
   const load = useCallback(() => {
     let active = true;
     setLoading(true);
     setError('');
-    Promise.allSettled([fetchPrayerTimes(today), fetchSalahDay(today)]).then(
-      ([timesResult, dayResult]) => {
-        if (!active) return;
-        if (timesResult.status === 'fulfilled') setTimes(timesResult.value);
-        if (dayResult.status === 'fulfilled') setDay(dayResult.value);
-        if (timesResult.status === 'rejected' && dayResult.status === 'rejected') {
-          setError(s.loadFailed);
-        } else if (timesResult.status === 'rejected') {
-          setError(
-            timesResult.reason instanceof Error ? timesResult.reason.message : s.loadFailed,
-          );
-        }
-        setLoading(false);
-      },
-    );
+    Promise.allSettled([
+      fetchPrayerTimes(today),
+      fetchSalahDay(today),
+      loadProfileWithCompletion(user?.name ?? ''),
+    ]).then(([timesResult, dayResult, profileResult]) => {
+      if (!active) return;
+      if (timesResult.status === 'fulfilled') setTimes(timesResult.value);
+      if (dayResult.status === 'fulfilled') setDay(dayResult.value);
+      if (
+        profileResult.status === 'fulfilled' &&
+        profileResult.value.profile?.asrMethod
+      ) {
+        setAsrMethod(profileResult.value.profile.asrMethod);
+      }
+      if (timesResult.status === 'rejected' && dayResult.status === 'rejected') {
+        setError(s.loadFailed);
+      } else if (timesResult.status === 'rejected') {
+        setError(
+          timesResult.reason instanceof Error ? timesResult.reason.message : s.loadFailed,
+        );
+      }
+      setLoading(false);
+    });
     return () => {
       active = false;
     };
-  }, [s.loadFailed, today]);
+  }, [s.loadFailed, today, user?.name]);
 
   useEffect(load, [load]);
 
-  async function mark(prayer: PrayerName, status: SalahStatus) {
+  async function cycleStatus(prayer: PrayerName) {
     if (saving) return;
-    if (status === 'pending') return;
+    const current = day?.[prayer].status ?? 'pending';
+    const nextStatus: SalahStatus =
+      current === 'pending' ? 'prayed' : CYCLE[current];
     setSaving(prayer);
     setError('');
     try {
-      const updated = await updateSalahStatus(today, prayer, status);
+      const updated = await updateSalahStatus(today, prayer, nextStatus);
       setDay(updated);
     } catch (e) {
       setError(e instanceof Error ? e.message : s.statusSaveFailed);
@@ -90,235 +105,93 @@ export default function PrayerScreen({ lang }: ScreenProps) {
     }
   }
 
-  async function openEditor() {
-    if (editorOpen) {
-      setEditorOpen(false);
-      return;
-    }
-    setEditorOpen(true);
-    setTimesMessage('');
-    if (draft) return;
-    setSettingsLoading(true);
-    try {
-      setDraft(await fetchPrayerSettings());
-    } catch (e) {
-      setTimesMessage(e instanceof Error ? e.message : s.settingsLoadFailed);
-    } finally {
-      setSettingsLoading(false);
-    }
-  }
-
-  async function saveTimes() {
-    if (!draft) return;
-    setSavingTimes(true);
-    setTimesMessage('');
-    try {
-      await savePrayerSettings(draft);
-      setTimesMessage(s.timesSaved);
-      const refreshed = await fetchPrayerTimes(today).catch(() => null);
-      if (refreshed) setTimes(refreshed);
-    } catch (e) {
-      setTimesMessage(e instanceof Error ? e.message : s.timesSaveFailed);
-    } finally {
-      setSavingTimes(false);
-    }
-  }
-
   function statusLabel(prayer: PrayerName): string {
     const entry = day?.[prayer];
     if (!entry) return s.statusPending;
-    if (entry.status === 'missed' && entry.autoMissed) return s.statusMissedAuto;
-    if (entry.status === 'qaza' && entry.wasMissed) return s.statusQazaWasMissed;
     if (entry.status === 'prayed') return s.statusPrayed;
     if (entry.status === 'missed') return s.statusMissed;
     if (entry.status === 'qaza') return s.statusQaza;
     return s.statusPending;
   }
 
-  function statusTone(prayer: PrayerName): 'teal' | 'red' | 'peach' | 'muted' {
-    const entry = day?.[prayer];
-    if (!entry) return 'muted';
-    if (entry.status === 'prayed') return 'teal';
-    if (entry.status === 'missed') return 'red';
-    if (entry.status === 'qaza') return 'peach';
-    return 'muted';
-  }
+  const rows: Row[] = times
+    ? [
+        { name: 'Fajr', time: times.perPrayer.Fajr?.time ?? times.timings.Fajr ?? '', prayer: 'Fajr' },
+        { name: 'Sunrise', time: times.timings.Sunrise ?? '', prayer: null },
+        { name: 'Dhuhr', time: times.perPrayer.Dhuhr?.time ?? times.timings.Dhuhr ?? '', prayer: 'Dhuhr' },
+        { name: 'Asr', time: times.perPrayer.Asr?.time ?? times.timings.Asr ?? '', prayer: 'Asr' },
+        { name: 'Maghrib', time: times.perPrayer.Maghrib?.time ?? times.timings.Maghrib ?? '', prayer: 'Maghrib' },
+        { name: 'Isha', time: times.perPrayer.Isha?.time ?? times.timings.Isha ?? '', prayer: 'Isha' },
+      ]
+    : [];
+
+  const subParts = [times?.city, asrMethod].filter(Boolean);
+  const sub = subParts.length > 0 ? subParts.join(' · ') : s.prayerSub;
 
   return (
     <ScrollView contentContainerStyle={L.scroll} showsVerticalScrollIndicator={false}>
-      <Text style={T.eyebrow}>{s.prayerTitle}</Text>
-      <Text style={[T.title, { marginTop: 6 }]}>{s.prayerTitle}</Text>
-      <Text style={[T.sub, { marginBottom: 18 }]}>{s.prayerSub}</Text>
+      <Text style={T.title}>{s.namazTitle}</Text>
+      <Text style={[T.sub, { marginBottom: 14 }]}>{sub}</Text>
 
       {loading ? (
         <ActivityIndicator color={C.teal} style={{ marginVertical: 24 }} />
       ) : times ? (
         <View>
           <Card>
-            <Text style={T.cardBody}>
-              {times.city}
-              {times.country ? `, ${times.country}` : ''} · {times.method}
-            </Text>
-            {times.notice ? (
-              <Text style={[T.cardBody, { marginTop: 6, color: C.peachDeep }]}>
-                {times.notice}
-              </Text>
-            ) : null}
+            {rows.map((row, index) => {
+              const isNext = row.prayer !== null && times.nextPrayer?.name === row.prayer;
+              const isLast = index === rows.length - 1;
+              return (
+                <View
+                  key={row.name}
+                  style={[
+                    styles.row,
+                    !isLast && !isNext && styles.rowBorder,
+                    isNext && styles.rowNext,
+                  ]}
+                >
+                  <Text style={[styles.rowName, isNext && styles.rowNextText]}>
+                    {row.name}
+                    {isNext ? ` · ${s.nextTag}` : ''}
+                  </Text>
+                  <Text style={[styles.rowTime, isNext && styles.rowNextText]}>
+                    {formatTime12h(row.time)}
+                  </Text>
+                  {row.prayer === null ? (
+                    <Text style={styles.rowDash}>—</Text>
+                  ) : saving === row.prayer ? (
+                    <ActivityIndicator color={C.teal} />
+                  ) : (
+                    <StatusPill
+                      state={statusToPill(day?.[row.prayer].status ?? 'pending')}
+                      label={statusLabel(row.prayer)}
+                      onPress={() => void cycleStatus(row.prayer as PrayerName)}
+                    />
+                  )}
+                </View>
+              );
+            })}
           </Card>
 
-          {PRAYER_NAMES.map((prayer) => {
-            const per = times.perPrayer[prayer];
-            const time = per?.time ?? times.timings[prayer] ?? '';
-            const deadline = per?.deadline ?? '';
-            const source = per?.source ?? 'calculated';
-            const entry = day?.[prayer];
-            const isNext = times.nextPrayer?.name === prayer;
-            return (
-              <Card key={prayer}>
-                <View style={styles.prayerHead}>
-                  <View>
-                    <Text style={styles.prayerName}>
-                      {prayer}
-                      {isNext ? ` · ${s.nextPrayer}` : ''}
-                    </Text>
-                    <Text style={styles.prayerTime}>{formatTime12h(time)}</Text>
-                    {deadline ? (
-                      <Text style={T.cardBody}>
-                        {s.deadline}: {formatTime12h(deadline)}
-                      </Text>
-                    ) : null}
-                  </View>
-                  <Chip
-                    label={
-                      source === 'manual'
-                        ? s.sourceManual
-                        : source === 'unavailable'
-                          ? s.sourceUnavailable
-                          : s.sourceCalculated
-                    }
-                    tone={statusTone(prayer)}
-                  />
-                </View>
-                <Text
-                  style={{
-                    fontSize: 14,
-                    fontWeight: '800',
-                    color:
-                      entry?.status === 'prayed'
-                        ? C.teal2
-                        : entry?.status === 'missed'
-                          ? C.red
-                          : entry?.status === 'qaza'
-                            ? C.peachDeep
-                            : C.muted,
-                    marginTop: 8,
-                    marginBottom: 10,
-                  }}
-                >
-                  {statusLabel(prayer)}
-                </Text>
-                <View style={styles.markRow}>
-                  {(['prayed', 'missed', 'qaza'] as SalahStatus[]).map((status) => (
-                    <Pressable
-                      key={status}
-                      onPress={() => mark(prayer, status)}
-                      disabled={saving === prayer}
-                      style={[
-                        styles.markBtn,
-                        entry?.status === status && styles.markBtnOn,
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: entry?.status === status }}
-                    >
-                      <Text
-                        style={[
-                          styles.markBtnText,
-                          entry?.status === status && styles.markBtnTextOn,
-                        ]}
-                      >
-                        {status === 'prayed'
-                          ? s.statusPrayed
-                          : status === 'missed'
-                            ? s.statusMissed
-                            : s.statusQaza}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-                {saving === prayer ? (
-                  <ActivityIndicator color={C.teal} style={{ marginTop: 8 }} />
-                ) : null}
-              </Card>
-            );
-          })}
+          <Text style={[T.note, { marginBottom: 16, textAlign: 'left' }]}>
+            {s.namazHint}
+          </Text>
 
-          <Text style={[T.note, { marginBottom: 16 }]}>{s.prayerTimesNote}</Text>
-
-          {/* Manual time editor */}
-          <SectionTitle title={s.editTimesTitle} sub={s.editTimesSub} />
           <PillButton
-            label={editorOpen ? s.cancel : s.editTimesTitle}
-            variant="ghost"
-            onPress={openEditor}
+            label={s.dashEditTimes}
+            variant="peach"
+            block
+            onPress={() => goTo('onboarding')}
           />
-          {editorOpen ? (
-            <Card>
-              {settingsLoading ? (
-                <ActivityIndicator color={C.teal} />
-              ) : draft ? (
-                <View>
-                  {PRAYER_NAMES.map((prayer) => (
-                    <View key={prayer} style={styles.editorBox}>
-                      <Text style={styles.prayerName}>{prayer}</Text>
-                      <Text style={T.label}>{s.timeOverride}</Text>
-                      <TextInput
-                        style={L.input}
-                        value={draft[prayer].timeOverride}
-                        onChangeText={(v) =>
-                          setDraft((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  [prayer]: { ...prev[prayer], timeOverride: v },
-                                }
-                              : prev,
-                          )
-                        }
-                        placeholder="HH:mm"
-                        placeholderTextColor={C.muted}
-                        autoCapitalize="none"
-                      />
-                      <Text style={T.label}>{s.endTime}</Text>
-                      <TextInput
-                        style={L.input}
-                        value={draft[prayer].endTime}
-                        onChangeText={(v) =>
-                          setDraft((prev) =>
-                            prev
-                              ? { ...prev, [prayer]: { ...prev[prayer], endTime: v } }
-                              : prev,
-                          )
-                        }
-                        placeholder="HH:mm"
-                        placeholderTextColor={C.muted}
-                        autoCapitalize="none"
-                      />
-                    </View>
-                  ))}
-                  <PillButton
-                    label={s.save}
-                    onPress={saveTimes}
-                    busy={savingTimes}
-                    disabled={savingTimes}
-                  />
-                </View>
-              ) : null}
-              {timesMessage ? <Text style={T.note}>{timesMessage}</Text> : null}
-            </Card>
-          ) : null}
+          <PillButton
+            label={s.namazCal}
+            variant="ghost"
+            block
+            onPress={() => goTo('salahCalendar')}
+          />
         </View>
       ) : (
-        <EmptyState title={s.prayerTitle} body={s.loadFailed} />
+        <EmptyState title={s.namazTitle} body={s.loadFailed} />
       )}
 
       {error ? <Text style={T.error}>{error}</Text> : null}
@@ -327,31 +200,42 @@ export default function PrayerScreen({ lang }: ScreenProps) {
 }
 
 const styles = StyleSheet.create({
-  prayerHead: {
+  row: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  prayerName: { fontSize: 17, fontWeight: '800', color: C.ink },
-  prayerTime: { fontSize: 22, fontWeight: '800', color: C.teal900, marginTop: 4 },
-  markRow: { flexDirection: 'row', gap: 8 },
-  markBtn: {
-    flex: 1,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: C.line,
-    backgroundColor: C.white,
-    paddingVertical: 10,
     alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 2,
   },
-  markBtnOn: { backgroundColor: C.teal950, borderColor: C.teal950 },
-  markBtnText: { fontSize: 13, fontWeight: '800', color: C.teal },
-  markBtnTextOn: { color: C.white },
-  editorBox: {
-    borderWidth: 1,
-    borderColor: C.line,
-    borderRadius: S.radiusSm,
-    padding: 12,
-    marginBottom: 12,
+  rowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: C.line,
+  },
+  rowNext: {
+    backgroundColor: C.peach,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+  },
+  rowNextText: { color: C.peachInk },
+  rowName: {
+    flex: 1,
+    fontFamily: F.sans,
+    fontSize: 15,
+    fontWeight: '700',
+    color: C.ink,
+  },
+  rowTime: {
+    fontFamily: F.sans,
+    fontSize: 15,
+    fontWeight: '800',
+    color: C.ink,
+  },
+  rowDash: {
+    fontFamily: F.sans,
+    fontSize: 13,
+    fontWeight: '700',
+    color: C.muted,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
   },
 });

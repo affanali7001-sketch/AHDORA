@@ -13,7 +13,9 @@ import type { AuthUser } from './api';
 
 export type ScreenId =
   | 'welcome'
+  | 'language'
   | 'login'
+  | 'signup'
   | 'onboarding'
   | 'home'
   | 'dashboard'
@@ -21,6 +23,7 @@ export type ScreenId =
   | 'salahCalendar'
   | 'hijri'
   | 'quran'
+  | 'reader'
   | 'lifeAyahs'
   | 'duas'
   | 'tasbeeh'

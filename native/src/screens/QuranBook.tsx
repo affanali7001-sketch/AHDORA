@@ -1,18 +1,22 @@
 /**
- * Quran Book — mushaf-style reader (THE centerpiece).
+ * Quran Book — mushaf-style reader (THE centerpiece), rebuilt to the
+ * approved preview (§10 landing, §11 reader).
  *
  * Real data only: Uthmani Arabic from AlQuran Cloud
  * (GET /v1/page/{n}, 1–604), Urdu translation text from the
- * Junagarhi edition, continuous tilawat audio from EveryAyah
- * (Mishary Rashid Alafasy) with the AlQuran Cloud CDN as fallback,
- * and Urdu tarjuma audio from Shamshad Ali Khan (ur.khan, Islamic
- * Network CDN, 64 kbps) — see src/lib/apiWorship.ts for the
- * verification notes. Nothing is invented.
+ * Junagarhi edition, English (Saheeh International) + transliteration
+ * from AlQuran Cloud (verified live 2026-11-22), continuous tilawat
+ * audio from EveryAyah (Mishary Rashid Alafasy) with the AlQuran
+ * Cloud CDN as fallback, and Urdu tarjuma audio from Shamshad Ali
+ * Khan (ur.khan, Islamic Network CDN, 64 kbps) — see
+ * src/lib/apiWorship.ts for the verification notes.
  *
  * Reading progress: ayahs opened today + daily target come from
  * the live API (/api/quran/history, /read, /target) and persist
- * per user. Pages read and minutes shown here are counted in this
- * session only and are labelled as such.
+ * per user. The server tracks AYAHS, not pages — so the big line
+ * shows the real ayah count and the goal in ayahs, honestly
+ * labelled. Page counts are never faked. Minutes are real time
+ * spent in the reader this session. Nothing is invented.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -21,12 +25,13 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
 import type { ScreenProps } from '../lib/nav';
-import type { AppLanguage } from '../lib/strings';
+import { stringsFor, type AppLanguage } from '../lib/strings';
+import { C, F, L, T } from '../lib/theme';
+import { Chip, Field, Input, PillButton, TealHead } from '../components/ui';
 import {
   ARABIC_SOURCE,
   TILAWAT_RECITER,
@@ -39,7 +44,6 @@ import {
   fetchSurahList,
   fetchUrduPage,
   recordRead,
-  setDailyTarget,
   tilawatFallbackUrl,
   urduAudioUrl,
   type MushafAyah,
@@ -49,207 +53,180 @@ import {
   type UrduAyah,
 } from '../lib/apiWorship';
 
-/** Ice White / Deep Teal / Soft Peach — the AHDORA palette. No gold. */
-const C = {
-  ice: '#F5F7F6',
-  white: '#FFFFFF',
-  ink: '#0E1A17',
-  muted: '#687A75',
-  teal950: '#06231F',
-  teal900: '#0A352F',
-  teal: '#0B4F4A',
-  teal2: '#0F766E',
-  peach: '#FFD9BE',
-  peach2: '#FFF1E3',
-  peachDeep: '#B45309',
-  red: '#E11D2E',
-  line: '#E6ECE9',
-};
-
 const TOTAL_PAGES = 604;
 const BISMILLAH = 'بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ';
+const ALQURAN_BASE = 'https://api.alquran.cloud/v1';
+/* Preview-mandated mushaf colours (preview §11, .mushaf / .mushaf-text /
+ * .ayah.playing) — the only hex values outside the foundation tokens. */
+const MUSHAF_BG = '#FFFDF6';
+const MUSHAF_INK = '#1C1A15';
+const PLAYING_BG = '#FFF4E6';
 
 const STRINGS: Record<
   AppLanguage,
   {
-    title: string;
-    subtitle: string;
     todayRead: string;
-    ayahsToday: string;
-    pagesSession: string;
-    minutesSession: string;
-    dailyGoal: string;
-    goalAyahs: string;
-    continueReading: string;
-    openBook: string;
-    markPageRead: string;
+    ayahsWord: string;
+    minutesWord: string;
+    goalWord: string;
+    noReadingYet: string;
+    lastRead: (surah: string, ayah: number) => string;
+    continueBtn: string;
+    note604: string;
     pageMarked: string;
     markFailed: string;
-    surahIndex: string;
-    searchSurahs: string;
-    pageOf: string;
-    prev: string;
-    next: string;
-    jumpTo: string;
-    go: string;
-    invalidPage: string;
-    listenTilawat: string;
-    listenUrdu: string;
-    stopAudio: string;
-    tilawatCredit: string;
-    urduAudioCredit: string;
-    urduText: string;
-    urduTextCredit: string;
-    showUrdu: string;
-    hideUrdu: string;
     loading: string;
     loadFailed: string;
-    retry: string;
-    back: string;
     historyUnavailable: string;
-    sessionOnly: string;
-    targetSaved: string;
-    setGoal: string;
-    ayahs: string;
     audioLoading: string;
     audioFailed: string;
-    source: string;
+    playerNote: string;
+    urduNote: string;
+    tilawatCredit: string;
+    urduAudioCredit: string;
+    tarjumaUnavailable: string;
     mecca: string;
     medina: string;
-    ayahWord: string;
+    aayatWord: string;
+    paraWord: string;
+    stopAudio: string;
   }
 > = {
   en: {
-    title: 'Quran Book',
-    subtitle: 'Read the mushaf, page by page.',
     todayRead: 'Aaj kitna padha',
-    ayahsToday: 'Ayahs today',
-    pagesSession: 'Pages (this session)',
-    minutesSession: 'Minutes (this session)',
-    dailyGoal: 'Daily goal',
-    goalAyahs: 'ayahs / day',
-    continueReading: 'Continue reading',
-    openBook: 'Open the Book',
-    markPageRead: 'Mark this page read',
+    ayahsWord: 'ayahs',
+    minutesWord: 'minute',
+    goalWord: 'Daily goal',
+    noReadingYet: 'Nothing read today yet.',
+    lastRead: (surah, ayah) => `Last read: Surah ${surah} · Ayah ${ayah}`,
+    continueBtn: 'Continue from where you left off →',
+    note604:
+      'The whole book — all 604 pages, with continuous recitation and Urdu translation voice, from authorized sources.',
     pageMarked: 'Page marked as read.',
     markFailed: 'Could not save. Try again.',
-    surahIndex: 'Surah index',
-    searchSurahs: 'Search surah…',
-    pageOf: 'Page',
-    prev: '← Prev',
-    next: 'Next →',
-    jumpTo: 'Jump to page (1–604)',
-    go: 'Go',
-    invalidPage: 'Page number must be 1–604.',
-    listenTilawat: '▶ Listen — Tilawat',
-    listenUrdu: '▶ Listen — Urdu tarjuma',
-    stopAudio: '■ Stop audio',
-    tilawatCredit: 'Tilawat: Mishary Rashid Alafasy (EveryAyah)',
-    urduAudioCredit: 'Urdu tarjuma voice: Shamshad Ali Khan (Islamic Network)',
-    urduText: 'Urdu tarjuma',
-    urduTextCredit: 'Urdu text: Muhammad Junagarhi',
-    showUrdu: 'Urdu tarjuma dikhao',
-    hideUrdu: 'Urdu tarjuma chhupao',
     loading: 'Loading…',
-    loadFailed: 'Page load nahi ho paya.',
-    retry: 'Dobara try karo',
-    back: '← Back',
-    historyUnavailable: 'Login karke padho — progress aapke account me save hoga.',
-    sessionOnly: 'Pages aur minutes sirf is session ke hain.',
-    targetSaved: 'Daily goal save ho gaya.',
-    setGoal: 'Goal badlo',
-    ayahs: 'ayahs',
-    audioLoading: 'Audio load ho raha hai…',
-    audioFailed: 'Audio nahi chal paya. Dobara try karo.',
-    source: 'Source',
+    loadFailed: 'Page could not be loaded.',
+    historyUnavailable: 'Log in and read — your progress will be saved in your account.',
+    audioLoading: 'Audio is loading…',
+    audioFailed: 'Audio could not play. Try again.',
+    playerNote: 'No pause after an ayah — from Bismillah to the last ayah in one flow.',
+    urduNote: 'Hear the meaning in Urdu — ayah by ayah, in the same flow.',
+    tilawatCredit: 'Recitation: Mishary Rashid Alafasy (EveryAyah)',
+    urduAudioCredit: 'Urdu translation voice: Shamshad Ali Khan (Islamic Network)',
+    tarjumaUnavailable:
+      'Translation could not be loaded — the Arabic text above is complete.',
     mecca: 'Meccan',
     medina: 'Medinan',
-    ayahWord: 'Ayah',
+    aayatWord: 'ayahs',
+    paraWord: 'Para',
+    stopAudio: 'Stop audio',
   },
   hi: {
-    title: 'Quran Book',
-    subtitle: 'Mushaf ko page by page padho.',
     todayRead: 'Aaj kitna padha',
-    ayahsToday: 'Aaj ki ayahs',
-    pagesSession: 'Pages (is session me)',
-    minutesSession: 'Minutes (is session me)',
-    dailyGoal: 'Roz ka goal',
-    goalAyahs: 'ayahs / din',
-    continueReading: 'Padhna jaari rakho',
-    openBook: 'Kitab kholo',
-    markPageRead: 'Is page ko padha hua mark karo',
+    ayahsWord: 'ayahs',
+    minutesWord: 'minute',
+    goalWord: 'Roz ka goal',
+    noReadingYet: 'Aaj abhi kuch padha nahi gaya.',
+    lastRead: (surah, ayah) => `Aakhri padha: Surah ${surah} · Ayah ${ayah}`,
+    continueBtn: 'Wahin se aage padho →',
+    note604:
+      'Poori kitaab — 604 pages, continuous tilawat aur Urdu tarjume ki voice ke saath, authorized sources se.',
     pageMarked: 'Page padha hua mark ho gaya.',
     markFailed: 'Save nahi ho paya. Dobara try karo.',
-    surahIndex: 'Surah index',
-    searchSurahs: 'Surah dhoondho…',
-    pageOf: 'Page',
-    prev: '← Pichla',
-    next: 'Agla →',
-    jumpTo: 'Page par jao (1–604)',
-    go: 'Jao',
-    invalidPage: 'Page number 1–604 ke beech hona chahiye.',
-    listenTilawat: '▶ Suno — Tilawat',
-    listenUrdu: '▶ Suno — Urdu tarjuma',
-    stopAudio: '■ Audio roko',
-    tilawatCredit: 'Tilawat: Mishary Rashid Alafasy (EveryAyah)',
-    urduAudioCredit: 'Urdu tarjuma awaaz: Shamshad Ali Khan (Islamic Network)',
-    urduText: 'Urdu tarjuma',
-    urduTextCredit: 'Urdu text: Muhammad Junagarhi',
-    showUrdu: 'Urdu tarjuma dikhao',
-    hideUrdu: 'Urdu tarjuma chhupao',
     loading: 'Load ho raha hai…',
     loadFailed: 'Page load nahi ho paya.',
-    retry: 'Dobara try karo',
-    back: '← Wapas',
     historyUnavailable: 'Login karke padho — progress aapke account me save hoga.',
-    sessionOnly: 'Pages aur minutes sirf is session ke hain.',
-    targetSaved: 'Roz ka goal save ho gaya.',
-    setGoal: 'Goal badlo',
-    ayahs: 'ayahs',
     audioLoading: 'Audio load ho raha hai…',
     audioFailed: 'Audio nahi chal paya. Dobara try karo.',
-    source: 'Source',
+    playerNote: 'Ek aayat ke baad rukawat nahi — Bismillah se aakhri aayat tak ek flow me.',
+    urduNote: 'Urdu me ma’ani suno — aayat-dar-aayat, usi flow me.',
+    tilawatCredit: 'Tilawat: Mishary Rashid Alafasy (EveryAyah)',
+    urduAudioCredit: 'Urdu tarjuma awaaz: Shamshad Ali Khan (Islamic Network)',
+    tarjumaUnavailable: 'Tarjuma load nahi ho paya — upar wala Arabic text poora hai.',
     mecca: 'Makki',
     medina: 'Madani',
-    ayahWord: 'Ayah',
+    aayatWord: 'aayat',
+    paraWord: 'Para',
+    stopAudio: 'Audio roko',
   },
 };
 
 type AudioItem = { uri: string; fallbackUri?: string; globalAyah: number };
 type AudioMode = 'tilawat' | 'urdu' | null;
 
-export default function QuranBookScreen({ lang }: ScreenProps) {
+function fmtTime(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+const ARABIC_INDIC = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+function toArabicIndic(n: number): string {
+  return String(n)
+    .split('')
+    .map((d) => ARABIC_INDIC[Number(d)] ?? d)
+    .join('');
+}
+
+/** One mushaf page in a translation/transliteration edition. */
+async function fetchEditionPage(
+  page: number,
+  edition: string,
+): Promise<{ number: number; text: string }[]> {
+  const response = await fetch(`${ALQURAN_BASE}/page/${page}/${edition}`, {
+    signal: AbortSignal.timeout(15000),
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) throw new Error(`Edition ${edition} failed`);
+  const payload = (await response.json().catch(() => null)) as {
+    code?: number;
+    data?: { ayahs?: { number: number; text: string }[] };
+  } | null;
+  if (!payload || payload.code !== 200 || !payload.data?.ayahs) {
+    throw new Error(`Edition ${edition} failed`);
+  }
+  return payload.data.ayahs;
+}
+
+export default function QuranBookScreen({
+  lang,
+  goTo,
+  initialView = 'landing',
+}: ScreenProps & { initialView?: 'landing' | 'reader' }) {
   const s = STRINGS[lang];
-  const [view, setView] = useState<'landing' | 'reader'>('landing');
+  const shared = stringsFor(lang);
+  const [view, setView] = useState<'landing' | 'reader'>(initialView);
   const [page, setPage] = useState(1);
   const [mushaf, setMushaf] = useState<MushafPage | null>(null);
-  const [pageLoading, setPageLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(initialView === 'reader');
   const [pageError, setPageError] = useState<string | null>(null);
-  const [jumpText, setJumpText] = useState('');
-  const [jumpError, setJumpError] = useState<string | null>(null);
 
   const [history, setHistory] = useState<QuranHistory | null>(null);
   const [historyNote, setHistoryNote] = useState<string | null>(null);
   const [markMsg, setMarkMsg] = useState<string | null>(null);
   const [markBusy, setMarkBusy] = useState(false);
-  const [targetBusy, setTargetBusy] = useState(false);
 
   const [surahs, setSurahs] = useState<MushafSurahRef[]>([]);
   const [surahQuery, setSurahQuery] = useState('');
   const [surahError, setSurahError] = useState<string | null>(null);
 
-  const [showUrdu, setShowUrdu] = useState(false);
-  const [urduAyahs, setUrduAyahs] = useState<UrduAyah[] | null>(null);
-  const [urduLoading, setUrduLoading] = useState(false);
+  // Tarjuma: always visible (no toggle). Urdu + English + transliteration.
+  const [urduByGlobal, setUrduByGlobal] = useState<Map<number, string>>(new Map());
+  const [englishByGlobal, setEnglishByGlobal] = useState<Map<number, string>>(new Map());
+  const [translitByGlobal, setTranslitByGlobal] = useState<Map<number, string>>(new Map());
+  const [tarjumaFailed, setTarjumaFailed] = useState(false);
 
   const [audioMode, setAudioMode] = useState<AudioMode>(null);
   const [audioBusy, setAudioBusy] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [playingAyah, setPlayingAyah] = useState<number | null>(null);
+  const [tilawatTime, setTilawatTime] = useState(0);
+  const [tilawatDur, setTilawatDur] = useState(0);
+  const [urduTime, setUrduTime] = useState(0);
+  const [urduDur, setUrduDur] = useState(0);
 
   const lastPageRef = useRef(1);
-  const sessionPagesRef = useRef<Set<number>>(new Set());
-  const [sessionPages, setSessionPages] = useState(0);
+  const sessionOpenedRef = useRef(false);
+  const bootedRef = useRef(false);
   const [sessionSeconds, setSessionSeconds] = useState(0);
 
   const soundRef = useRef<AudioPlayer | null>(null);
@@ -274,6 +251,32 @@ export default function QuranBookScreen({ lang }: ScreenProps) {
     return () => clearInterval(id);
   }, [view]);
 
+  /* Player progress polling (additive only — the player logic below
+   * is unchanged): expo-audio exposes currentTime / duration. */
+  useEffect(() => {
+    if (!audioMode) return;
+    const id = setInterval(() => {
+      const p = soundRef.current;
+      if (!p) return;
+      try {
+        const t = p.currentTime;
+        const d = p.duration;
+        if (typeof t === 'number' && Number.isFinite(t)) {
+          if (modeRef.current === 'tilawat') {
+            setTilawatTime(t);
+            if (typeof d === 'number' && Number.isFinite(d) && d > 0) setTilawatDur(d);
+          } else if (modeRef.current === 'urdu') {
+            setUrduTime(t);
+            if (typeof d === 'number' && Number.isFinite(d) && d > 0) setUrduDur(d);
+          }
+        }
+      } catch {
+        // Player gone mid-poll — stopAudio clears the interval.
+      }
+    }, 500);
+    return () => clearInterval(id);
+  }, [audioMode]);
+
   const loadHistory = useCallback(async () => {
     try {
       const h = await fetchQuranHistory();
@@ -281,9 +284,11 @@ export default function QuranBookScreen({ lang }: ScreenProps) {
         setHistory(h);
         setHistoryNote(null);
       }
+      return h;
     } catch {
-      // Not logged in (or offline): progress stays session-only.
+      // Not logged in (or offline): progress stays unavailable.
       if (mountedRef.current) setHistoryNote(s.historyUnavailable);
+      return null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -307,13 +312,39 @@ export default function QuranBookScreen({ lang }: ScreenProps) {
   const loadPage = useCallback(async (n: number) => {
     setPageLoading(true);
     setPageError(null);
-    setUrduAyahs(null);
+    setUrduByGlobal(new Map());
+    setEnglishByGlobal(new Map());
+    setTranslitByGlobal(new Map());
+    setTarjumaFailed(false);
     try {
       const data = await fetchMushafPage(n);
       if (!mountedRef.current) return;
       setMushaf(data);
       setPage(n);
       lastPageRef.current = n;
+      sessionOpenedRef.current = true;
+      // Tarjuma (always visible): Urdu + English + transliteration.
+      // Each edition failing on its own must not fail the page.
+      const [urduRes, enRes, trRes] = await Promise.allSettled([
+        fetchUrduPage(n),
+        fetchEditionPage(n, 'en.sahih'),
+        fetchEditionPage(n, 'en.transliteration'),
+      ]);
+      if (!mountedRef.current) return;
+      let anyOk = false;
+      if (urduRes.status === 'fulfilled') {
+        anyOk = true;
+        setUrduByGlobal(new Map(urduRes.value.map((u: UrduAyah) => [u.number, u.text])));
+      }
+      if (enRes.status === 'fulfilled') {
+        anyOk = true;
+        setEnglishByGlobal(new Map(enRes.value.map((a) => [a.number, a.text])));
+      }
+      if (trRes.status === 'fulfilled') {
+        anyOk = true;
+        setTranslitByGlobal(new Map(trRes.value.map((a) => [a.number, a.text])));
+      }
+      if (!anyOk) setTarjumaFailed(true);
     } catch (e) {
       if (mountedRef.current) {
         setPageError(e instanceof Error ? e.message : s.loadFailed);
@@ -334,12 +365,40 @@ export default function QuranBookScreen({ lang }: ScreenProps) {
     [loadPage],
   );
 
+  /* 'reader' route (App.tsx): open at the last-read surah's first
+   * page when history exists, else page 1. */
+  useEffect(() => {
+    if (initialView !== 'reader' || bootedRef.current) return;
+    bootedRef.current = true;
+    void (async () => {
+      const h = await loadHistory();
+      const last = latestEntry(h);
+      if (!mountedRef.current) return;
+      if (last) {
+        try {
+          const firstPage = await fetchSurahFirstPage(last.surahNumber);
+          openReader(firstPage);
+          return;
+        } catch {
+          // Fall through to page 1.
+        }
+      }
+      openReader(1);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function stopAudio(): Promise<void> {
     modeRef.current = null;
     queueRef.current = [];
     queueIndexRef.current = 0;
     setPlayingAyah(null);
     setAudioMode(null);
+    setAudioBusy(false);
+    setTilawatTime(0);
+    setTilawatDur(0);
+    setUrduTime(0);
+    setUrduDur(0);
     const sound = soundRef.current;
     soundRef.current = null;
     if (sound) {
@@ -364,17 +423,30 @@ export default function QuranBookScreen({ lang }: ScreenProps) {
     }
     const tryLoad = (uri: string): AudioPlayer => {
       const player = createAudioPlayer({ uri }, { updateInterval: 500 });
+      // One retry per ayah: no second host exists for Urdu (ur.khan),
+      // so a transient failure retries the same URI once.
+      let retried = false;
       player.addListener('playbackStatusUpdate', (status) => {
-        if (status.didJustFinish) {
-          void playAt(queueIndexRef.current + 1);
-        } else if (status.error) {
+        // Error FIRST: a failed load must never be swallowed by a finish event.
+        if (status.error) {
           if (item.fallbackUri && uri === item.uri) {
             player.replace({ uri: item.fallbackUri });
+            player.play();
+          } else if (!retried) {
+            retried = true;
+            player.replace({ uri });
             player.play();
           } else {
             setAudioError(s.audioFailed);
             void stopAudio();
           }
+          return;
+        }
+        // Clear the loading state as soon as the player is actually loaded,
+        // so a slow-network stall shows "loading" instead of silence.
+        if (status.isLoaded) setAudioBusy(false);
+        if (status.didJustFinish) {
+          void playAt(queueIndexRef.current + 1);
         }
       });
       player.play();
@@ -418,24 +490,9 @@ export default function QuranBookScreen({ lang }: ScreenProps) {
     queueRef.current = queue;
     modeRef.current = mode;
     setAudioMode(mode);
-    setAudioBusy(false);
+    // Keep audioBusy true until the player's first loaded status
+    // clears it — otherwise a slow-network stall looks like silence.
     await playAt(0);
-  }
-
-  async function toggleUrdu(): Promise<void> {
-    const next = !showUrdu;
-    setShowUrdu(next);
-    if (next && mushaf && !urduAyahs) {
-      setUrduLoading(true);
-      try {
-        const list = await fetchUrduPage(mushaf.number);
-        if (mountedRef.current) setUrduAyahs(list);
-      } catch {
-        if (mountedRef.current) setShowUrdu(false);
-      } finally {
-        if (mountedRef.current) setUrduLoading(false);
-      }
-    }
   }
 
   async function markPageRead(): Promise<void> {
@@ -453,10 +510,6 @@ export default function QuranBookScreen({ lang }: ScreenProps) {
       for (const [surahNumber, ayahNumber] of furthest) {
         await recordRead(surahNumber, ayahNumber);
       }
-      if (!sessionPagesRef.current.has(mushaf.number)) {
-        sessionPagesRef.current.add(mushaf.number);
-        setSessionPages(sessionPagesRef.current.size);
-      }
       const h = await fetchQuranHistory();
       if (mountedRef.current) {
         setHistory(h);
@@ -469,31 +522,33 @@ export default function QuranBookScreen({ lang }: ScreenProps) {
     }
   }
 
-  async function changeTarget(next: number): Promise<void> {
-    setTargetBusy(true);
-    try {
-      const res = await setDailyTarget(next);
-      const h = await fetchQuranHistory();
-      if (mountedRef.current) {
-        setHistory({ ...h, dailyTarget: res.dailyTarget });
-        setMarkMsg(s.targetSaved);
-      }
-    } catch {
-      if (mountedRef.current) setMarkMsg(s.markFailed);
-    } finally {
-      if (mountedRef.current) setTargetBusy(false);
-    }
-  }
-
-  function jumpToPage(): void {
-    const n = Number(jumpText.trim());
-    if (!Number.isInteger(n) || n < 1 || n > TOTAL_PAGES) {
-      setJumpError(s.invalidPage);
+  async function continueReading(): Promise<void> {
+    if (sessionOpenedRef.current) {
+      openReader(lastPageRef.current);
       return;
     }
-    setJumpError(null);
-    setJumpText('');
-    openReader(n);
+    const last = latestEntry(history);
+    if (last) {
+      try {
+        const firstPage = await fetchSurahFirstPage(last.surahNumber);
+        openReader(firstPage);
+        return;
+      } catch {
+        // Fall through to page 1.
+      }
+    }
+    openReader(1);
+  }
+
+  function openSurah(su: MushafSurahRef): void {
+    void (async () => {
+      try {
+        const firstPage = await fetchSurahFirstPage(su.number);
+        openReader(firstPage);
+      } catch {
+        openReader(1);
+      }
+    })();
   }
 
   const filteredSurahs = surahs.filter((su) => {
@@ -506,127 +561,90 @@ export default function QuranBookScreen({ lang }: ScreenProps) {
     );
   });
 
+  const lastEntry = latestEntry(history);
+  const lastSurahName = lastEntry
+    ? (surahs.find((su) => su.number === lastEntry.surahNumber)?.englishName ??
+      `Surah ${lastEntry.surahNumber}`)
+    : null;
+  const lastSurah = lastEntry
+    ? surahs.find((su) => su.number === lastEntry.surahNumber) ?? null
+    : null;
   const goalProgress =
     history && history.dailyTarget > 0
       ? Math.min(1, history.ayahsOpenedToday / history.dailyTarget)
       : 0;
+  const sessionMinutes = Math.floor(sessionSeconds / 60);
 
   /* ------------------------------ Landing ------------------------------ */
   if (view === 'landing') {
     return (
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.title}>{s.title}</Text>
-        <Text style={styles.sub}>{s.subtitle}</Text>
+      <ScrollView style={styles.scroll} contentContainerStyle={L.scroll}>
+        <Text style={T.title}>{shared.quranTitle}</Text>
+        <Text style={T.sub}>{shared.quranSub}</Text>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>{s.todayRead}</Text>
+        <TealHead style={styles.tealHead}>
+          <Text style={styles.todayTitle}>{s.todayRead}</Text>
           {history ? (
             <>
-              <View style={styles.statRow}>
-                <View style={styles.stat}>
-                  <Text style={styles.statNum}>{history.ayahsOpenedToday}</Text>
-                  <Text style={styles.statLabel}>{s.ayahsToday}</Text>
-                </View>
-                <View style={styles.stat}>
-                  <Text style={styles.statNum}>{sessionPages}</Text>
-                  <Text style={styles.statLabel}>{s.pagesSession}</Text>
-                </View>
-                <View style={styles.stat}>
-                  <Text style={styles.statNum}>{Math.floor(sessionSeconds / 60)}</Text>
-                  <Text style={styles.statLabel}>{s.minutesSession}</Text>
-                </View>
-              </View>
-              <View style={styles.progressTrack}>
-                <View style={[styles.progressFill, { width: `${goalProgress * 100}%` }]} />
-              </View>
-              <Text style={styles.goalLine}>
-                {s.dailyGoal}: {history.ayahsOpenedToday} / {history.dailyTarget} {s.goalAyahs}
+              <Text style={styles.bigLine}>
+                <Text style={styles.bigNum}>{history.ayahsOpenedToday}</Text>
+                <Text style={styles.bigUnit}> {s.ayahsWord} </Text>
+                <Text style={styles.bigMeta}>
+                  · {sessionMinutes} {s.minutesWord} · {s.goalWord}: {history.dailyTarget}{' '}
+                  {s.ayahsWord}
+                </Text>
               </Text>
-              <View style={styles.goalRow}>
-                {[10, 20, 50].map((g) => (
-                  <Pressable
-                    key={g}
-                    onPress={() => void changeTarget(g)}
-                    disabled={targetBusy || history.dailyTarget === g}
-                    style={[
-                      styles.goalChip,
-                      history.dailyTarget === g && styles.goalChipOn,
-                    ]}
-                    accessibilityRole="button"
-                  >
-                    <Text
-                      style={[
-                        styles.goalChipText,
-                        history.dailyTarget === g && styles.goalChipTextOn,
-                      ]}
-                    >
-                      {g}
-                    </Text>
-                  </Pressable>
-                ))}
-                <Text style={styles.setGoalLabel}>{s.setGoal}</Text>
+              <View style={styles.progressTrack}>
+                <View
+                  style={[styles.progressFill, { width: `${goalProgress * 100}%` }]}
+                />
               </View>
+              <Text style={styles.lastLine}>
+                {lastEntry && lastSurahName
+                  ? s.lastRead(lastSurahName, lastEntry.lastAyahNumber)
+                  : s.noReadingYet}
+              </Text>
             </>
           ) : (
-            <>
-              <Text style={styles.note}>{historyNote ?? s.loading}</Text>
-              <View style={styles.statRow}>
-                <View style={styles.stat}>
-                  <Text style={styles.statNum}>{sessionPages}</Text>
-                  <Text style={styles.statLabel}>{s.pagesSession}</Text>
-                </View>
-                <View style={styles.stat}>
-                  <Text style={styles.statNum}>{Math.floor(sessionSeconds / 60)}</Text>
-                  <Text style={styles.statLabel}>{s.minutesSession}</Text>
-                </View>
-              </View>
-            </>
+            <Text style={styles.lastLine}>{historyNote ?? s.loading}</Text>
           )}
-          <Text style={styles.tinyNote}>{s.sessionOnly}</Text>
-          {markMsg ? <Text style={styles.infoMsg}>{markMsg}</Text> : null}
+          <PillButton
+            label={s.continueBtn}
+            variant="peach"
+            block
+            onPress={() => void continueReading()}
+          />
+        </TealHead>
+        {markMsg ? <Text style={styles.infoMsg}>{markMsg}</Text> : null}
 
-          <Pressable
-            onPress={() => openReader(lastPageRef.current)}
-            style={styles.primaryBtn}
-            accessibilityRole="button"
-          >
-            <Text style={styles.primaryBtnText}>
-              {s.continueReading} · {s.pageOf} {lastPageRef.current} / {TOTAL_PAGES}
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => openReader(1)}
-            style={styles.peachBtn}
-            accessibilityRole="button"
-          >
-            <Text style={styles.peachBtnText}>{s.openBook}</Text>
-          </Pressable>
+        <Text style={styles.sectionTitle}>{shared.indexTitle}</Text>
+        <Field label={shared.quranSearchLbl}>
+          <Input
+            value={surahQuery}
+            onChangeText={setSurahQuery}
+            placeholder="e.g. Al-Kahf, 18…"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </Field>
+        <View style={styles.chipRow}>
+          <Chip label={shared.quranAll} selected />
+          {lastSurah ? (
+            <Chip
+              label={
+                lang === 'hi'
+                  ? `Aakhri padhi: ${lastSurah.englishName}`
+                  : `Last read: ${lastSurah.englishName}`
+              }
+              onPress={() => openSurah(lastSurah)}
+            />
+          ) : null}
         </View>
-
-        <Text style={styles.sectionTitle}>{s.surahIndex}</Text>
-        <TextInput
-          style={styles.input}
-          value={surahQuery}
-          onChangeText={setSurahQuery}
-          placeholder={s.searchSurahs}
-          placeholderTextColor={C.muted}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        {surahError ? <Text style={styles.error}>{surahError}</Text> : null}
+        {surahError ? <Text style={T.error}>{surahError}</Text> : null}
         {filteredSurahs.map((su) => (
           <Pressable
             key={su.number}
-            onPress={() => {
-              void (async () => {
-                try {
-                  const firstPage = await fetchSurahFirstPage(su.number);
-                  openReader(firstPage);
-                } catch {
-                  openReader(1);
-                }
-              })();
-            }}
+            onPress={() => openSurah(su)}
             style={styles.surahRow}
             accessibilityRole="button"
           >
@@ -636,26 +654,22 @@ export default function QuranBookScreen({ lang }: ScreenProps) {
             <View style={styles.surahMeta}>
               <Text style={styles.surahName}>{su.englishName}</Text>
               <Text style={styles.surahSub}>
-                {su.englishNameTranslation} · {su.numberOfAyahs} {s.ayahs} ·{' '}
-                {su.revelationType === 'Meccan' ? s.mecca : s.medina}
+                {su.revelationType === 'Meccan' ? s.mecca : s.medina} ·{' '}
+                {su.numberOfAyahs} {s.aayatWord}
               </Text>
             </View>
             <Text style={styles.surahArabic}>{su.name}</Text>
           </Pressable>
         ))}
-        <Text style={styles.tinyNote}>
-          {s.source}: {ARABIC_SOURCE}
+        <Text style={T.note}>{s.note604}</Text>
+        <Text style={T.note}>
+          Source: {ARABIC_SOURCE}
         </Text>
       </ScrollView>
     );
   }
 
   /* ------------------------------ Reader ------------------------------ */
-  const urduByGlobal = new Map<number, string>();
-  if (urduAyahs) {
-    for (const u of urduAyahs) urduByGlobal.set(u.number, u.text);
-  }
-
   // Group the page's ayahs by surah, in page order.
   const segments: { surah: MushafSurahRef; ayahs: MushafAyah[] }[] = [];
   if (mushaf) {
@@ -668,312 +682,345 @@ export default function QuranBookScreen({ lang }: ScreenProps) {
       }
     }
   }
+  const firstSeg = segments[0];
+  const firstAyah = mushaf?.ayahs[0];
+  const readerSub =
+    firstSeg && firstAyah
+      ? `${firstSeg.surah.englishName} · ${
+          firstSeg.surah.revelationType === 'Meccan' ? s.mecca : s.medina
+        } · ${firstSeg.surah.numberOfAyahs} ${s.aayatWord} · ${s.paraWord} ${firstAyah.juz}`
+      : null;
 
   return (
-    <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-      <Pressable
+    <ScrollView style={styles.scroll} contentContainerStyle={L.scroll}>
+      <PillButton
+        label={shared.readerBack}
+        variant="ghost"
+        small
         onPress={() => {
           void stopAudio();
-          setView('landing');
-          void loadHistory();
+          if (initialView === 'reader') {
+            goTo('quran');
+          } else {
+            setView('landing');
+            void loadHistory();
+          }
         }}
-        accessibilityRole="button"
-      >
-        <Text style={styles.back}>{s.back}</Text>
-      </Pressable>
-
-      <Text style={styles.pageLabel}>
-        {s.pageOf} {page} / {TOTAL_PAGES}
-      </Text>
-
-      {pageLoading ? (
-        <ActivityIndicator color={C.teal} size="large" style={styles.loader} />
-      ) : pageError ? (
-        <View style={styles.card}>
-          <Text style={styles.error}>{pageError}</Text>
-          <Pressable
-            onPress={() => void loadPage(page)}
-            style={styles.primaryBtn}
-            accessibilityRole="button"
-          >
-            <Text style={styles.primaryBtnText}>{s.retry}</Text>
-          </Pressable>
-        </View>
-      ) : mushaf ? (
-        <View style={styles.mushafFrame}>
-          <View style={styles.mushafInner}>
-            {segments.map((seg) => (
-              <View key={`${seg.surah.number}-${seg.ayahs[0]?.numberInSurah ?? 0}`}>
-                {seg.ayahs[0]?.numberInSurah === 1 ? (
-                  <View style={styles.surahBand}>
-                    <Text style={styles.surahBandArabic}>{seg.surah.name}</Text>
-                    <Text style={styles.surahBandSub}>
-                      {seg.surah.englishName} · {seg.surah.englishNameTranslation} ·{' '}
-                      {seg.surah.revelationType === 'Meccan' ? s.mecca : s.medina}
-                    </Text>
-                    {seg.surah.number !== 1 && seg.surah.number !== 9 ? (
-                      <Text style={styles.bismillah}>{BISMILLAH}</Text>
-                    ) : null}
-                  </View>
-                ) : null}
-                {showUrdu ? (
-                  seg.ayahs.map((a) => (
-                    <View key={a.number} style={styles.ayahBlock}>
-                      <Text
-                        style={[
-                          styles.ayahText,
-                          playingAyah === a.number && styles.ayahPlaying,
-                        ]}
-                      >
-                        {a.text.trim()} {'\uFD3F'}
-                        {a.numberInSurah}
-                        {'\uFD3E'}
-                      </Text>
-                      {urduByGlobal.get(a.number) ? (
-                        <Text style={styles.urduText}>{urduByGlobal.get(a.number)}</Text>
-                      ) : null}
-                    </View>
-                  ))
-                ) : (
-                  <Text style={styles.ayahFlow}>
-                    {seg.ayahs.map((a) => (
-                      <Text
-                        key={a.number}
-                        style={playingAyah === a.number ? styles.ayahPlaying : undefined}
-                      >
-                        {a.text.trim()} {'\uFD3F'}
-                        {a.numberInSurah}
-                        {'\uFD3E'}{' '}
-                      </Text>
-                    ))}
-                  </Text>
-                )}
-              </View>
-            ))}
-          </View>
-          <Text style={styles.pageFooter}>
-            {s.pageOf} {page} / {TOTAL_PAGES}
+      />
+      <View style={styles.readerHead}>
+        <Text style={T.h2}>Quran Book</Text>
+        <View style={styles.pageTag}>
+          <Text style={styles.pageTagText}>
+            Page {page} / {TOTAL_PAGES}
           </Text>
         </View>
-      ) : null}
+      </View>
+      {readerSub ? <Text style={styles.readerSub}>{readerSub}</Text> : null}
 
-      {mushaf && !pageLoading ? (
+      {pageLoading ? (
+        <ActivityIndicator color={C.teal500} size="large" style={styles.loader} />
+      ) : pageError ? (
+        <View style={styles.errorCard}>
+          <Text style={T.error}>{pageError}</Text>
+          <PillButton
+            label={shared.retry}
+            variant="primary"
+            block
+            onPress={() => void loadPage(page)}
+          />
+        </View>
+      ) : mushaf ? (
         <>
-          <View style={styles.audioCard}>
-            <Text style={styles.audioTitle}>
-              {audioMode === 'tilawat'
-                ? s.listenTilawat
-                : audioMode === 'urdu'
-                  ? s.listenUrdu
-                  : s.listenTilawat}
-            </Text>
-            {audioBusy ? (
-              <ActivityIndicator color={C.teal} />
-            ) : audioMode ? (
-              <Pressable
-                onPress={() => void stopAudio()}
-                style={styles.peachBtn}
-                accessibilityRole="button"
-              >
-                <Text style={styles.peachBtnText}>{s.stopAudio}</Text>
-              </Pressable>
-            ) : (
-              <>
-                <Pressable
-                  onPress={() => void startAudio('tilawat')}
-                  style={styles.primaryBtn}
-                  accessibilityRole="button"
-                >
-                  <Text style={styles.primaryBtnText}>{s.listenTilawat}</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => void startAudio('urdu')}
-                  style={styles.peachBtn}
-                  accessibilityRole="button"
-                >
-                  <Text style={styles.peachBtnText}>{s.listenUrdu}</Text>
-                </Pressable>
-              </>
-            )}
-            {audioError ? <Text style={styles.error}>{audioError}</Text> : null}
-            <Text style={styles.tinyNote}>{s.tilawatCredit}</Text>
-            <Text style={styles.tinyNote}>{s.urduAudioCredit}</Text>
+          <View style={styles.mushaf}>
+            <View style={styles.mushafInner}>
+              <View style={styles.stripe} />
+              <Text style={styles.pageNo}>— {page} —</Text>
+              {segments.map((seg) => {
+                const startsHere = seg.ayahs[0]?.numberInSurah === 1;
+                // Surah Al-Fatiha's ayah 1 IS the Bismillah: it is shown
+                // as the separate Bismillah line, not again in the flow.
+                const flowAyahs =
+                  seg.surah.number === 1 && startsHere ? seg.ayahs.slice(1) : seg.ayahs;
+                return (
+                  <View key={`${seg.surah.number}-${seg.ayahs[0]?.numberInSurah ?? 0}`}>
+                    {startsHere ? (
+                      <View style={styles.bandOuter}>
+                        <View style={styles.surahBand}>
+                          <Text style={styles.surahBandArabic}>
+                            ۞ {seg.surah.name} ۞
+                          </Text>
+                        </View>
+                      </View>
+                    ) : null}
+                    {startsHere && seg.surah.number !== 9 ? (
+                      <Text style={styles.bismillah}>
+                        {BISMILLAH}
+                        {seg.surah.number === 1 ? (
+                          <Text style={styles.marker}> {toArabicIndic(1)} </Text>
+                        ) : null}
+                      </Text>
+                    ) : null}
+                    <Text style={styles.ayahFlow}>
+                      {flowAyahs.map((a) => (
+                        <Text
+                          key={a.number}
+                          style={playingAyah === a.number ? styles.ayahPlaying : undefined}
+                        >
+                          {a.text.trim()}{' '}
+                          <Text style={styles.marker}>
+                            {' '}
+                            {toArabicIndic(a.numberInSurah)}{' '}
+                          </Text>{' '}
+                        </Text>
+                      ))}
+                    </Text>
+                  </View>
+                );
+              })}
+              <View style={styles.stripe} />
+              <View style={styles.mushafFoot}>
+                <Text style={styles.footText}>PARA {firstAyah?.juz ?? ''}</Text>
+                <Text style={styles.footText}>
+                  SURAH {firstSeg?.surah.englishName.toUpperCase() ?? ''}
+                </Text>
+                <Text style={styles.footText}>PAGE {page}</Text>
+              </View>
+            </View>
           </View>
 
-          <Pressable
-            onPress={() => void toggleUrdu()}
-            style={styles.outlineBtn}
-            accessibilityRole="button"
-          >
-            <Text style={styles.outlineBtnText}>
-              {showUrdu ? s.hideUrdu : s.showUrdu}
-            </Text>
-          </Pressable>
-          {urduLoading ? <ActivityIndicator color={C.teal} /> : null}
-          {showUrdu ? (
-            <Text style={styles.tinyNote}>
-              {s.urduText}: {s.urduTextCredit}
-            </Text>
+          <PlayerCard
+            dark
+            title={shared.playerTitle}
+            note={s.playerNote}
+            time={tilawatTime}
+            duration={tilawatDur}
+            timeLabel={tilawatDur > 0 ? `${fmtTime(tilawatDur)} · Page ${page}` : `Page ${page}`}
+            playing={audioMode === 'tilawat'}
+            busy={audioBusy && audioMode === 'tilawat'}
+            onToggle={() =>
+              audioMode === 'tilawat' ? void stopAudio() : void startAudio('tilawat')
+            }
+          />
+          <PlayerCard
+            title={shared.urduTitle}
+            note={s.urduNote}
+            time={urduTime}
+            duration={urduDur}
+            timeLabel={urduDur > 0 ? `${fmtTime(urduDur)} · Page ${page}` : `Page ${page}`}
+            playing={audioMode === 'urdu'}
+            busy={audioBusy && audioMode === 'urdu'}
+            onToggle={() =>
+              audioMode === 'urdu' ? void stopAudio() : void startAudio('urdu')
+            }
+          />
+          {audioBusy && audioMode ? (
+            <Text style={styles.audioLoading}>{s.audioLoading}</Text>
           ) : null}
+          {audioError ? <Text style={T.error}>{audioError}</Text> : null}
+          <Text style={T.note}>
+            {s.tilawatCredit} · {TILAWAT_RECITER.bitrate}
+          </Text>
+          <Text style={T.note}>
+            {s.urduAudioCredit} · {URDU_AUDIO.bitrate}
+          </Text>
 
-          <Pressable
+          <Text style={styles.sectionTitle}>{shared.rdTarjumaH}</Text>
+          {tarjumaFailed ? <Text style={T.error}>{s.tarjumaUnavailable}</Text> : null}
+          {mushaf.ayahs.map((a) => (
+            <View
+              key={a.number}
+              style={[
+                styles.ayahRow,
+                playingAyah === a.number && styles.ayahRowPlaying,
+              ]}
+            >
+              <Text style={styles.ayahArabic}>{a.text.trim()}</Text>
+              {translitByGlobal.get(a.number) ? (
+                <Text style={styles.translit}>{translitByGlobal.get(a.number)}</Text>
+              ) : null}
+              {urduByGlobal.get(a.number) ? (
+                <Text style={styles.urduText}>{urduByGlobal.get(a.number)}</Text>
+              ) : null}
+              {englishByGlobal.get(a.number) ? (
+                <Text style={styles.english}>{englishByGlobal.get(a.number)}</Text>
+              ) : null}
+            </View>
+          ))}
+
+          <PillButton
+            label={shared.markRead}
+            variant="peach"
+            block
+            busy={markBusy}
             onPress={() => void markPageRead()}
-            disabled={markBusy}
-            style={[styles.primaryBtn, markBusy && styles.btnDisabled]}
-            accessibilityRole="button"
-          >
-            {markBusy ? (
-              <ActivityIndicator color={C.white} />
-            ) : (
-              <Text style={styles.primaryBtnText}>{s.markPageRead}</Text>
-            )}
-          </Pressable>
+          />
           {markMsg ? <Text style={styles.infoMsg}>{markMsg}</Text> : null}
 
           <View style={styles.navRow}>
-            <Pressable
-              onPress={() => page > 1 && openReader(page - 1)}
+            <PillButton
+              label={shared.prevPage}
+              variant="ghost"
               disabled={page <= 1}
-              style={[styles.navBtn, page <= 1 && styles.btnDisabled]}
-              accessibilityRole="button"
-            >
-              <Text style={styles.navBtnText}>{s.prev}</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => page < TOTAL_PAGES && openReader(page + 1)}
-              disabled={page >= TOTAL_PAGES}
-              style={[styles.navBtn, page >= TOTAL_PAGES && styles.btnDisabled]}
-              accessibilityRole="button"
-            >
-              <Text style={styles.navBtnText}>{s.next}</Text>
-            </Pressable>
-          </View>
-
-          <Text style={styles.label}>{s.jumpTo}</Text>
-          <View style={styles.jumpRow}>
-            <TextInput
-              style={styles.jumpInput}
-              value={jumpText}
-              onChangeText={setJumpText}
-              placeholder="1"
-              placeholderTextColor={C.muted}
-              keyboardType="number-pad"
-              onSubmitEditing={jumpToPage}
+              onPress={() => page > 1 && openReader(page - 1)}
+              style={styles.navBtn}
             />
-            <Pressable
-              onPress={jumpToPage}
-              style={styles.jumpBtn}
-              accessibilityRole="button"
-            >
-              <Text style={styles.jumpBtnText}>{s.go}</Text>
-            </Pressable>
+            <PillButton
+              label={shared.nextPage}
+              variant="primary"
+              disabled={page >= TOTAL_PAGES}
+              onPress={() => page < TOTAL_PAGES && openReader(page + 1)}
+              style={styles.navBtn}
+            />
           </View>
-          {jumpError ? <Text style={styles.error}>{jumpError}</Text> : null}
 
-          <Text style={styles.tinyNote}>
-            {s.source}: {ARABIC_SOURCE}
+          <Text style={styles.pageFooter}>
+            Page {page} of {TOTAL_PAGES} · Surah {firstSeg?.surah.englishName ?? ''}
           </Text>
+          <Text style={T.note}>Urdu text: {URDU_TEXT_NAME}</Text>
         </>
       ) : null}
     </ScrollView>
   );
 }
 
+function latestEntry(
+  h: QuranHistory | null,
+): { surahNumber: number; lastAyahNumber: number; lastReadAt: string } | null {
+  if (!h || h.history.length === 0) return null;
+  let best = h.history[0];
+  for (const e of h.history) {
+    if (best && e.lastReadAt > best.lastReadAt) best = e;
+  }
+  return best ?? null;
+}
+
+/** One audio player card (preview §11): round 52px play button,
+ * title, progress bar, current / total times, note. */
+function PlayerCard({
+  dark = false,
+  title,
+  note,
+  time,
+  duration,
+  timeLabel,
+  playing,
+  busy,
+  onToggle,
+}: {
+  dark?: boolean;
+  title: string;
+  note: string;
+  time: number;
+  duration: number;
+  timeLabel: string;
+  playing: boolean;
+  busy: boolean;
+  onToggle: () => void;
+}) {
+  const pct = duration > 0 ? Math.min(1, time / duration) : 0;
+  return (
+    <View style={[styles.player, dark ? styles.playerDark : styles.playerLight]}>
+      <View style={styles.playerRow}>
+        <Pressable
+          onPress={onToggle}
+          style={[styles.playBtn, dark ? styles.playBtnPeach : styles.playBtnTeal]}
+          accessibilityRole="button"
+          accessibilityLabel={playing ? 'Stop' : 'Play'}
+        >
+          {busy ? (
+            <ActivityIndicator color={dark ? C.peachText : C.white} />
+          ) : (
+            <Text style={[styles.playIcon, dark ? styles.playIconPeach : styles.playIconTeal]}>
+              {playing ? '■' : '▶'}
+            </Text>
+          )}
+        </Pressable>
+        <View style={styles.playerBody}>
+          <Text style={[styles.playerTitle, dark && styles.playerTitleDark]}>{title}</Text>
+          <View
+            style={[styles.playerTrack, dark ? styles.playerTrackDark : styles.playerTrackLight]}
+          >
+            <View
+              style={[
+                styles.playerFill,
+                {
+                  width: `${pct * 100}%`,
+                  backgroundColor: dark ? C.peachMid : C.teal500,
+                },
+              ]}
+            />
+          </View>
+          <View style={styles.playerTimes}>
+            <Text style={[styles.playerTime, dark && styles.playerTimeDark]}>
+              {fmtTime(time)}
+            </Text>
+            <Text style={[styles.playerTime, dark && styles.playerTimeDark]}>{timeLabel}</Text>
+          </View>
+        </View>
+      </View>
+      <Text style={[styles.playerNote, dark ? styles.playerNoteDark : styles.playerNoteLight]}>
+        {note}
+      </Text>
+    </View>
+  );
+}
+
+/** Reader view for the 'reader' route (App.tsx) — opens at the
+ * last-read surah's first page, else page 1. */
+export function QuranReaderScreen(props: ScreenProps) {
+  return <QuranBookScreen {...props} initialView="reader" />;
+}
+
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: C.ice },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 48 },
-  title: { fontSize: 28, fontWeight: '800', color: C.ink },
-  sub: { fontSize: 14, color: C.muted, marginTop: 4, marginBottom: 18 },
-  back: { fontSize: 16, fontWeight: '700', color: C.teal, marginBottom: 12 },
-  pageLabel: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: C.teal900,
-    textAlign: 'center',
-    marginBottom: 12,
-  },
   loader: { marginVertical: 40 },
-  card: {
+  infoMsg: { fontFamily: F.sans, fontSize: 13, color: C.teal500, textAlign: 'center', marginTop: 10 },
+  audioLoading: {
+    fontFamily: F.sans,
+    fontSize: 13,
+    color: C.muted,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  sectionTitle: {
+    fontFamily: F.sans,
+    fontSize: 16.5,
+    fontWeight: '800',
+    color: C.ink,
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  errorCard: {
     backgroundColor: C.white,
-    borderRadius: 24,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: C.line,
-    padding: 20,
-    marginBottom: 18,
+    padding: 18,
+    marginTop: 16,
   },
-  cardTitle: { fontSize: 18, fontWeight: '800', color: C.ink, marginBottom: 14 },
-  statRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
-  stat: { flex: 1, alignItems: 'center' },
-  statNum: { fontSize: 26, fontWeight: '800', color: C.teal },
-  statLabel: { fontSize: 11, color: C.muted, textAlign: 'center', marginTop: 2 },
+  /* ---- Landing ---- */
+  tealHead: { marginTop: 14 },
+  todayTitle: { fontFamily: F.sans, fontSize: 18, fontWeight: '800', color: C.white },
+  bigLine: { marginTop: 10, marginBottom: 2 },
+  bigNum: { fontFamily: F.sans, fontSize: 24, fontWeight: '800', color: C.white },
+  bigUnit: { fontFamily: F.sans, fontSize: 15, fontWeight: '700', color: C.white },
+  bigMeta: { fontFamily: F.sans, fontSize: 14, fontWeight: '600', color: C.navInactive },
   progressTrack: {
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: C.peach2,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.22)',
     overflow: 'hidden',
-    marginBottom: 8,
-  },
-  progressFill: { height: 10, backgroundColor: C.teal, borderRadius: 5 },
-  goalLine: { fontSize: 13, color: C.muted, marginBottom: 10 },
-  goalRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  goalChip: {
-    borderWidth: 1,
-    borderColor: C.line,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    marginRight: 8,
-    backgroundColor: C.white,
-  },
-  goalChipOn: { backgroundColor: C.teal950, borderColor: C.teal950 },
-  goalChipText: { fontSize: 14, fontWeight: '700', color: C.ink },
-  goalChipTextOn: { color: C.white },
-  setGoalLabel: { fontSize: 12, color: C.muted },
-  note: { fontSize: 14, lineHeight: 21, color: C.muted, marginBottom: 12 },
-  tinyNote: { fontSize: 12, color: C.muted, textAlign: 'center', marginTop: 10 },
-  infoMsg: { fontSize: 13, color: C.teal2, textAlign: 'center', marginTop: 10 },
-  error: { color: C.red, fontSize: 14, fontWeight: '600', textAlign: 'center', marginVertical: 8 },
-  primaryBtn: {
-    backgroundColor: C.teal,
-    borderRadius: 999,
-    minHeight: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
-  },
-  primaryBtnText: { color: C.white, fontSize: 16, fontWeight: '800' },
-  peachBtn: {
-    backgroundColor: C.peach,
-    borderRadius: 999,
-    minHeight: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
     marginTop: 10,
   },
-  peachBtnText: { color: C.peachDeep, fontSize: 16, fontWeight: '800' },
-  outlineBtn: {
-    borderWidth: 1,
-    borderColor: C.teal,
-    borderRadius: 999,
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
+  progressFill: { height: 8, backgroundColor: C.peachMid, borderRadius: 999 },
+  lastLine: {
+    fontFamily: F.sans,
+    fontSize: 13,
+    color: C.navInactive,
+    marginTop: 8,
+    marginBottom: 14,
   },
-  outlineBtnText: { color: C.teal, fontSize: 15, fontWeight: '800' },
-  btnDisabled: { opacity: 0.5 },
-  sectionTitle: { fontSize: 18, fontWeight: '800', color: C.ink, marginBottom: 10 },
-  input: {
-    backgroundColor: C.white,
-    borderWidth: 1,
-    borderColor: C.line,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: C.ink,
-    marginBottom: 12,
-  },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 12, marginBottom: 6 },
   surahRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -987,116 +1034,214 @@ const styles = StyleSheet.create({
   surahNum: {
     width: 38,
     height: 38,
-    borderRadius: 19,
-    backgroundColor: C.peach2,
+    borderRadius: 10, // square badge (preview .surah-num)
+    backgroundColor: C.teal100,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
-  surahNumText: { fontSize: 15, fontWeight: '800', color: C.peachDeep },
+  surahNumText: { fontFamily: F.sans, fontSize: 15, fontWeight: '800', color: C.teal900 },
   surahMeta: { flex: 1 },
-  surahName: { fontSize: 16, fontWeight: '700', color: C.ink },
-  surahSub: { fontSize: 12, color: C.muted, marginTop: 2 },
-  surahArabic: { fontSize: 20, color: C.teal },
-  mushafFrame: {
-    backgroundColor: C.white,
-    borderWidth: 3,
-    borderColor: C.teal,
+  surahName: { fontFamily: F.sans, fontSize: 16, fontWeight: '700', color: C.ink },
+  surahSub: { fontFamily: F.sans, fontSize: 12, color: C.muted, marginTop: 2 },
+  surahArabic: { fontFamily: F.arabic, fontSize: 20, color: C.teal900 },
+  /* ---- Reader ---- */
+  readerHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 14,
+  },
+  pageTag: {
+    backgroundColor: C.peach,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  pageTagText: { fontFamily: F.sans, fontSize: 11, fontWeight: '800', color: C.peachInk },
+  readerSub: { fontFamily: F.sans, fontSize: 13, color: C.muted, marginTop: 4 },
+  mushaf: {
+    marginTop: 14,
+    backgroundColor: MUSHAF_BG,
+    borderWidth: 2.5,
+    borderColor: C.teal900,
     borderRadius: 8,
-    padding: 6,
-    marginBottom: 16,
+    padding: 8,
+    shadowColor: C.teal950,
+    shadowOpacity: 0.16,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
   },
   mushafInner: {
-    borderWidth: 1,
-    borderColor: C.peach,
+    borderWidth: 1.5,
+    borderColor: C.teal700,
     borderRadius: 4,
-    paddingVertical: 18,
-    paddingHorizontal: 14,
-    backgroundColor: '#FDFBF7',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: MUSHAF_BG,
+  },
+  /* RN has no repeating-linear-gradient: a translucent teal bar is
+   * the closest honest stand-in for the preview's stripe rows. */
+  stripe: { height: 7, backgroundColor: 'rgba(11,74,65,0.16)', borderRadius: 3 },
+  pageNo: {
+    fontFamily: F.sans,
+    fontSize: 12.5,
+    fontWeight: '800',
+    letterSpacing: 4,
+    color: C.teal700,
+    textAlign: 'center',
+    marginVertical: 10,
+  },
+  bandOuter: {
+    borderWidth: 1,
+    borderColor: C.teal700,
+    padding: 3,
+    marginHorizontal: 6,
   },
   surahBand: {
-    backgroundColor: C.teal950,
-    borderRadius: 12,
-    paddingVertical: 12,
+    borderWidth: 2,
+    borderColor: C.teal900,
+    backgroundColor: C.teal100,
+    paddingVertical: 8,
     paddingHorizontal: 10,
-    marginBottom: 16,
     alignItems: 'center',
   },
-  surahBandArabic: { fontSize: 24, color: C.white, textAlign: 'center' },
-  surahBandSub: { fontSize: 12, color: '#B8CFCB', marginTop: 4, textAlign: 'center' },
-  bismillah: {
-    fontSize: 20,
-    color: C.peach,
+  surahBandArabic: {
+    fontFamily: F.arabic,
+    fontSize: 25,
+    lineHeight: 38,
+    color: C.teal950,
     textAlign: 'center',
-    marginTop: 10,
   },
-  ayahFlow: {
+  bismillah: {
+    fontFamily: F.arabic,
     fontSize: 24,
     lineHeight: 46,
-    color: C.ink,
-    textAlign: 'justify',
+    color: MUSHAF_INK,
+    textAlign: 'center',
+    marginTop: 14,
+    marginBottom: 2,
   },
-  ayahBlock: { marginBottom: 14 },
-  ayahText: {
-    fontSize: 24,
-    lineHeight: 44,
+  ayahFlow: {
+    fontFamily: F.arabic,
+    fontSize: 23.5,
+    lineHeight: 53, // 23.5 * 2.25
+    color: MUSHAF_INK,
+    textAlign: 'justify',
+    marginVertical: 6,
+  },
+  marker: {
+    fontFamily: F.arabic,
+    fontSize: 14.5,
+    color: C.teal700,
+    backgroundColor: C.teal100,
+    borderRadius: 13,
+  },
+  ayahPlaying: { color: C.teal500 },
+  mushafFoot: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: C.line,
+    borderStyle: 'dashed',
+    marginTop: 10,
+    paddingTop: 8,
+  },
+  footText: {
+    fontFamily: F.sans,
+    fontSize: 11.5,
+    fontWeight: '800',
+    letterSpacing: 1,
+    color: C.muted,
+  },
+  /* ---- Players ---- */
+  player: { borderRadius: 20, paddingHorizontal: 16, paddingVertical: 14, marginTop: 16 },
+  playerDark: {
+    backgroundColor: C.teal900,
+    shadowColor: C.teal950,
+    shadowOpacity: 0.3,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 5,
+  },
+  playerLight: {
+    backgroundColor: C.white,
+    borderWidth: 1,
+    borderColor: C.line,
+  },
+  playerRow: { flexDirection: 'row', gap: 14 },
+  playBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  playBtnPeach: { backgroundColor: C.peachMid },
+  playBtnTeal: { backgroundColor: C.teal700 },
+  playIcon: { fontSize: 20, textAlign: 'center' },
+  playIconPeach: { color: C.peachText },
+  playIconTeal: { color: C.white },
+  playerBody: { flex: 1 },
+  playerTitle: { fontFamily: F.sans, fontSize: 14.5, fontWeight: '800', color: C.ink },
+  playerTitleDark: { color: C.white },
+  playerTrack: { height: 6, borderRadius: 999, overflow: 'hidden', marginTop: 10, marginBottom: 6 },
+  playerTrackDark: { backgroundColor: 'rgba(255,255,255,0.22)' },
+  playerTrackLight: { backgroundColor: C.teal100 },
+  playerFill: { height: 6, borderRadius: 999 },
+  playerTimes: { flexDirection: 'row', justifyContent: 'space-between' },
+  playerTime: { fontFamily: F.sans, fontSize: 12, color: C.muted },
+  playerTimeDark: { color: C.navInactive },
+  playerNote: { fontFamily: F.sans, fontSize: 12.5, lineHeight: 18, marginTop: 10 },
+  playerNoteDark: { color: C.navInactive },
+  playerNoteLight: { color: C.muted },
+  /* ---- Tarjuma list ---- */
+  ayahRow: {
+    paddingHorizontal: 4,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: C.line,
+    borderStyle: 'dashed',
+    borderRadius: 12,
+  },
+  ayahRowPlaying: { backgroundColor: PLAYING_BG },
+  ayahArabic: {
+    fontFamily: F.arabic,
+    fontSize: 25,
+    lineHeight: 52,
     color: C.ink,
     textAlign: 'right',
   },
-  ayahPlaying: { color: C.teal2 },
+  translit: {
+    fontFamily: F.sans,
+    fontSize: 13.5,
+    color: C.teal700,
+    lineHeight: 21,
+    marginTop: 6,
+  },
   urduText: {
-    fontSize: 16,
+    fontSize: 15,
     lineHeight: 26,
-    color: '#3D4A46',
+    color: C.ink,
     textAlign: 'right',
     marginTop: 6,
   },
+  english: {
+    fontFamily: F.sans,
+    fontSize: 13.5,
+    color: C.muted,
+    lineHeight: 21,
+    marginTop: 3,
+  },
+  navRow: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  navBtn: { flex: 1 },
   pageFooter: {
-    fontSize: 12,
+    fontFamily: F.sans,
+    fontSize: 12.5,
     color: C.muted,
     textAlign: 'center',
-    marginTop: 14,
+    marginTop: 10,
   },
-  audioCard: {
-    backgroundColor: C.white,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: C.line,
-    padding: 18,
-    marginBottom: 4,
-  },
-  audioTitle: { fontSize: 16, fontWeight: '800', color: C.ink, marginBottom: 6 },
-  navRow: { flexDirection: 'row', marginTop: 16 },
-  navBtn: {
-    flex: 1,
-    backgroundColor: C.teal950,
-    borderRadius: 999,
-    minHeight: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 4,
-  },
-  navBtnText: { color: C.white, fontSize: 15, fontWeight: '800' },
-  label: { fontSize: 13, fontWeight: '700', color: C.ink, marginTop: 18, marginBottom: 6 },
-  jumpRow: { flexDirection: 'row' },
-  jumpInput: {
-    flex: 1,
-    backgroundColor: C.white,
-    borderWidth: 1,
-    borderColor: C.line,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: C.ink,
-    marginRight: 10,
-  },
-  jumpBtn: {
-    backgroundColor: C.teal,
-    borderRadius: 16,
-    paddingHorizontal: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  jumpBtnText: { color: C.white, fontSize: 16, fontWeight: '800' },
 });

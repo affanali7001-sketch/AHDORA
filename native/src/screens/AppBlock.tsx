@@ -1,233 +1,537 @@
 /**
- * AppBlock — DEMO UI ONLY.
+ * AppBlock — REAL app blocking (native Android, real APK only).
  *
- * Two demos, nothing real is blocked:
- *  1. Namaz lock screen — "all apps blocked until you pray", with the
- *     "Haan, maine namaz padh li" unlock button (unlocks only the demo).
- *  2. Sleep 5-minute warning — a countdown demo of the warning shown
- *     before sleep-time blocking starts.
+ * Controls the AHDORA blocker:
+ *  - The three permissions the blocker needs (Accessibility service,
+ *    Usage Access, "Display over other apps") with buttons that open
+ *    the exact Android Settings screens to grant them.
+ *  - Master on/off, prayer-time blocking (all apps until "Haan, maine
+ *    namaz padh li"), sleep blocking (only the apps the user picks,
+ *    after a 5-minute warning), and a YouTube exemption.
+ *  - An app picker (launchable apps from the phone) for sleep blocking.
  *
- * Real blocking needs native Android modules and a real APK — it
- * CANNOT run inside Expo Go. This screen says that on the screen.
+ * The native side is an Accessibility Service (AhdoraBlockService) plus
+ * the AhdoraBlock inline module; both share SharedPreferences
+ * ("ahdora_block"). The service enforces blocking even when the app
+ * is closed. Calls and emergency are never blocked.
+ *
+ * In Expo Go the native module does not exist — this screen says so
+ * plainly instead of pretending to block.
  */
-import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import type { ScreenProps } from '../lib/nav';
+import { stringsFor } from '../lib/strings';
+import { C, L, T } from '../lib/theme';
+import { Card, EmptyState, PillButton, SectionTitle, Switch } from '../components/ui';
+import {
+  confirmPrayer,
+  DEFAULT_APP_BLOCK_CONFIG,
+  getAppBlockStatus,
+  getInstalledApps,
+  isAppBlockAvailable,
+  loadAppBlockConfig,
+  normalizeHHmm,
+  openAccessibilitySettings,
+  openOverlaySettings,
+  openUsageAccessSettings,
+  saveAppBlockConfig,
+  syncScheduleFromServer,
+  type AppBlockConfig,
+  type AppBlockStatus,
+  type InstalledApp,
+} from '../lib/appBlock';
 
-const C = {
-  ice: '#F5F7F6',
-  white: '#FFFFFF',
-  ink: '#0E1A17',
-  muted: '#687A75',
-  teal950: '#06231F',
-  teal900: '#0A352F',
-  teal: '#0B4F4A',
-  teal2: '#0F766E',
-  peach: '#FFD9BE',
-  peach2: '#FFF1E3',
-  peachDeep: '#B45309',
-  red: '#E11D2E',
-  line: '#E6ECE9',
-};
+function toMinutes(hhmm: string | null): number | null {
+  if (!hhmm) return null;
+  const m = hhmm.match(/^(\d{2}):(\d{2})$/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
 
-const STR = {
-  en: {
-    back: '← Back',
-    title: 'App Blocking',
-    demoBadge: 'DEMO ONLY — nothing is really blocked',
-    demoNote:
-      'Real app blocking needs native Android modules and a real APK. It cannot run inside Expo Go, so this screen only shows how it will look.',
-    namazTitle: 'Namaz time — apps locked',
-    namazBody:
-      'All apps are blocked until you pray. Finish your namaz, then tap below to unlock.',
-    unlock: 'Haan, maine namaz padh li',
-    unlockedTitle: 'Unlocked — demo only',
-    unlockedBody: 'In the real app this unlocks all apps after you confirm your prayer.',
-    lockAgain: 'Lock again (demo)',
-    sleepTitle: 'Sleep-time warning',
-    sleepBody: 'Sleep time is coming. You have 5 minutes to finish up — then apps will be blocked.',
-    startDemo: 'Start 5-minute warning demo',
-    closeNow: 'Close now (demo)',
-    timeLeft: 'Time left before blocking',
-    warningDone: 'Warning over — in the real app, apps would be blocked now.',
-  },
-  hi: {
-    back: '← Wapas',
-    title: 'App Blocking',
-    demoBadge: 'SIRF DEMO — kuch bhi asli me block nahi hai',
-    demoNote:
-      'Asli app blocking ke liye native Android modules aur real APK chahiye. Expo Go me ye chal nahi sakta, isliye ye screen sirf dikhati hai ki ye kaisa lagega.',
-    namazTitle: 'Namaz ka time — apps locked',
-    namazBody:
-      'Saare apps band hain jab tak aap namaz na padh lein. Namaz poori karke neeche dabao to unlock hoga.',
-    unlock: 'Haan, maine namaz padh li',
-    unlockedTitle: 'Unlock ho gaya — sirf demo',
-    unlockedBody: 'Asli app me namaz confirm karne par saare apps unlock honge.',
-    lockAgain: 'Dobara lock karo (demo)',
-    sleepTitle: 'Sleep-time warning',
-    sleepBody: 'Sone ka time aa raha hai. 5 minute bache hain — phir apps block ho jayenge.',
-    startDemo: '5-minute warning demo shuru karo',
-    closeNow: 'Abhi band karo (demo)',
-    timeLeft: 'Block hone se pehle bacha time',
-    warningDone: 'Warning khatam — asli app me ab apps block ho jate.',
-  },
-} as const;
+function todayKey(d: Date): string {
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const da = String(d.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${da}`;
+}
 
-function formatCountdown(totalSeconds: number): string {
-  const m = Math.floor(totalSeconds / 60);
-  const s = totalSeconds % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
+/** The prayer whose lock window covers right now, or null. */
+function currentPrayerLock(config: AppBlockConfig, now: Date): string | null {
+  if (!config.blocking_enabled || !config.prayer_block_enabled) return null;
+  if (config.prayer_times.length === 0) return null;
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const today = todayKey(now);
+  for (let i = 0; i < config.prayer_times.length; i++) {
+    const name = config.prayer_names[i] ?? 'Namaz';
+    if (config.prayed[name] === today) continue;
+    const start = toMinutes(normalizeHHmm(config.prayer_times[i]));
+    if (start === null) continue;
+    const end = start + (config.prayer_grace_min || 30);
+    if (nowMin >= start && nowMin < end) return name;
+  }
+  return null;
+}
+
+/** Minutes until sleep starts (0..1439), or null when not applicable. */
+function minutesUntilSleep(config: AppBlockConfig, now: Date): number | null {
+  if (!config.blocking_enabled || !config.sleep_block_enabled) return null;
+  const start = toMinutes(normalizeHHmm(config.sleep_start));
+  if (start === null) return null;
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const diff = (start - nowMin + 1440) % 1440;
+  return diff;
+}
+
+function PermRow({
+  title,
+  sub,
+  granted,
+  grantedLabel,
+  notGrantedLabel,
+  openLabel,
+  onOpen,
+}: {
+  title: string;
+  sub: string;
+  granted: boolean;
+  grantedLabel: string;
+  notGrantedLabel: string;
+  openLabel: string;
+  onOpen: () => void;
+}) {
+  return (
+    <View style={styles.permRow}>
+      <View style={styles.permText}>
+        <Text style={styles.permTitle}>{title}</Text>
+        <Text style={styles.permSub}>{sub}</Text>
+        <Text style={[styles.permState, granted ? styles.permOk : styles.permBad]}>
+          {granted ? `✓ ${grantedLabel}` : `✕ ${notGrantedLabel}`}
+        </Text>
+      </View>
+      {!granted ? (
+        <PillButton label={openLabel} onPress={onOpen} variant="peach" small />
+      ) : null}
+    </View>
+  );
 }
 
 export default function AppBlockScreen({ lang, goTo }: ScreenProps) {
-  const s = STR[lang];
-  const [locked, setLocked] = useState(true);
-  const [warningRunning, setWarningRunning] = useState(false);
-  const [warningSeconds, setWarningSeconds] = useState(300);
+  const s = stringsFor(lang);
+  const available = isAppBlockAvailable();
+  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<AppBlockStatus | null>(null);
+  const [config, setConfig] = useState<AppBlockConfig>({ ...DEFAULT_APP_BLOCK_CONFIG });
+  const [apps, setApps] = useState<InstalledApp[]>([]);
+  const [query, setQuery] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [now, setNow] = useState(() => new Date());
+  const [unlockedMsg, setUnlockedMsg] = useState<string | null>(null);
+  const mounted = useRef(true);
 
   useEffect(() => {
-    if (!warningRunning) return;
-    if (warningSeconds <= 0) {
-      setWarningRunning(false);
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  // Tick so the prayer-lock card / sleep warning appear when their time comes.
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(id);
+  }, []);
+
+  const load = useCallback(async () => {
+    if (!available) {
+      setLoading(false);
       return;
     }
-    const id = setInterval(() => setWarningSeconds((v) => Math.max(0, v - 1)), 1000);
-    return () => clearInterval(id);
-  }, [warningRunning, warningSeconds]);
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      const [cfg, st, installed] = await Promise.all([
+        loadAppBlockConfig(),
+        getAppBlockStatus(),
+        getInstalledApps(),
+      ]);
+      let merged = cfg ?? { ...DEFAULT_APP_BLOCK_CONFIG };
+      // Pull today's prayer times + sleep window from the server so the
+      // service can enforce blocking even when the app is closed.
+      const synced = await syncScheduleFromServer(merged);
+      if (synced) merged = synced;
+      if (!mounted.current) return;
+      setConfig(merged);
+      setStatus(st);
+      setApps(installed ?? []);
+    } catch {
+      if (mounted.current) setErrorMsg(s.errorGeneric);
+    } finally {
+      if (mounted.current) setLoading(false);
+    }
+  }, [available, s.errorGeneric]);
 
-  function startWarning() {
-    setWarningSeconds(300);
-    setWarningRunning(true);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const lockedPrayer = useMemo(() => currentPrayerLock(config, now), [config, now]);
+  const sleepIn = useMemo(() => minutesUntilSleep(config, now), [config, now]);
+  const sleepWarning = sleepIn !== null && sleepIn > 0 && sleepIn <= 5;
+
+  const blockedSet = useMemo(() => new Set(config.blocked_packages), [config.blocked_packages]);
+
+  const filteredApps = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = q
+      ? apps.filter(
+          (a) =>
+            a.label.toLowerCase().includes(q) ||
+            a.packageName.toLowerCase().includes(q)
+        )
+      : apps;
+    return list.slice(0, 120);
+  }, [apps, query]);
+
+  function toggleBlocked(pkg: string) {
+    setSavedMsg(null);
+    setConfig((c) => {
+      const set = new Set(c.blocked_packages);
+      if (set.has(pkg)) set.delete(pkg);
+      else set.add(pkg);
+      return { ...c, blocked_packages: [...set] };
+    });
+  }
+
+  async function onSave() {
+    setSaving(true);
+    setSavedMsg(null);
+    setErrorMsg(null);
+    const synced = await syncScheduleFromServer(config);
+    const toSave = synced ?? config;
+    const ok = await saveAppBlockConfig(toSave);
+    if (ok) {
+      setConfig(toSave);
+      setSavedMsg(s.abSaved);
+    } else {
+      setErrorMsg(s.abSaveFailed);
+    }
+    setSaving(false);
+  }
+
+  async function onUnlock() {
+    if (!lockedPrayer) return;
+    const ok = await confirmPrayer(lockedPrayer);
+    if (!ok) {
+      setErrorMsg(s.abSaveFailed);
+      return;
+    }
+    setUnlockedMsg(s.abUnlocked);
+    const cfg = await loadAppBlockConfig();
+    if (cfg) setConfig(cfg);
+  }
+
+  if (loading) {
+    return (
+      <View style={[L.safe, styles.center]}>
+        <ActivityIndicator size="large" color={C.teal} />
+        <Text style={T.sub}>{s.loading}</Text>
+      </View>
+    );
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+    <ScrollView contentContainerStyle={L.scroll} showsVerticalScrollIndicator={false}>
       <Pressable onPress={() => goTo('dashboard')} accessibilityRole="button">
         <Text style={styles.back}>{s.back}</Text>
       </Pressable>
-      <Text style={styles.title}>{s.title}</Text>
-      <Text style={styles.badge}>{s.demoBadge}</Text>
-      <Text style={styles.sub}>{s.demoNote}</Text>
+      <Text style={T.title}>{s.abTitle}</Text>
+      <Text style={T.sub}>{s.abSub}</Text>
 
-      {locked ? (
-        <View style={styles.lockCard}>
-          <Text style={styles.lockEmoji}>🔒</Text>
-          <Text style={styles.lockTitle}>{s.namazTitle}</Text>
-          <Text style={styles.lockBody}>{s.namazBody}</Text>
-          <Pressable
-            onPress={() => setLocked(false)}
-            style={styles.primaryBtn}
-            accessibilityRole="button"
-          >
-            <Text style={styles.primaryBtnText}>{s.unlock}</Text>
-          </Pressable>
-        </View>
+      {!available ? (
+        <Card style={styles.warnCard}>
+          <Text style={styles.warnText}>{s.abNotAvailable}</Text>
+        </Card>
       ) : (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>{s.unlockedTitle}</Text>
-          <Text style={styles.cardBody}>{s.unlockedBody}</Text>
-          <Pressable
-            onPress={() => setLocked(true)}
-            style={styles.peachBtn}
-            accessibilityRole="button"
-          >
-            <Text style={styles.peachBtnText}>{s.lockAgain}</Text>
-          </Pressable>
-        </View>
-      )}
+        <>
+          {errorMsg ? <Text style={T.error}>{errorMsg}</Text> : null}
+          {savedMsg ? <Text style={styles.savedText}>{savedMsg}</Text> : null}
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>{s.sleepTitle}</Text>
-        <Text style={styles.cardBody}>{s.sleepBody}</Text>
-        {warningRunning || warningSeconds < 300 ? (
-          <>
-            <Text style={styles.countLabel}>{s.timeLeft}</Text>
-            <Text style={styles.countdown}>{formatCountdown(warningSeconds)}</Text>
-            {warningSeconds === 0 ? <Text style={styles.cardBody}>{s.warningDone}</Text> : null}
-            <Pressable
-              onPress={() => {
-                setWarningRunning(false);
-                setWarningSeconds(300);
+          {lockedPrayer ? (
+            <Card style={styles.lockCard}>
+              <Text style={styles.lockTitle}>{s.abCurrentPrayer}</Text>
+              <Text style={styles.lockBody}>
+                {lockedPrayer} — {s.abCurrentPrayerSub}
+              </Text>
+              <PillButton label={s.abUnlock} onPress={onUnlock} variant="primary" block />
+              {unlockedMsg ? <Text style={styles.savedText}>{unlockedMsg}</Text> : null}
+            </Card>
+          ) : null}
+
+          {sleepWarning ? (
+            <Card style={styles.warnCard}>
+              <Text style={styles.warnText}>
+                {s.abSleepTitle} — {sleepIn} min
+              </Text>
+              <Text style={styles.warnSub}>{s.abSleepSub}</Text>
+            </Card>
+          ) : null}
+
+          <SectionTitle title={s.abPermissionsTitle} />
+          <Card>
+            <PermRow
+              title={s.abPermAccessibility}
+              sub={s.abPermAccessibilitySub}
+              granted={status?.accessibility === true}
+              grantedLabel={s.abGranted}
+              notGrantedLabel={s.abNotGranted}
+              openLabel={s.abOpenSettings}
+              onOpen={() => {
+                openAccessibilitySettings();
               }}
-              style={styles.peachBtn}
-              accessibilityRole="button"
-            >
-              <Text style={styles.peachBtnText}>{s.closeNow}</Text>
-            </Pressable>
-          </>
-        ) : (
-          <Pressable
-            onPress={startWarning}
-            style={styles.primaryBtn}
-            accessibilityRole="button"
-          >
-            <Text style={styles.primaryBtnText}>{s.startDemo}</Text>
-          </Pressable>
-        )}
-      </View>
+            />
+            <View style={styles.divider} />
+            <PermRow
+              title={s.abPermUsage}
+              sub={s.abPermUsageSub}
+              granted={status?.usageAccess === true}
+              grantedLabel={s.abGranted}
+              notGrantedLabel={s.abNotGranted}
+              openLabel={s.abOpenSettings}
+              onOpen={() => {
+                openUsageAccessSettings();
+              }}
+            />
+            <View style={styles.divider} />
+            <PermRow
+              title={s.abPermOverlay}
+              sub={s.abPermOverlaySub}
+              granted={status?.overlay === true}
+              grantedLabel={s.abGranted}
+              notGrantedLabel={s.abNotGranted}
+              openLabel={s.abOpenSettings}
+              onOpen={() => {
+                openOverlaySettings();
+              }}
+            />
+            <PillButton
+              label={s.abRefresh}
+              onPress={() => void load()}
+              variant="ghost"
+              small
+              style={{ marginTop: 12 }}
+            />
+          </Card>
+
+          <SectionTitle title={s.abMaster} />
+          <Card>
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleText}>
+                <Text style={styles.toggleLabel}>{s.abMaster}</Text>
+                <Text style={styles.toggleSub}>{s.abMasterSub}</Text>
+              </View>
+              <Switch
+                value={config.blocking_enabled}
+                onValueChange={(v) => {
+                  setSavedMsg(null);
+                  setConfig((c) => ({ ...c, blocking_enabled: v }));
+                }}
+              />
+            </View>
+          </Card>
+
+          <SectionTitle title={s.abPrayerTitle} />
+          <Card>
+            <Text style={T.cardBody}>{s.abPrayerSub}</Text>
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleText}>
+                <Text style={styles.toggleLabel}>
+                  {config.prayer_block_enabled ? s.abPrayerOn : s.abPrayerOff}
+                </Text>
+              </View>
+              <Switch
+                value={config.prayer_block_enabled}
+                onValueChange={(v) => {
+                  setSavedMsg(null);
+                  setConfig((c) => ({ ...c, prayer_block_enabled: v }));
+                }}
+              />
+            </View>
+            <Text style={styles.miniLabel}>{s.abPrayerTimes}</Text>
+            {config.prayer_times.length > 0 ? (
+              config.prayer_times.map((t, i) => (
+                <Text key={`${config.prayer_names[i] ?? i}-${t}`} style={styles.timeRow}>
+                  {config.prayer_names[i] ?? 'Namaz'} — {t}
+                </Text>
+              ))
+            ) : (
+              <Text style={T.cardBody}>{s.abPrayerTimesMissing}</Text>
+            )}
+          </Card>
+
+          <SectionTitle title={s.abSleepTitle} />
+          <Card>
+            <Text style={T.cardBody}>{s.abSleepSub}</Text>
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleText}>
+                <Text style={styles.toggleLabel}>
+                  {config.sleep_block_enabled ? s.abSleepOn : s.abSleepOff}
+                </Text>
+              </View>
+              <Switch
+                value={config.sleep_block_enabled}
+                onValueChange={(v) => {
+                  setSavedMsg(null);
+                  setConfig((c) => ({ ...c, sleep_block_enabled: v }));
+                }}
+              />
+            </View>
+            <Text style={styles.miniLabel}>{s.abSleepWindow}</Text>
+            {config.sleep_start && config.sleep_end ? (
+              <Text style={styles.timeRow}>
+                {config.sleep_start} — {config.sleep_end}
+              </Text>
+            ) : (
+              <Text style={T.cardBody}>{s.abSleepWindowMissing}</Text>
+            )}
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleText}>
+                <Text style={styles.toggleLabel}>{s.abYoutube}</Text>
+                <Text style={styles.toggleSub}>{s.abYoutubeSub}</Text>
+              </View>
+              <Switch
+                value={config.youtube_allowed}
+                onValueChange={(v) => {
+                  setSavedMsg(null);
+                  setConfig((c) => ({ ...c, youtube_allowed: v }));
+                }}
+              />
+            </View>
+          </Card>
+
+          <SectionTitle
+            title={`${s.abPickTitle} (${config.blocked_packages.length})`}
+          />
+          <Card>
+            <Text style={T.cardBody}>{s.abPickSub}</Text>
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder={s.abSearchApps}
+              placeholderTextColor={C.muted}
+              style={styles.search}
+            />
+            {filteredApps.length === 0 ? (
+              <EmptyState title={s.abPickEmpty} />
+            ) : (
+              filteredApps.map((a) => {
+                const blocked = blockedSet.has(a.packageName);
+                return (
+                  <Pressable
+                    key={a.packageName}
+                    onPress={() => toggleBlocked(a.packageName)}
+                    style={styles.appRow}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: blocked }}
+                  >
+                    <View style={styles.appText}>
+                      <Text style={styles.appLabel}>{a.label}</Text>
+                      <Text style={styles.appPkg}>{a.packageName}</Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.checkbox,
+                        blocked ? styles.checkboxOn : styles.checkboxOff,
+                      ]}
+                    >
+                      {blocked ? <Text style={styles.checkMark}>✓</Text> : null}
+                    </View>
+                  </Pressable>
+                );
+              })
+            )}
+          </Card>
+
+          <PillButton
+            label={saving ? s.saving : s.abSave}
+            onPress={onSave}
+            variant="primary"
+            block
+            busy={saving}
+            disabled={saving}
+          />
+        </>
+      )}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: { paddingHorizontal: 22, paddingTop: 28, paddingBottom: 40 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   back: { fontSize: 16, fontWeight: '700', color: C.teal, marginBottom: 16 },
-  title: { fontSize: 30, fontWeight: '800', color: C.ink, letterSpacing: -0.5 },
-  badge: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1,
-    color: C.peachDeep,
-    backgroundColor: C.peach2,
-    borderWidth: 1,
-    borderColor: C.peach,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    alignSelf: 'flex-start',
-    marginTop: 10,
-    overflow: 'hidden',
-  },
-  sub: { fontSize: 14, color: C.muted, marginTop: 12, marginBottom: 20, lineHeight: 20 },
-  lockCard: {
-    backgroundColor: C.teal950,
-    borderRadius: 26,
-    padding: 26,
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  lockEmoji: { fontSize: 44, marginBottom: 12 },
-  lockTitle: { color: C.white, fontSize: 22, fontWeight: '800', textAlign: 'center' },
-  lockBody: { color: '#B8CFCB', fontSize: 14, lineHeight: 21, textAlign: 'center', marginTop: 10, marginBottom: 20 },
-  card: {
-    backgroundColor: C.white,
-    borderRadius: 24,
+  warnCard: { backgroundColor: C.peach2, borderColor: C.peach, marginTop: 16 },
+  warnText: { fontSize: 15, fontWeight: '700', color: C.peachDeep, lineHeight: 21 },
+  warnSub: { fontSize: 14, color: C.muted, lineHeight: 20, marginTop: 6 },
+  savedText: { fontSize: 14, fontWeight: '700', color: C.teal, marginTop: 12 },
+  lockCard: { backgroundColor: C.teal950, borderColor: C.teal950, marginTop: 16 },
+  lockTitle: { color: C.white, fontSize: 20, fontWeight: '800' },
+  lockBody: { color: '#B8CFCB', fontSize: 14, lineHeight: 21, marginTop: 8, marginBottom: 16 },
+  permRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 6 },
+  permText: { flex: 1 },
+  permTitle: { fontSize: 15, fontWeight: '800', color: C.ink },
+  permSub: { fontSize: 13, color: C.muted, lineHeight: 18, marginTop: 2 },
+  permState: { fontSize: 13, fontWeight: '800', marginTop: 6 },
+  permOk: { color: C.teal2 },
+  permBad: { color: C.red },
+  divider: { height: 1, backgroundColor: C.line, marginVertical: 10 },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12 },
+  toggleText: { flex: 1 },
+  toggleLabel: { fontSize: 15, fontWeight: '800', color: C.ink },
+  toggleSub: { fontSize: 13, color: C.muted, lineHeight: 18, marginTop: 2 },
+  miniLabel: { fontSize: 12, fontWeight: '800', letterSpacing: 1, color: C.muted, marginTop: 14 },
+  timeRow: { fontSize: 15, color: C.ink, marginTop: 6, fontWeight: '600' },
+  search: {
+    backgroundColor: C.ice,
     borderWidth: 1,
     borderColor: C.line,
-    padding: 20,
-    marginBottom: 16,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: C.ink,
+    marginTop: 12,
+    marginBottom: 6,
   },
-  cardTitle: { fontSize: 18, fontWeight: '800', color: C.ink, marginBottom: 8 },
-  cardBody: { fontSize: 14, color: C.muted, lineHeight: 20, marginBottom: 14 },
-  primaryBtn: {
-    backgroundColor: C.teal,
-    borderRadius: 999,
-    minHeight: 54,
+  appRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: C.line,
+  },
+  appText: { flex: 1 },
+  appLabel: { fontSize: 15, fontWeight: '700', color: C.ink },
+  appPkg: { fontSize: 12, color: C.muted, marginTop: 2 },
+  checkbox: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 20,
-    alignSelf: 'stretch',
   },
-  primaryBtnText: { color: C.white, fontSize: 17, fontWeight: '800', textAlign: 'center' },
-  peachBtn: {
-    backgroundColor: C.peach,
-    borderRadius: 999,
-    minHeight: 54,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-  },
-  peachBtnText: { color: C.peachDeep, fontSize: 17, fontWeight: '800', textAlign: 'center' },
-  countLabel: { fontSize: 13, fontWeight: '700', color: C.muted, textAlign: 'center' },
-  countdown: { fontSize: 56, fontWeight: '800', color: C.teal900, textAlign: 'center', marginVertical: 6 },
+  checkboxOn: { backgroundColor: C.teal, borderColor: C.teal },
+  checkboxOff: { backgroundColor: C.white, borderColor: C.line },
+  checkMark: { color: C.white, fontSize: 15, fontWeight: '800' },
 });

@@ -1,404 +1,540 @@
 /**
- * Challenges — real data from the live API.
- * GET /api/challenges/mine, GET /api/challenges/templates,
- * POST /api/challenges/templates/:id/join, POST /api/challenges/:id/check-in,
- * POST /api/challenges/:id/leave.
- *
- * Streak is shown with a fire from the server's streak count. Missed
- * days are derived honestly from server numbers only: days elapsed
- * before today minus days completed before today. Share & dare have
- * NO backend yet — the buttons lead to an honest "coming" state and
- * never fake a share or a dare.
+ * Challenges — rebuilt to the approved preview (§20 in the preview file).
+ * Dark-teal hero card for the first active challenge: Day X / total,
+ * streak, a 30-cell streak grid (✓ done, 😢 missed, peach today),
+ * REAL Share (OS share sheet) and REAL Invite (pick a friend — the
+ * invite goes through POST /api/friends/invites). Friends' streak
+ * card from GET /api/friends/:id/shared-challenges (shared progress
+ * only, never private data). Peach dare card with a REAL rotating
+ * dare (fixed list of harmless dares). Template chips join real
+ * challenges (rules shown before joining); "+ Apna banao" creates a
+ * real custom challenge via POST /api/challenges/. No "coming soon"
+ * anywhere.
  */
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { apiFetch } from '../lib/api';
 import type { ScreenProps } from '../lib/nav';
+import { stringsFor, type AppLanguage } from '../lib/strings';
+import { C, L, T } from '../lib/theme';
+import { Card, Chip, EmptyState, Input, PillButton, TealHead } from '../components/ui';
 import {
   checkInChallenge,
   joinTemplate,
   leaveChallenge,
   listChallengeTemplates,
+  listFriends,
   myChallenges,
   type ChallengeParticipation,
   type ChallengeTemplate,
+  type PublicUser,
 } from '../lib/apiSocial';
 
-const C = {
-  ice: '#F5F7F6',
-  white: '#FFFFFF',
-  ink: '#0E1A17',
-  muted: '#687A75',
-  teal950: '#06231F',
-  teal900: '#0A352F',
-  teal: '#0B4F4A',
-  teal2: '#0F766E',
-  peach: '#FFD9BE',
-  peach2: '#FFF1E3',
-  peachDeep: '#B45309',
-  red: '#E11D2E',
-  line: '#E6ECE9',
+const DARES: Record<AppLanguage, string[]> = {
+  en: [
+    'The loser reads 1 page of Quran aloud to the winner after Fajr tomorrow.',
+    'The loser prays 2 nafl rakahs for the winner’s success.',
+    'The loser treats the winner to their favourite snack (under ₹50).',
+    'The loser writes down 3 things they learned this week and shares them.',
+    'The loser does 20 push-ups (or a 20-minute walk) before Maghrib.',
+    'The loser recites Surah Al-Ikhlas 10 times and gifts the reward to the winner.',
+    'The loser makes chai for the winner tomorrow.',
+  ],
+  hi: [
+    'Haar ne wale ko kal Fajr ke baad 1 page Quran padh kar sunana hai.',
+    'Haar ne wala jeetne wale ki kamyabi ke liye 2 nafl padhega.',
+    'Haar ne wala jeetne wale ko uska favourite snack khilayega (₹50 ke andar).',
+    'Haar ne wala is hafte ki 3 seekhi hui baatein likh kar share karega.',
+    'Haar ne wala Maghrib se pehle 20 push-ups (ya 20 minute walk) karega.',
+    'Haar ne wala Surah Al-Ikhlas 10 baar padh kar sawaab jeetne wale ko dega.',
+    'Haar ne wala kal jeetne wale ke liye chai banayega.',
+  ],
 };
 
-const STR = {
-  en: {
-    back: '← Back',
-    title: 'Challenges',
-    sub: 'Real challenges from your account. Days count only from real activity or an honest self-reported check-in.',
-    active: 'Your active challenges',
-    noActive: 'No active challenges yet. Join one below.',
-    templates: 'Join a challenge',
-    noTemplates: 'No challenge templates available right now.',
-    day: 'Day',
-    of: 'of',
-    daysDone: 'days done',
-    streak: 'day streak',
-    points: 'points',
-    checkIn: 'Check in today',
-    checkedIn: 'Checked in today',
-    leave: 'Leave',
-    join: 'Join',
-    joined: 'Joined',
-    share: 'Share',
-    dare: 'Dare a friend',
-    comingTitle: 'Coming in a later phase',
-    comingBody:
-      'Sharing challenges and friend dares are not built yet. Nothing was shared and no dare was sent.',
-    missedDays: 'missed days',
-    missedNote: 'Missed days stay missed — check in today to keep the streak alive.',
-    selfReported: 'Self-reported check-in: this day is recorded from your own confirmation, not measured activity.',
-    leaveRule: 'Leaving keeps your history and points — nothing is taken back.',
-    loading: 'Loading challenges…',
-    retry: 'Retry',
-    close: 'Close',
-  },
-  hi: {
-    back: '← Wapas',
-    title: 'Challenges',
-    sub: 'Aapke account ke asli challenges. Din sirf asli activity ya imaandaar self-reported check-in se ginte hain.',
-    active: 'Aapke active challenges',
-    noActive: 'Abhi koi active challenge nahi hai. Neeche se ek join karo.',
-    templates: 'Challenge join karo',
-    noTemplates: 'Abhi koi challenge template available nahi hai.',
-    day: 'Din',
-    of: 'me se',
-    daysDone: 'din poore',
-    streak: 'din ki streak',
-    points: 'points',
-    checkIn: 'Aaj check-in karo',
-    checkedIn: 'Aaj check-in ho gaya',
-    leave: 'Chhod do',
-    join: 'Join karo',
-    joined: 'Joined',
-    share: 'Share karo',
-    dare: 'Dost ko dare do',
-    comingTitle: 'Agle phase me aayega',
-    comingBody:
-      'Challenge share karna aur dost ko dare dena abhi bana nahi hai. Kuch share nahi hua aur koi dare nahi bheja gaya.',
-    missedDays: 'din miss hue',
-    missedNote: 'Miss hue din miss hi rehte hain — streak bachane ke liye aaj check-in karo.',
-    selfReported: 'Self-reported check-in: ye din aapki apni confirmation se record hua hai, measured activity se nahi.',
-    leaveRule: 'Chhodne par aapki history aur points rehte hain — kuch wapas nahi liya jata.',
-    loading: 'Challenges load ho rahe hain…',
-    retry: 'Dobara try karo',
-    close: 'Band karo',
-  },
-} as const;
+type SharedProgress = {
+  challengeId: string;
+  challengeTitle: string;
+  friend: { currentDay: number; totalDays: number; completedDays: number; pointsEarned: number };
+};
 
-/**
- * Missed days, from server numbers only: days elapsed before today
- * minus days completed before today. Never negative, never invented.
- */
+async function sharedWith(friendId: string): Promise<SharedProgress[]> {
+  const response = await apiFetch(`/api/friends/${encodeURIComponent(friendId)}/shared-challenges`);
+  const data = (await response.json().catch(() => ({}))) as { shared?: SharedProgress[] };
+  return Array.isArray(data.shared) ? data.shared : [];
+}
+
+async function sendInvite(challengeId: string, toUserId: string): Promise<void> {
+  const response = await apiFetch('/api/friends/invites', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ challengeId, toUserId }),
+  });
+  const data = (await response.json().catch(() => ({}))) as { error?: unknown };
+  if (!response.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : 'Request failed. Please try again.');
+  }
+}
+
+async function createCustomChallenge(title: string): Promise<void> {
+  const response = await apiFetch('/api/challenges', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      title,
+      description: '',
+      category: 'discipline',
+      durationDays: 30,
+      rules: ['Roz ka kaam poora karo', 'Ek din chhoota to streak toot jayega'],
+      consent: true,
+    }),
+  });
+  const data = (await response.json().catch(() => ({}))) as { error?: unknown };
+  if (!response.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : 'Request failed. Please try again.');
+  }
+}
+
+/** Missed days, from server numbers only. */
 function missedDays(p: ChallengeParticipation): number {
   const doneBeforeToday = p.completedDays - (p.todayCompleted ? 1 : 0);
   return Math.max(0, p.currentDay - 1 - doneBeforeToday);
 }
 
-export default function ChallengesScreen({ lang, goTo }: ScreenProps) {
-  const s = STR[lang];
+export default function ChallengesScreen({ lang }: ScreenProps) {
+  const s = stringsFor(lang);
   const [active, setActive] = useState<ChallengeParticipation[]>([]);
   const [templates, setTemplates] = useState<ChallengeTemplate[]>([]);
+  const [friends, setFriends] = useState<(PublicUser & { since: string })[]>([]);
+  const [friendProgress, setFriendProgress] = useState<
+    { friend: PublicUser; progress: SharedProgress }[]
+  >([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [checkInNote, setCheckInNote] = useState<string | null>(null);
+  const [notice, setNotice] = useState('');
+  const [dare, setDare] = useState<string | null>(null);
+  const [showInvitePicker, setShowInvitePicker] = useState(false);
+  const [invitedIds, setInvitedIds] = useState<Set<string>>(new Set());
+  const [selectedTemplate, setSelectedTemplate] = useState<ChallengeTemplate | null>(null);
+  const [creatingCustom, setCreatingCustom] = useState(false);
+  const [customTitle, setCustomTitle] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError(null);
+    setError('');
     try {
-      const [mine, temps] = await Promise.all([myChallenges(), listChallengeTemplates()]);
+      const [mine, temps, fr] = await Promise.all([myChallenges(), listChallengeTemplates(), listFriends()]);
       setActive(mine.active);
       setTemplates(temps);
+      setFriends(fr);
+      // Friends' shared challenge progress (shared fields only).
+      const settled = await Promise.allSettled(fr.slice(0, 6).map(async (f) => ({ f, shared: await sharedWith(f.id) })));
+      const rows: { friend: PublicUser; progress: SharedProgress }[] = [];
+      for (const result of settled) {
+        if (result.status !== 'fulfilled') continue;
+        const first = result.value.shared[0];
+        if (first) rows.push({ friend: result.value.f, progress: first });
+      }
+      rows.sort((a, b) => b.progress.friend.completedDays - a.progress.friend.completedDays);
+      setFriendProgress(rows);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Request failed. Please try again.');
+      setError(e instanceof Error ? e.message : s.errorGeneric);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [s.errorGeneric]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  const hero = active.find((p) => p.totalDays === 30) ?? active[0] ?? null;
+
+  async function shareChallenge() {
+    if (!hero) return;
+    try {
+      await Share.share({
+        message:
+          lang === 'hi'
+            ? `Main AHDORA par "${hero.challenge.title}" challenge me Day ${hero.currentDay}/${hero.totalDays} par hoon — 🔥 ${hero.streak} din ki streak! Tum bhi join karo.`
+            : `I'm on Day ${hero.currentDay}/${hero.totalDays} of the "${hero.challenge.title}" challenge on AHDORA — 🔥 ${hero.streak} day streak! Join me.`,
+      });
+    } catch {
+      // Share sheet dismissed — nothing to report.
+    }
+  }
+
+  async function inviteFriend(friendId: string) {
+    if (!hero || busyId) return;
+    setBusyId(friendId);
+    setError('');
+    try {
+      await sendInvite(hero.challengeId, friendId);
+      setInvitedIds((prev) => new Set(prev).add(friendId));
+      setNotice(s.chInviteSent);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : s.errorGeneric);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function checkIn() {
+    if (!hero || busyId) return;
+    setBusyId(hero.challengeId);
+    setError('');
+    try {
+      const result = await checkInChallenge(hero.challengeId);
+      setNotice(result.message);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : s.errorGeneric);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function leave() {
+    if (!hero || busyId) return;
+    setBusyId(hero.challengeId);
+    setError('');
+    try {
+      await leaveChallenge(hero.challengeId);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : s.errorGeneric);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function join(template: ChallengeTemplate) {
     if (busyId) return;
     setBusyId(template.id);
-    setError(null);
+    setError('');
     try {
-      const participation = await joinTemplate(template.id);
-      setActive((prev) => [participation, ...prev]);
-      setTemplates((prev) => prev.map((t) => (t.id === template.id ? { ...t, joined: true } : t)));
+      await joinTemplate(template.id);
+      setSelectedTemplate(null);
+      await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Request failed. Please try again.');
+      setError(e instanceof Error ? e.message : s.errorGeneric);
     } finally {
       setBusyId(null);
     }
   }
 
-  async function checkIn(p: ChallengeParticipation) {
-    if (busyId) return;
-    setBusyId(p.challengeId);
-    setError(null);
+  async function createCustom() {
+    const title = customTitle.trim();
+    if (!title || busyId) return;
+    setBusyId('custom');
+    setError('');
     try {
-      const result = await checkInChallenge(p.challengeId);
-      setCheckInNote(result.message);
+      await createCustomChallenge(title);
+      setCustomTitle('');
+      setCreatingCustom(false);
+      setNotice(s.chCreated);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Request failed. Please try again.');
+      setError(e instanceof Error ? e.message : s.errorGeneric);
     } finally {
       setBusyId(null);
     }
   }
 
-  async function leave(p: ChallengeParticipation) {
-    if (busyId) return;
-    setBusyId(p.challengeId);
-    setError(null);
-    try {
-      await leaveChallenge(p.challengeId);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Request failed. Please try again.');
-    } finally {
-      setBusyId(null);
+  function showDare() {
+    const list = DARES[lang];
+    const dayOfYear = Math.floor(
+      (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86_400_000,
+    );
+    setDare(list[dayOfYear % list.length]);
+  }
+
+  // Streak grid cells for the hero challenge.
+  const gridCells: ('done' | 'missed' | 'today' | 'future')[] = [];
+  if (hero) {
+    const missed = missedDays(hero);
+    const doneBeforeToday = Math.max(0, hero.completedDays - (hero.todayCompleted ? 1 : 0));
+    for (let day = 1; day <= hero.totalDays; day += 1) {
+      if (day === hero.currentDay) gridCells.push('today');
+      else if (day < hero.currentDay) {
+        gridCells.push(day <= doneBeforeToday ? 'done' : day <= doneBeforeToday + missed ? 'missed' : 'future');
+      } else gridCells.push('future');
     }
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-      <Pressable onPress={() => goTo('dashboard')} accessibilityRole="button">
-        <Text style={styles.back}>{s.back}</Text>
-      </Pressable>
-      <Text style={styles.title}>{s.title}</Text>
-      <Text style={styles.sub}>{s.sub}</Text>
-
-      {notice ? (
-        <View style={styles.noticeCard}>
-          <Text style={styles.noticeTitle}>{s.comingTitle}</Text>
-          <Text style={styles.noticeBody}>{s.comingBody}</Text>
-          <Pressable onPress={() => setNotice(null)} accessibilityRole="button">
-            <Text style={styles.noticeClose}>{s.close}</Text>
-          </Pressable>
-        </View>
-      ) : null}
-      {checkInNote ? <Text style={styles.checkInNote}>{checkInNote}</Text> : null}
+    <ScrollView contentContainerStyle={L.scroll} showsVerticalScrollIndicator={false}>
+      <Text style={T.title}>{s.chTitle}</Text>
+      <Text style={T.sub}>{s.chSub}</Text>
 
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={C.teal} />
-          <Text style={styles.note}>{s.loading}</Text>
-        </View>
+        <ActivityIndicator color={C.teal700} style={{ marginVertical: 24 }} />
       ) : error && active.length === 0 && templates.length === 0 ? (
-        <View style={styles.card}>
-          <Text style={styles.error}>{error}</Text>
-          <Pressable onPress={() => void load()} style={styles.primaryBtn} accessibilityRole="button">
-            <Text style={styles.primaryBtnText}>{s.retry}</Text>
-          </Pressable>
-        </View>
+        <Card>
+          <Text style={T.error}>{error}</Text>
+          <PillButton label={s.retry} onPress={() => void load()} />
+        </Card>
       ) : (
-        <>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+        <View>
+          {error ? <Text style={T.error}>{error}</Text> : null}
+          {notice ? <Text style={styles.notice}>{notice}</Text> : null}
 
-          <Text style={styles.sectionTitle}>{s.active}</Text>
-          {active.length === 0 ? (
-            <Text style={styles.empty}>{s.noActive}</Text>
-          ) : (
-            active.map((p) => {
-              const missed = missedDays(p);
-              const progress = p.totalDays > 0 ? p.completedDays / p.totalDays : 0;
-              return (
-                <View key={p.id} style={styles.card}>
-                  <Text style={styles.cardTitle}>{p.challenge.title}</Text>
-                  <Text style={styles.cardBody}>{p.challenge.description}</Text>
-                  <Text style={styles.meta}>
-                    {s.day} {p.currentDay} {s.of} {p.totalDays} · {p.completedDays} {s.daysDone}
-                  </Text>
-                  <View style={styles.progressTrack}>
-                    <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
-                  </View>
-                  <Text style={styles.streak}>
-                    🔥 {p.streak} {s.streak} · {p.pointsEarned} {s.points}
-                  </Text>
-                  {missed > 0 ? (
-                    <Text style={styles.missed}>
-                      😢 {missed} {s.missedDays} — {s.missedNote}
-                    </Text>
-                  ) : null}
-                  <View style={styles.btnRow}>
-                    <Pressable
-                      onPress={() => void checkIn(p)}
-                      style={[
-                        styles.primaryBtn,
-                        styles.flexBtn,
-                        (p.todayCompleted || busyId === p.challengeId) && styles.btnDisabled,
-                      ]}
-                      disabled={p.todayCompleted || busyId === p.challengeId}
-                      accessibilityRole="button"
-                    >
-                      <Text style={styles.primaryBtnText}>
-                        {p.todayCompleted ? s.checkedIn : s.checkIn}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => setNotice('share')}
-                      style={[styles.peachBtn, styles.flexBtn]}
-                      accessibilityRole="button"
-                    >
-                      <Text style={styles.peachBtnText}>{s.share}</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => setNotice('dare')}
-                      style={[styles.peachBtn, styles.flexBtn]}
-                      accessibilityRole="button"
-                    >
-                      <Text style={styles.peachBtnText}>{s.dare}</Text>
-                    </Pressable>
-                  </View>
-                  <Text style={styles.meta}>{s.selfReported}</Text>
-                  <Pressable onPress={() => void leave(p)} disabled={busyId === p.challengeId} accessibilityRole="button">
-                    <Text style={styles.leave}>{s.leave} — {s.leaveRule}</Text>
-                  </Pressable>
-                </View>
-              );
-            })
-          )}
-
-          <Text style={styles.sectionTitle}>{s.templates}</Text>
-          {templates.length === 0 ? (
-            <Text style={styles.empty}>{s.noTemplates}</Text>
-          ) : (
-            templates.map((t) => (
-              <View key={t.id} style={styles.card}>
-                <Text style={styles.cardTitle}>{t.title}</Text>
-                <Text style={styles.cardBody}>{t.description}</Text>
-                <Text style={styles.meta}>
-                  {t.durationDays} days · {t.requirement}
+          {/* Hero — first active challenge */}
+          {hero ? (
+            <TealHead style={{ marginTop: 14 }}>
+              <View style={styles.heroHead}>
+                <Text style={styles.heroTitle}>{hero.challenge.title}</Text>
+                <Text style={styles.heroTag}>
+                  Day {hero.currentDay} / {hero.totalDays}
                 </Text>
-                {t.rules.slice(0, 3).map((rule) => (
-                  <Text key={rule} style={styles.rule}>
-                    • {rule}
-                  </Text>
-                ))}
-                <Pressable
-                  onPress={() => void join(t)}
-                  style={[
-                    styles.primaryBtn,
-                    (t.joined || busyId === t.id) && styles.btnDisabled,
-                  ]}
-                  disabled={t.joined || busyId === t.id}
-                  accessibilityRole="button"
-                >
-                  <Text style={styles.primaryBtnText}>{t.joined ? s.joined : s.join}</Text>
-                </Pressable>
               </View>
-            ))
+              <Text style={styles.heroStreak}>
+                🔥 {hero.streak} <Text style={styles.heroStreakSub}>{s.chStreakWord}</Text>
+              </Text>
+              <View style={styles.streakGrid}>
+                {gridCells.map((cell, i) => (
+                  <View
+                    key={i}
+                    style={[
+                      styles.streakCell,
+                      cell === 'done' && styles.streakDone,
+                      cell === 'today' && styles.streakToday,
+                      cell === 'missed' && styles.streakMissed,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.streakCellText,
+                        cell === 'done' && styles.streakDoneText,
+                        cell === 'today' && styles.streakTodayText,
+                      ]}
+                    >
+                      {cell === 'done' ? '✓' : cell === 'missed' ? '😢' : cell === 'today' ? hero.currentDay : ''}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+              <Text style={styles.heroNote}>
+                {s.chGridNote.replace('{day}', String(hero.currentDay))}
+              </Text>
+              <View style={styles.heroBtns}>
+                <View style={{ flex: 1 }}>
+                  <PillButton label={s.chShare} small variant="peach" block onPress={() => void shareChallenge()} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <PillButton
+                    label={s.chInvite}
+                    small
+                    variant="soft"
+                    block
+                    onPress={() => setShowInvitePicker((v) => !v)}
+                  />
+                </View>
+              </View>
+              {!hero.todayCompleted ? (
+                <PillButton
+                  label={s.chCheckIn}
+                  small
+                  variant="soft"
+                  block
+                  onPress={() => void checkIn()}
+                  disabled={busyId === hero.challengeId}
+                />
+              ) : (
+                <Text style={styles.checkedIn}>{s.chCheckedIn}</Text>
+              )}
+              <Pressable onPress={() => void leave()} disabled={busyId === hero.challengeId} accessibilityRole="button">
+                <Text style={styles.leave}>{s.chLeave}</Text>
+              </Pressable>
+            </TealHead>
+          ) : (
+            <EmptyState title={s.chTitle} body={s.chNoActive} />
           )}
-        </>
+
+          {/* Invite picker — real invite via the API */}
+          {showInvitePicker && hero ? (
+            <Card>
+              <Text style={T.cardTitle}>{s.chInvitePick}</Text>
+              {friends.length === 0 ? (
+                <Text style={[T.cardBody, { marginTop: 6 }]}>{s.chNoFriends}</Text>
+              ) : (
+                friends.map((f) => (
+                  <View key={f.id} style={styles.friendRow}>
+                    <View style={styles.avatar}>
+                      <Text style={styles.avatarText}>{f.initial}</Text>
+                    </View>
+                    <Text style={styles.friendName}>{f.name}</Text>
+                    <PillButton
+                      label={invitedIds.has(f.id) ? s.chInviteSent : s.chInvite}
+                      small
+                      variant={invitedIds.has(f.id) ? 'ghost' : 'primary'}
+                      onPress={() => void inviteFriend(f.id)}
+                      disabled={invitedIds.has(f.id) || busyId === f.id}
+                    />
+                  </View>
+                ))
+              )}
+            </Card>
+          ) : null}
+
+          {/* Friends' streaks — shared progress only */}
+          <Card>
+            <Text style={T.cardTitle}>{s.chFriendH}</Text>
+            {friendProgress.length === 0 ? (
+              <Text style={[T.cardBody, { marginTop: 6 }]}>{s.chNoShared}</Text>
+            ) : (
+              friendProgress.map(({ friend, progress }, i) => (
+                <View key={friend.id} style={styles.friendRow}>
+                  <View style={[styles.avatar, i % 2 === 1 && styles.avatarPeach]}>
+                    <Text style={[styles.avatarText, i % 2 === 1 && styles.avatarTextPeach]}>
+                      {friend.initial}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.friendName}>{friend.name}</Text>
+                    <Text style={styles.friendSub}>
+                      Day {progress.friend.currentDay} / {progress.friend.totalDays} · 🔥{' '}
+                      {progress.friend.completedDays} din streak
+                    </Text>
+                  </View>
+                  <Text style={styles.rankTag}>{i + 1 === 1 ? '1st' : i + 1 === 2 ? '2nd' : '3rd'}</Text>
+                </View>
+              ))
+            )}
+            <Text style={[T.cardBody, { marginTop: 10 }]}>{s.chFriendNote}</Text>
+          </Card>
+
+          {/* Dare rule */}
+          <View style={styles.dareCard}>
+            <Text style={styles.dareTitle}>{s.chDareH}</Text>
+            <Text style={styles.dareBody}>{s.chDareBody}</Text>
+            <PillButton label={s.chDareBtn} small variant="soft" onPress={showDare} />
+            {dare ? <Text style={styles.dareText}>{dare}</Text> : null}
+          </View>
+
+          {/* Template chips + custom */}
+          <View style={styles.chips}>
+            {templates.slice(0, 3).map((t) => (
+              <Chip
+                key={t.id}
+                label={t.title}
+                selected={selectedTemplate?.id === t.id}
+                onPress={() => setSelectedTemplate(selectedTemplate?.id === t.id ? null : t)}
+              />
+            ))}
+            <Chip label={`+ ${s.chCustom}`} tone="peach" onPress={() => setCreatingCustom((v) => !v)} />
+          </View>
+          {selectedTemplate ? (
+            <Card>
+              <Text style={T.cardTitle}>{selectedTemplate.title}</Text>
+              <Text style={[T.cardBody, { marginTop: 4 }]}>{selectedTemplate.description}</Text>
+              <Text style={[T.cardBody, { marginTop: 4 }]}>
+                {selectedTemplate.durationDays} days · {selectedTemplate.requirement}
+              </Text>
+              {selectedTemplate.rules.map((rule) => (
+                <Text key={rule} style={[T.cardBody, { marginTop: 2 }]}>
+                  • {rule}
+                </Text>
+              ))}
+              <View style={{ marginTop: 10 }}>
+                <PillButton
+                  label={selectedTemplate.joined ? s.chJoined : s.chJoin}
+                  onPress={() => void join(selectedTemplate)}
+                  disabled={selectedTemplate.joined || busyId === selectedTemplate.id}
+                  busy={busyId === selectedTemplate.id}
+                />
+              </View>
+            </Card>
+          ) : null}
+          {creatingCustom ? (
+            <View style={styles.addRow}>
+              <Input
+                value={customTitle}
+                onChangeText={setCustomTitle}
+                placeholder={s.chCustomTitlePh}
+                editable={busyId !== 'custom'}
+                onSubmitEditing={() => void createCustom()}
+                style={{ flex: 1 }}
+              />
+              <PillButton label={s.chCreateBtn} small onPress={() => void createCustom()} busy={busyId === 'custom'} />
+            </View>
+          ) : null}
+          <Text style={styles.footnote}>{s.chRules}</Text>
+        </View>
       )}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: { paddingHorizontal: 22, paddingTop: 28, paddingBottom: 40 },
-  back: { fontSize: 16, fontWeight: '700', color: C.teal, marginBottom: 16 },
-  title: { fontSize: 30, fontWeight: '800', color: C.ink, letterSpacing: -0.5 },
-  sub: { fontSize: 14, color: C.muted, marginTop: 6, marginBottom: 20, lineHeight: 20 },
-  center: { alignItems: 'center', paddingVertical: 40 },
-  note: { fontSize: 13, color: C.muted, marginTop: 10, textAlign: 'center' },
-  error: { color: C.red, fontSize: 14, fontWeight: '600', textAlign: 'center', marginBottom: 12 },
-  empty: { fontSize: 14, color: C.muted, lineHeight: 20, marginBottom: 12 },
-  sectionTitle: { fontSize: 18, fontWeight: '800', color: C.ink, marginTop: 8, marginBottom: 12 },
-  card: {
-    backgroundColor: C.white,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: C.line,
-    padding: 20,
-    marginBottom: 14,
-  },
-  cardTitle: { fontSize: 18, fontWeight: '800', color: C.ink, marginBottom: 6 },
-  cardBody: { fontSize: 14, color: C.muted, lineHeight: 20, marginBottom: 8 },
-  meta: { fontSize: 13, color: C.muted, lineHeight: 19, marginBottom: 8 },
-  rule: { fontSize: 13, color: C.muted, lineHeight: 19, marginBottom: 4 },
-  progressTrack: {
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: C.line,
-    overflow: 'hidden',
-    marginBottom: 10,
-  },
-  progressFill: { height: 10, backgroundColor: C.teal, borderRadius: 5 },
-  streak: { fontSize: 15, fontWeight: '800', color: C.ink, marginBottom: 8 },
-  missed: { fontSize: 14, color: C.ink, lineHeight: 20, marginBottom: 8 },
-  btnRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
-  flexBtn: { flex: 1 },
-  primaryBtn: {
-    backgroundColor: C.teal,
-    borderRadius: 999,
-    minHeight: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-  },
-  primaryBtnText: { color: C.white, fontSize: 15, fontWeight: '800', textAlign: 'center' },
-  peachBtn: {
-    backgroundColor: C.peach,
-    borderRadius: 999,
-    minHeight: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-  },
-  peachBtnText: { color: C.peachDeep, fontSize: 15, fontWeight: '800', textAlign: 'center' },
-  btnDisabled: { opacity: 0.6 },
-  leave: { color: C.red, fontSize: 13, fontWeight: '700', lineHeight: 18 },
-  noticeCard: {
-    backgroundColor: C.peach2,
-    borderWidth: 1,
-    borderColor: C.peach,
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 16,
-  },
-  noticeTitle: { fontSize: 16, fontWeight: '800', color: C.peachDeep, marginBottom: 6 },
-  noticeBody: { fontSize: 14, color: C.ink, lineHeight: 20, marginBottom: 8 },
-  noticeClose: { color: C.teal, fontSize: 14, fontWeight: '800' },
-  checkInNote: {
+  notice: {
+    fontFamily: 'PlusJakartaSans',
     fontSize: 13,
-    color: C.teal,
-    backgroundColor: C.peach2,
+    fontWeight: '700',
+    color: C.teal700,
+    backgroundColor: C.teal100,
     borderRadius: 12,
     padding: 10,
-    marginBottom: 14,
+    marginTop: 12,
     lineHeight: 18,
   },
+  heroHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 },
+  heroTitle: { fontFamily: 'PlusJakartaSans', fontSize: 17, fontWeight: '800', color: C.white, flex: 1 },
+  heroTag: {
+    fontFamily: 'PlusJakartaSans',
+    fontSize: 11,
+    fontWeight: '800',
+    backgroundColor: C.peach,
+    color: C.peachInk,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    overflow: 'hidden',
+  },
+  heroStreak: { fontFamily: 'PlusJakartaSans', fontSize: 26, fontWeight: '800', color: C.white, marginTop: 12 },
+  heroStreakSub: { fontSize: 15, fontWeight: '700', color: C.navInactive },
+  streakGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 10 },
+  streakCell: {
+    width: '12.5%',
+    aspectRatio: 1,
+    borderRadius: 9,
+    backgroundColor: '#EDF3F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  streakDone: { backgroundColor: C.teal500 },
+  streakToday: { backgroundColor: C.peach, borderWidth: 2, borderColor: C.peachMid },
+  streakMissed: { backgroundColor: '#FDF0ED' },
+  streakCellText: { fontFamily: 'PlusJakartaSans', fontSize: 12, fontWeight: '700', color: C.muted },
+  streakDoneText: { color: C.white },
+  streakTodayText: { color: C.peachInk },
+  heroNote: { fontFamily: 'PlusJakartaSans', fontSize: 12.5, color: C.navInactive, marginTop: 10, lineHeight: 18 },
+  heroBtns: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  checkedIn: { fontFamily: 'PlusJakartaSans', fontSize: 13, fontWeight: '700', color: C.navInactive, textAlign: 'center', marginTop: 4 },
+  leave: { fontFamily: 'PlusJakartaSans', fontSize: 13, fontWeight: '700', color: C.peach, textAlign: 'center', marginTop: 10 },
+  friendRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: C.line },
+  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.teal700, alignItems: 'center', justifyContent: 'center' },
+  avatarPeach: { backgroundColor: C.peachMid },
+  avatarText: { fontFamily: 'PlusJakartaSans', fontSize: 17, fontWeight: '800', color: C.white },
+  avatarTextPeach: { color: C.peachText },
+  friendName: { fontFamily: 'PlusJakartaSans', fontSize: 15, fontWeight: '700', color: C.ink, flex: 1 },
+  friendSub: { fontFamily: 'PlusJakartaSans', fontSize: 12.5, color: C.muted, marginTop: 2 },
+  rankTag: {
+    fontFamily: 'PlusJakartaSans',
+    fontSize: 11,
+    fontWeight: '800',
+    backgroundColor: C.teal100,
+    color: C.teal900,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    overflow: 'hidden',
+  },
+  dareCard: { backgroundColor: C.peach, borderWidth: 1, borderColor: C.peach, borderRadius: 20, padding: 16, marginBottom: 12 },
+  dareTitle: { fontFamily: 'PlusJakartaSans', fontSize: 15.5, fontWeight: '800', color: C.peachInk },
+  dareBody: { fontFamily: 'PlusJakartaSans', fontSize: 14, color: C.peachInk, lineHeight: 22, marginTop: 6, marginBottom: 12 },
+  dareText: { fontFamily: 'PlusJakartaSans', fontSize: 14, fontWeight: '700', color: C.peachInk, lineHeight: 20, marginTop: 10 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 2 },
+  addRow: { flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 8, marginBottom: 8 },
+  footnote: { fontFamily: 'PlusJakartaSans', fontSize: 12.5, color: C.muted, lineHeight: 18, marginTop: 10, textAlign: 'center' },
 });

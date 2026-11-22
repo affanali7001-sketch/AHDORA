@@ -245,6 +245,49 @@ export async function login(email: string, password: string): Promise<AuthUser> 
   return data.user;
 }
 
+export type SignupResult = {
+  user: AuthUser;
+  verificationEmailSent: boolean;
+  notice?: string;
+};
+
+/**
+ * Real signup against the live API. Returns the created user.
+ * The server requires name 2–60 chars and password 12–128 chars;
+ * it returns 400 for invalid details and 409 when the email is
+ * already registered. Throws an Error carrying the server's message.
+ */
+export async function signup(
+  name: string,
+  email: string,
+  password: string
+): Promise<SignupResult> {
+  await refreshCsrfToken();
+  const response = await apiFetch('/api/auth/signup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, email, password }),
+  });
+  const data = await parseJson<{
+    user?: AuthUser;
+    verificationEmailSent?: boolean;
+    notice?: string;
+    error?: unknown;
+  }>(response);
+  if (!response.ok || !data.user) {
+    const message =
+      typeof data.error === 'string' && data.error.length > 0
+        ? data.error
+        : 'Request failed. Please try again.';
+    throw new Error(message);
+  }
+  return {
+    user: data.user,
+    verificationEmailSent: data.verificationEmailSent === true,
+    notice: typeof data.notice === 'string' ? data.notice : undefined,
+  };
+}
+
 /** Real logout against the live API. Best effort — local state is cleared regardless. */
 export async function logout(): Promise<void> {
   try {

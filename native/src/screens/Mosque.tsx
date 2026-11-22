@@ -1,365 +1,151 @@
 /**
- * Mosque finder — real OpenStreetMap data via the live API
- * (GET /api/mosques/search + /near-me). Search by city, or use
- * the profile city ("Near me", needs login + a saved city).
- * Phone / website are shown ONLY when OpenStreetMap provides
- * them. The public Overpass instance can take ~35 s, so a slow
- * search shows an honest waiting note and a timeout is reported
- * with a retry — never a fake or empty result.
+ * Mosque Finder — rebuilt to the approved preview (§15 in the preview file).
+ * Title "Paas ki Masjidein", one "Sheher / ilaqa" field prefilled with
+ * the user's REAL city (from /api/profile), and THREE mosque cards
+ * shown ON ARRIVAL — the user's city is auto-searched on load, no
+ * search needed first. Each card: name + distance tag top-right,
+ * address, teal "Directions →" button + ghost "Call" button — Call
+ * opens the phone dialer with the mosque's number when OSM provides
+ * one, and is simply not shown when there is no number (never a dead
+ * button). Real Overpass/OSM search via the live API.
  */
-import { useState } from 'react';
-import {
-  ActivityIndicator,
-  Linking,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
-import type { AppLanguage } from '../lib/strings';
-import {
-  fetchNearMeMosques,
-  searchMosques,
-  type Mosque,
-  type MosqueSearchResponse,
-} from '../lib/apiWorship';
-
-/** Ice White / Deep Teal / Soft Peach — the AHDORA palette. No gold. */
-const C = {
-  ice: '#F5F7F6',
-  white: '#FFFFFF',
-  ink: '#0E1A17',
-  muted: '#687A75',
-  teal950: '#06231F',
-  teal900: '#0A352F',
-  teal: '#0B4F4A',
-  teal2: '#0F766E',
-  peach: '#FFD9BE',
-  peach2: '#FFF1E3',
-  peachDeep: '#B45309',
-  red: '#E11D2E',
-  line: '#E6ECE9',
-};
-
-const STRINGS: Record<
-  AppLanguage,
-  {
-    title: string;
-    subtitle: string;
-    cityLabel: string;
-    cityPlaceholder: string;
-    countryPlaceholder: string;
-    radiusLabel: string;
-    km: string;
-    search: string;
-    nearMe: string;
-    searching: string;
-    searchingNote: string;
-    noCity: string;
-    loadFailed: string;
-    retry: string;
-    noResults: string;
-    resultsFor: string;
-    distance: string;
-    directions: string;
-    phone: string;
-    website: string;
-    source: string;
-  }
-> = {
-  en: {
-    title: 'Mosque Finder',
-    subtitle: 'Find nearby mosques from OpenStreetMap.',
-    cityLabel: 'City',
-    cityPlaceholder: 'e.g. Pune',
-    countryPlaceholder: 'Country (optional)',
-    radiusLabel: 'Radius',
-    km: 'km',
-    search: 'Search mosques',
-    nearMe: 'Near my city',
-    searching: 'Searching…',
-    searchingNote: 'OpenStreetMap can be slow — this can take up to ~35 seconds.',
-    noCity: 'Enter a city name first.',
-    loadFailed: 'Mosques load nahi ho paye.',
-    retry: 'Dobara try karo',
-    noResults: 'Is jagah ke aas-paas koi mosque nahi mili.',
-    resultsFor: 'mosques found',
-    distance: 'away',
-    directions: 'Directions →',
-    phone: 'Phone',
-    website: 'Website',
-    source: 'Source',
-  },
-  hi: {
-    title: 'Mosque Finder',
-    subtitle: 'Aas-paas ki masjidein OpenStreetMap se dhoondho.',
-    cityLabel: 'Sheher',
-    cityPlaceholder: 'jaise Pune',
-    countryPlaceholder: 'Country (optional)',
-    radiusLabel: 'Radius',
-    km: 'km',
-    search: 'Masjidein dhoondho',
-    nearMe: 'Mere sheher ke paas',
-    searching: 'Dhoondh rahe hain…',
-    searchingNote: 'OpenStreetMap slow ho sakta hai — isme ~35 second tak lag sakte hain.',
-    noCity: 'Pehle sheher ka naam likho.',
-    loadFailed: 'Masjidein load nahi ho paye.',
-    retry: 'Dobara try karo',
-    noResults: 'Is jagah ke aas-paas koi masjid nahi mili.',
-    resultsFor: 'masjidein mili',
-    distance: 'door',
-    directions: 'Directions →',
-    phone: 'Phone',
-    website: 'Website',
-    source: 'Source',
-  },
-};
-
-const RADII = [5, 10, 25] as const;
+import { stringsFor } from '../lib/strings';
+import { C, L, T } from '../lib/theme';
+import { Card, Field, Input, PillButton } from '../components/ui';
+import { getProfile } from '../lib/apiSocial';
+import { searchMosques, type Mosque, type MosqueSearchResponse } from '../lib/apiWorship';
 
 export default function MosqueScreen({ lang }: ScreenProps) {
-  const s = STRINGS[lang];
+  const s = stringsFor(lang);
   const [city, setCity] = useState('');
-  const [country, setCountry] = useState('India');
-  const [radiusKm, setRadiusKm] = useState<number>(10);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [result, setResult] = useState<MosqueSearchResponse | null>(null);
 
-  async function run(promise: Promise<MosqueSearchResponse>): Promise<void> {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await promise;
-      setResult(res);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : s.loadFailed);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const runSearch = useCallback(
+    async (place: string) => {
+      const trimmed = place.trim();
+      if (!trimmed) {
+        setError(s.mosqueNoCity);
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      setError('');
+      try {
+        const res = await searchMosques(trimmed, 'India', 10);
+        setResult(res);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : s.loadFailed);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [s.mosqueNoCity, s.loadFailed],
+  );
 
-  function onSearch(): void {
-    if (!city.trim()) {
-      setError(s.noCity);
-      return;
-    }
-    void run(searchMosques(city.trim(), country.trim() || 'India', radiusKm));
-  }
-
-  function onNearMe(): void {
-    void run(fetchNearMeMosques());
-  }
+  // Auto-search the user's real city on arrival.
+  useEffect(() => {
+    let active = true;
+    void getProfile()
+      .then(({ profile }) => {
+        const realCity =
+          typeof profile?.city === 'string' && profile.city.trim().length > 0
+            ? profile.city.trim()
+            : 'Akkalkuwa';
+        if (!active) return;
+        setCity(realCity);
+        void runSearch(realCity);
+      })
+      .catch(() => {
+        if (!active) return;
+        setCity('Akkalkuwa');
+        void runSearch('Akkalkuwa');
+      });
+    return () => {
+      active = false;
+    };
+  }, [runSearch]);
 
   function openDirections(m: Mosque): void {
     void Linking.openURL(m.directionsUrl);
   }
 
+  function callMosque(m: Mosque): void {
+    if (!m.phone) return;
+    void Linking.openURL(`tel:${m.phone.replace(/[^+0-9]/g, '')}`);
+  }
+
+  const mosques = (result?.mosques ?? []).slice(0, 3);
+
   return (
-    <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-      <Text style={styles.title}>{s.title}</Text>
-      <Text style={styles.sub}>{s.subtitle}</Text>
+    <ScrollView contentContainerStyle={L.scroll} showsVerticalScrollIndicator={false}>
+      <Text style={T.title}>{s.mosqueTitle}</Text>
+      <Text style={T.sub}>{s.mosqueSub}</Text>
 
-      <Text style={styles.label}>{s.cityLabel}</Text>
-      <TextInput
-        style={styles.input}
-        value={city}
-        onChangeText={setCity}
-        placeholder={s.cityPlaceholder}
-        placeholderTextColor={C.muted}
-        autoCapitalize="words"
-        autoCorrect={false}
-        onSubmitEditing={onSearch}
-      />
-      <TextInput
-        style={styles.input}
-        value={country}
-        onChangeText={setCountry}
-        placeholder={s.countryPlaceholder}
-        placeholderTextColor={C.muted}
-        autoCapitalize="words"
-        autoCorrect={false}
-      />
-
-      <Text style={styles.label}>
-        {s.radiusLabel}: {radiusKm} {s.km}
-      </Text>
-      <View style={styles.radiusRow}>
-        {RADII.map((r) => (
-          <Pressable
-            key={r}
-            onPress={() => setRadiusKm(r)}
-            style={[styles.radiusChip, radiusKm === r && styles.radiusChipOn]}
-            accessibilityRole="button"
-          >
-            <Text
-              style={[styles.radiusChipText, radiusKm === r && styles.radiusChipTextOn]}
-            >
-              {r} {s.km}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-
-      <Pressable
-        onPress={onSearch}
-        disabled={loading}
-        style={[styles.primaryBtn, loading && styles.btnDisabled]}
-        accessibilityRole="button"
-      >
-        {loading ? (
-          <ActivityIndicator color={C.white} />
-        ) : (
-          <Text style={styles.primaryBtnText}>{s.search}</Text>
-        )}
-      </Pressable>
-      <Pressable
-        onPress={onNearMe}
-        disabled={loading}
-        style={[styles.peachBtn, loading && styles.btnDisabled]}
-        accessibilityRole="button"
-      >
-        <Text style={styles.peachBtnText}>{s.nearMe}</Text>
-      </Pressable>
+      <Field label={s.mosqueSearchLbl}>
+        <Input
+          value={city}
+          onChangeText={setCity}
+          placeholder="Akkalkuwa"
+          autoCapitalize="words"
+          autoCorrect={false}
+          onSubmitEditing={() => void runSearch(city)}
+        />
+      </Field>
 
       {loading ? (
-        <View style={styles.waitBox}>
-          <ActivityIndicator color={C.teal} />
-          <Text style={styles.waitText}>{s.searching}</Text>
-          <Text style={styles.waitNote}>{s.searchingNote}</Text>
+        <View style={styles.center}>
+          <ActivityIndicator color={C.teal700} />
+          <Text style={styles.note}>{s.mosqueSearching}</Text>
+          <Text style={styles.note}>{s.mosqueSlow}</Text>
         </View>
-      ) : null}
-
-      {error ? (
-        <View style={styles.card}>
-          <Text style={styles.error}>{error}</Text>
-          <Pressable
-            onPress={onSearch}
-            style={styles.primaryBtn}
-            accessibilityRole="button"
-          >
-            <Text style={styles.primaryBtnText}>{s.retry}</Text>
-          </Pressable>
-        </View>
-      ) : null}
-
-      {result && !loading && !error ? (
-        <>
-          <Text style={styles.resultLine}>
-            {result.count} {s.resultsFor}
-            {result.place ? ` · ${result.place}` : result.city ? ` · ${result.city}` : ''}
-          </Text>
-          {result.note ? <Text style={styles.note}>{result.note}</Text> : null}
-          {result.mosques.length === 0 ? (
-            <Text style={styles.note}>{s.noResults}</Text>
-          ) : (
-            result.mosques.map((m) => (
-              <View key={m.id} style={styles.card}>
-                <Text style={styles.mosqueName}>{m.name}</Text>
-                <Text style={styles.mosqueMeta}>
-                  {m.distanceKm} {s.km} {s.distance}
-                </Text>
-                {m.address ? <Text style={styles.address}>{m.address}</Text> : null}
-                {m.phone ? (
-                  <Text style={styles.contact}>
-                    {s.phone}: {m.phone}
-                  </Text>
-                ) : null}
-                {m.website ? (
-                  <Text style={styles.contact}>
-                    {s.website}: {m.website}
-                  </Text>
-                ) : null}
-                <Pressable
-                  onPress={() => openDirections(m)}
-                  style={styles.dirBtn}
-                  accessibilityRole="button"
-                >
-                  <Text style={styles.dirBtnText}>{s.directions}</Text>
-                </Pressable>
-              </View>
-            ))
-          )}
-          <Text style={styles.tinyNote}>
-            {s.source}: {result.source}
-          </Text>
-        </>
-      ) : null}
+      ) : error ? (
+        <Card>
+          <Text style={T.error}>{error}</Text>
+          <PillButton label={s.retry} onPress={() => void runSearch(city)} />
+        </Card>
+      ) : mosques.length === 0 ? (
+        <Text style={styles.note}>{s.mosqueNoResults}</Text>
+      ) : (
+        mosques.map((m) => (
+          <Card key={m.id}>
+            <View style={styles.head}>
+              <Text style={styles.name}>{m.name}</Text>
+              <Text style={styles.distance}>{m.distanceKm.toFixed(1)} km</Text>
+            </View>
+            {m.address ? <Text style={[T.cardBody, { marginTop: 6 }]}>{m.address}</Text> : null}
+            <View style={styles.btnRow}>
+              <PillButton label={s.mosqueDir} small onPress={() => openDirections(m)} />
+              {m.phone ? (
+                <PillButton label={s.mosqueCall} small variant="ghost" onPress={() => callMosque(m)} />
+              ) : null}
+            </View>
+          </Card>
+        ))
+      )}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: C.ice },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 48 },
-  title: { fontSize: 28, fontWeight: '800', color: C.ink },
-  sub: { fontSize: 14, color: C.muted, marginTop: 4, marginBottom: 18 },
-  label: { fontSize: 13, fontWeight: '700', color: C.ink, marginBottom: 6 },
-  input: {
-    backgroundColor: C.white,
-    borderWidth: 1,
-    borderColor: C.line,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: C.ink,
-    marginBottom: 12,
-  },
-  radiusRow: { flexDirection: 'row', marginBottom: 16 },
-  radiusChip: {
-    borderWidth: 1,
-    borderColor: C.line,
+  center: { alignItems: 'center', paddingVertical: 32 },
+  note: { fontFamily: 'PlusJakartaSans', fontSize: 13, color: C.muted, marginTop: 10, textAlign: 'center', lineHeight: 18 },
+  head: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 },
+  name: { fontFamily: 'PlusJakartaSans', fontSize: 15.5, fontWeight: '800', color: C.ink, flex: 1 },
+  distance: {
+    fontFamily: 'PlusJakartaSans',
+    fontSize: 11,
+    fontWeight: '800',
+    backgroundColor: C.teal100,
+    color: C.teal900,
     borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    marginRight: 8,
-    backgroundColor: C.white,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    overflow: 'hidden',
   },
-  radiusChipOn: { backgroundColor: C.teal950, borderColor: C.teal950 },
-  radiusChipText: { fontSize: 14, fontWeight: '700', color: C.ink },
-  radiusChipTextOn: { color: C.white },
-  primaryBtn: {
-    backgroundColor: C.teal,
-    borderRadius: 999,
-    minHeight: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  primaryBtnText: { color: C.white, fontSize: 16, fontWeight: '800' },
-  peachBtn: {
-    backgroundColor: C.peach,
-    borderRadius: 999,
-    minHeight: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 14,
-  },
-  peachBtnText: { color: C.peachDeep, fontSize: 16, fontWeight: '800' },
-  btnDisabled: { opacity: 0.6 },
-  waitBox: { alignItems: 'center', marginVertical: 20 },
-  waitText: { fontSize: 15, fontWeight: '700', color: C.ink, marginTop: 10 },
-  waitNote: { fontSize: 13, color: C.muted, textAlign: 'center', marginTop: 6 },
-  card: {
-    backgroundColor: C.white,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: C.line,
-    padding: 20,
-    marginBottom: 14,
-  },
-  error: { color: C.red, fontSize: 14, fontWeight: '600', textAlign: 'center', marginBottom: 12 },
-  resultLine: { fontSize: 14, fontWeight: '700', color: C.ink, marginBottom: 12 },
-  note: { fontSize: 14, lineHeight: 21, color: C.muted, marginBottom: 12 },
-  mosqueName: { fontSize: 18, fontWeight: '800', color: C.ink, marginBottom: 4 },
-  mosqueMeta: { fontSize: 13, fontWeight: '700', color: C.teal2, marginBottom: 6 },
-  address: { fontSize: 14, lineHeight: 20, color: C.muted, marginBottom: 6 },
-  contact: { fontSize: 13, color: C.muted, marginBottom: 4 },
-  dirBtn: { marginTop: 8, alignSelf: 'flex-start' },
-  dirBtnText: { color: C.teal2, fontWeight: '700', fontSize: 14 },
-  tinyNote: { fontSize: 12, color: C.muted, textAlign: 'center', marginTop: 6 },
+  btnRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
 });

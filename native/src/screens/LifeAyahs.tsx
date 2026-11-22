@@ -1,261 +1,324 @@
 /**
  * Life Ayahs — a SEPARATE section from the Quran Book.
  *
- * ONLY the four previously verified curated ayahs, copied exactly
- * from the web app's src/components/QuranDuas.tsx (Arabic,
- * transliteration, Hinglish meaning, English line, surah / para /
- * page references). No other verse is added here — the full Quran
- * lives in the Quran Book screen.
+ * ONLY the four previously verified curated ayahs, in the preview's
+ * order (Ar-Ra'd → Al-Baqarah → Taha → Al-Mu'minun). Arabic,
+ * Hinglish meaning and English are copied exactly from the curated
+ * set already in this file (web app QuranDuas.tsx); Al-Baqarah
+ * 2:286 shows ONLY the selected portion, labelled as such.
+ * No other verse is added — the full Quran lives in Quran Book.
+ *
+ * Voice is REAL: tapping "Voice suno" plays that ayah's tilawat
+ * (EveryAyah, Mishary Rashid Alafasy, AlQuran Cloud CDN fallback),
+ * reusing the same retry-once player pattern as QuranBook.
  */
-import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
 import type { ScreenProps } from '../lib/nav';
-import type { AppLanguage } from '../lib/strings';
+import { stringsFor } from '../lib/strings';
+import { C, F, L, T } from '../lib/theme';
+import { Card, PillButton } from '../components/ui';
+import {
+  everyAyahUrl,
+  tilawatFallbackUrl,
+} from '../lib/apiWorship';
 
-/** Ice White / Deep Teal / Soft Peach — the AHDORA palette. No gold. */
-const C = {
-  ice: '#F5F7F6',
-  white: '#FFFFFF',
-  ink: '#0E1A17',
-  muted: '#687A75',
-  teal950: '#06231F',
-  teal900: '#0A352F',
-  teal: '#0B4F4A',
-  teal2: '#0F766E',
-  peach: '#FFD9BE',
-  peach2: '#FFF1E3',
-  peachDeep: '#B45309',
-  line: '#E6ECE9',
-};
-
-const STRINGS: Record<
-  AppLanguage,
-  {
-    title: string;
-    subtitle: string;
-    note: string;
-    para: string;
-    page: string;
-    meaning: string;
-    showMore: string;
-    showLess: string;
-    openInBook: string;
-  }
-> = {
-  en: {
-    title: 'Life Ayahs',
-    subtitle: 'Four verses to live by — how to live life.',
-    note: 'Only these four verified ayahs are shown here. The full Quran is in the Quran Book.',
-    para: 'Para',
-    page: 'Page',
-    meaning: 'Hinglish meaning',
-    showMore: 'Show transliteration + English',
-    showLess: 'Hide details',
-    openInBook: 'Open in Quran Book →',
-  },
-  hi: {
-    title: 'Life Ayahs',
-    subtitle: 'Zindagi jeene ke liye chaar ayahs.',
-    note: 'Yahan sirf ye chaar verified ayahs hain. Poora Quran, Quran Book me hai.',
-    para: 'Para',
-    page: 'Page',
-    meaning: 'Hinglish matlab',
-    showMore: 'Transliteration + English dikhao',
-    showLess: 'Details chhupao',
-    openInBook: 'Quran Book me kholo →',
-  },
-};
-
-/** The four curated ayahs — verbatim from the web app (QuranDuas.tsx). */
+/** The four curated ayahs — verbatim curated text, preview order. */
 const CURATED_AYAHS = [
   {
-    title: 'Shaitani waswason se panaah',
-    surah: 'Al-Mu’minun',
-    surahNumber: 23,
-    reference: '23:97–98',
-    para: 18,
-    pages: '348',
-    arabic:
-      'وَقُل رَّبِّ أَعُوذُ بِكَ مِنْ هَمَزَٰتِ ٱلشَّيَـٰطِينِ ۝ وَأَعُوذُ بِكَ رَبِّ أَن يَحْضُرُونِ',
-    transliteration:
-      "Wa qul rabbi a'oodhu bika min hamazaatish-shayaateen. Wa a'oodhu bika rabbi an yahduroon.",
-    meaning:
-      'Ae mere Rab! Main shaitanon ke waswason se Teri panaah maangta hoon. Aur Ae mere Rab! Main Teri panaah maangta hoon is baat se ki woh mere paas aayein.',
-    english: 'My Lord, I seek refuge in You from the whisperings of the devils.',
-    category: 'Waswase aur panaah',
-    type: 'Dua',
-  },
-  {
-    title: 'Mushkil aur bojh ke waqt',
-    surah: 'Al-Baqarah',
-    surahNumber: 2,
-    reference: '2:286',
-    para: 3,
-    pages: '49',
-    arabic:
-      'رَبَّنَا لَا تُؤَاخِذْنَآ إِن نَّسِينَآ أَوْ أَخْطَأْنَا ۚ رَبَّنَا وَلَا تَحْمِلْ عَلَيْنَآ إِصْرًا كَمَا حَمَلْتَهُۥ عَلَى ٱلَّذِينَ مِن قَبْلِنَا ۚ رَبَّنَا وَلَا تُحَمِّلْنَا مَا لَا طَاقَةَ لَنَا بِهِۦ ۖ وَٱعْفُ عَنَّا وَٱغْفِرْ لَنَا وَٱرْحَمْنَآ',
-    transliteration:
-      "Rabbana la tu'aakhidhna in naseena aw akhta'na. Rabbana wa la tahmil 'alayna isran kama hamaltahu 'alal-lazeena min qablina. Rabbana wa la tuhammilna ma la taqata lana bih. Wa'fu 'anna, waghfir lana, warhamna.",
-    meaning:
-      'Ae hamare Rab! Agar hum bhool jaayein ya galti kar baithein toh humein na pakad. Hum par aisa bojh na daal jiski hum mein taaqat nahi. Humein maaf kar, humein bakhsh de aur hum par raham farma.',
-    english: 'Our Lord, do not hold us accountable if we forget or make a mistake.',
-    category: 'Maafi aur aasani',
-    type: 'Selected dua portion',
-  },
-  {
-    title: 'Dil khulne aur kaam aasaan hone ki dua',
-    surah: 'Taha',
-    surahNumber: 20,
-    reference: '20:25–28',
-    para: 16,
-    pages: '313',
-    arabic:
-      'قَالَ رَبِّ ٱشْرَحْ لِى صَدْرِى ۝ وَيَسِّرْ لِىٓ أَمْرِى ۝ وَٱحْلُلْ عُقْدَةًۭ مِّن لِّسَانِى ۝ يَفْقَهُوا۟ قَوْلِى',
-    transliteration:
-      "Qaala rabbish-rah lee sadree. Wa yassir lee amree. Wahlul 'uqdatan min lisaanee. Yafqahoo qawlee.",
-    meaning:
-      'Ae mere Rab! Mera seena khol de, mera kaam mere liye aasaan kar de, meri zubaan ki girah khol de, taaki log meri baat samajh sakein.',
-    english: 'My Lord, expand for me my chest and ease for me my task.',
-    category: 'Aasani aur ilm',
-    type: 'Dua',
-  },
-  {
-    title: 'Dil ka sukoon',
+    themeHi: 'Dil ka sukoon',
+    themeEn: 'Peace of the heart',
     surah: 'Ar-Ra’d',
     surahNumber: 13,
+    ayahStart: 28,
+    ayahEnd: 28,
     reference: '13:28',
     para: 13,
-    pages: '252',
+    page: 252,
     arabic:
       'ٱلَّذِينَ ءَامَنُوا۟ وَتَطْمَئِنُّ قُلُوبُهُم بِذِكْرِ ٱللَّهِ ۗ أَلَا بِذِكْرِ ٱللَّهِ تَطْمَئِنُّ ٱلْقُلُوبُ',
-    transliteration:
-      "Allazeena aamanoo wa tatma'innu quloobuhum bizikrillaah. Alaa bizikrillaahi tatma'innul-quloob.",
     meaning:
       'Jo log imaan laaye aur jinke dil Allah ke zikr se sukoon paate hain. Sun lo, Allah ke zikr hi se dilon ko sukoon milta hai.',
     english: 'Verily, in the remembrance of Allah do hearts find rest.',
-    category: 'Sukoon aur zikr',
-    type: 'Ayat, dua nahi',
+  },
+  {
+    themeHi: 'Mushkil waqt ki dua (chuna hua hissa)',
+    themeEn: 'Dua for hard times (selected portion)',
+    surah: 'Al-Baqarah',
+    surahNumber: 2,
+    ayahStart: 286,
+    ayahEnd: 286,
+    reference: '2:286',
+    para: 3,
+    page: 49,
+    // Selected portion ONLY (the full ayah is longer) — verbatim
+    // prefix of the curated 2:286 text, as in the preview.
+    arabic: 'رَبَّنَا لَا تُؤَاخِذْنَا إِن نَّسِينَا أَوْ أَخْطَأْنَا',
+    meaning:
+      'Ae hamare Rabb! Agar hum bhool jaayein ya galti kar dein to humein na pakadna.',
+    english: 'Our Lord! Do not hold us accountable if we forget or make a mistake.',
+  },
+  {
+    themeHi: 'Padhai / bolne se pehle ki dua',
+    themeEn: 'Dua before studying or speaking',
+    surah: 'Taha',
+    surahNumber: 20,
+    ayahStart: 25,
+    ayahEnd: 28,
+    reference: '20:25–28',
+    para: 16,
+    page: 313,
+    arabic:
+      'قَالَ رَبِّ ٱشْرَحْ لِى صَدْرِى ۝ وَيَسِّرْ لِىٓ أَمْرِى ۝ وَٱحْلُلْ عُقْدَةًۭ مِّن لِّسَانِى ۝ يَفْقَهُوا۟ قَوْلِى',
+    meaning:
+      'Ae mere Rab! Mera seena khol de, mera kaam mere liye aasaan kar de, meri zubaan ki girah khol de, taaki log meri baat samajh sakein.',
+    english: 'My Lord, expand for me my chest and ease for me my task.',
+  },
+  {
+    themeHi: 'Waswason se hifazat',
+    themeEn: 'Protection from whisperings',
+    surah: 'Al-Mu’minun',
+    surahNumber: 23,
+    ayahStart: 97,
+    ayahEnd: 98,
+    reference: '23:97–98',
+    para: 18,
+    page: 348,
+    arabic:
+      'وَقُل رَّبِّ أَعُوذُ بِكَ مِنْ هَمَزَٰتِ ٱلشَّيَـٰطِينِ ۝ وَأَعُوذُ بِكَ رَبِّ أَن يَحْضُرُونِ',
+    meaning:
+      'Ae mere Rab! Main shaitanon ke waswason se Teri panaah maangta hoon. Aur Ae mere Rab! Main Teri panaah maangta hoon is baat se ki woh mere paas aayein.',
+    english: 'My Lord, I seek refuge in You from the whisperings of the devils.',
   },
 ];
 
-export default function LifeAyahsScreen({ lang, goTo }: ScreenProps) {
-  const s = STRINGS[lang];
-  const [expanded, setExpanded] = useState<number | null>(null);
+type AudioItem = { uri: string; fallbackUri: string };
+
+export default function LifeAyahsScreen({ lang }: ScreenProps) {
+  const s = stringsFor(lang);
+  const [playingRef, setPlayingRef] = useState<string | null>(null);
+  const [audioBusy, setAudioBusy] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
+
+  const soundRef = useRef<AudioPlayer | null>(null);
+  const queueRef = useRef<AudioItem[]>([]);
+  const queueIndexRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      void stopAudio();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function stopAudio(): Promise<void> {
+    queueRef.current = [];
+    queueIndexRef.current = 0;
+    setPlayingRef(null);
+    setAudioBusy(false);
+    const sound = soundRef.current;
+    soundRef.current = null;
+    if (sound) sound.remove();
+  }
+
+  async function playAt(index: number): Promise<void> {
+    const queue = queueRef.current;
+    if (index >= queue.length) {
+      await stopAudio();
+      return;
+    }
+    const item = queue[index];
+    if (!item) return;
+    queueIndexRef.current = index;
+    const old = soundRef.current;
+    soundRef.current = null;
+    if (old) old.remove();
+    const tryLoad = (uri: string): AudioPlayer => {
+      const player = createAudioPlayer({ uri }, { updateInterval: 500 });
+      let retried = false;
+      player.addListener('playbackStatusUpdate', (status) => {
+        if (status.error) {
+          if (uri === item.uri) {
+            player.replace({ uri: item.fallbackUri });
+            player.play();
+          } else if (!retried) {
+            retried = true;
+            player.replace({ uri });
+            player.play();
+          } else {
+            setAudioError(
+              lang === 'hi'
+                ? 'Audio nahi chal paya. Dobara try karo.'
+                : 'Audio could not play. Try again.',
+            );
+            void stopAudio();
+          }
+          return;
+        }
+        if (status.isLoaded) setAudioBusy(false);
+        if (status.didJustFinish) void playAt(queueIndexRef.current + 1);
+      });
+      player.play();
+      return player;
+    };
+    try {
+      soundRef.current = tryLoad(item.uri);
+    } catch {
+      try {
+        soundRef.current = tryLoad(item.fallbackUri);
+      } catch {
+        setAudioError(
+          lang === 'hi'
+            ? 'Audio nahi chal paya. Dobara try karo.'
+            : 'Audio could not play. Try again.',
+        );
+        await stopAudio();
+      }
+    }
+  }
+
+  async function toggleVoice(ayah: (typeof CURATED_AYAHS)[number]): Promise<void> {
+    if (playingRef === ayah.reference) {
+      await stopAudio();
+      return;
+    }
+    setAudioError(null);
+    setAudioBusy(true);
+    await stopAudio();
+    // Global ayah number = ayahs before this surah + ayah-in-surah.
+    // The fallback CDN needs the global number; EveryAyah needs
+    // surah + ayah-in-surah. Exact global numbers for these four
+    // ayahs (verified: surah starts — Al-Baqarah 8, Ar-Ra'd 1708,
+    // Taha 2349, Al-Mu'minun 2674 — from AlQuran Cloud's 1..6236
+    // numbering).
+    const GLOBAL_START: Record<number, number> = {
+      2: 8,
+      13: 1708,
+      20: 2349,
+      23: 2674,
+    };
+    const start = GLOBAL_START[ayah.surahNumber] ?? 0;
+    const queue: AudioItem[] = [];
+    for (let a = ayah.ayahStart; a <= ayah.ayahEnd; a += 1) {
+      queue.push({
+        uri: everyAyahUrl(ayah.surahNumber, a),
+        fallbackUri: tilawatFallbackUrl(start + a - 1),
+      });
+    }
+    queueRef.current = queue;
+    setPlayingRef(ayah.reference);
+    await playAt(0);
+  }
 
   return (
-    <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-      <Text style={styles.title}>{s.title}</Text>
-      <Text style={styles.sub}>{s.subtitle}</Text>
-      <Text style={styles.note}>{s.note}</Text>
+    <ScrollView style={styles.scroll} contentContainerStyle={L.scroll}>
+      <Text style={T.title}>{s.lifeTitle}</Text>
+      <Text style={T.sub}>{s.lifeSub}</Text>
+      {audioError ? <Text style={T.error}>{audioError}</Text> : null}
 
-      {CURATED_AYAHS.map((ayah, index) => {
-        const isOpen = expanded === index;
+      {CURATED_AYAHS.map((ayah) => {
+        const theme = lang === 'hi' ? ayah.themeHi : ayah.themeEn;
+        const playing = playingRef === ayah.reference;
         return (
-          <View key={ayah.reference} style={styles.card}>
-            <View style={styles.chipRow}>
-              <Text style={styles.chip}>{ayah.category}</Text>
-              <Text style={styles.chipMuted}>{ayah.type}</Text>
+          <Card key={ayah.reference}>
+            <View style={styles.headRow}>
+              <Text style={styles.theme}>{theme}</Text>
+              <View style={styles.metaTag}>
+                <Text style={styles.metaTagText}>
+                  Para {ayah.para} · Page {ayah.page}
+                </Text>
+              </View>
             </View>
-            <Text style={styles.cardTitle}>{ayah.title}</Text>
-            <Text style={styles.ref}>
-              {ayah.surah} · {ayah.reference} · {s.para} {ayah.para} · {s.page}{' '}
-              {ayah.pages}
-            </Text>
             <Text style={styles.arabic}>{ayah.arabic}</Text>
-            <Text style={styles.label}>{s.meaning}</Text>
             <Text style={styles.meaning}>{ayah.meaning}</Text>
-            {isOpen ? (
-              <>
-                <Text style={styles.translit}>{ayah.transliteration}</Text>
-                <Text style={styles.english}>{ayah.english}</Text>
-              </>
-            ) : null}
-            <Pressable
-              onPress={() => setExpanded(isOpen ? null : index)}
-              style={styles.toggleBtn}
-              accessibilityRole="button"
-            >
-              <Text style={styles.toggleText}>{isOpen ? s.showLess : s.showMore}</Text>
-            </Pressable>
-          </View>
+            <Text style={styles.english}>{ayah.english}</Text>
+            <View style={styles.divider} />
+            <View style={styles.footRow}>
+              <Text style={styles.ref}>
+                Surah {ayah.surah} · {ayah.reference}
+              </Text>
+              <PillButton
+                label={
+                  playing ? '■ Roko' : audioBusy && !playing ? '…' : '▶ Voice suno'
+                }
+                variant="ghost"
+                small
+                busy={audioBusy && playing}
+                onPress={() => void toggleVoice(ayah)}
+              />
+            </View>
+          </Card>
         );
       })}
-
-      <Pressable
-        onPress={() => goTo('quran')}
-        style={styles.primaryBtn}
-        accessibilityRole="button"
-      >
-        <Text style={styles.primaryBtnText}>{s.openInBook}</Text>
-      </Pressable>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   scroll: { flex: 1, backgroundColor: C.ice },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 48 },
-  title: { fontSize: 28, fontWeight: '800', color: C.ink },
-  sub: { fontSize: 14, color: C.muted, marginTop: 4 },
-  note: {
-    fontSize: 13,
-    lineHeight: 19,
-    color: C.muted,
-    backgroundColor: C.peach2,
-    borderRadius: 14,
-    padding: 12,
-    marginTop: 14,
-    marginBottom: 18,
+  headRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 10,
   },
-  card: {
-    backgroundColor: C.white,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: C.line,
-    padding: 20,
-    marginBottom: 16,
+  theme: {
+    flex: 1,
+    fontFamily: F.sans,
+    fontSize: 14.5,
+    fontWeight: '800',
+    color: C.ink,
   },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 10 },
-  chip: {
-    backgroundColor: C.teal,
-    color: C.white,
-    fontSize: 12,
-    fontWeight: '700',
+  metaTag: {
+    backgroundColor: C.peach,
     borderRadius: 999,
-    paddingHorizontal: 10,
+    paddingHorizontal: 9,
     paddingVertical: 4,
-    overflow: 'hidden',
-    marginRight: 8,
+    flexShrink: 0,
   },
-  chipMuted: { fontSize: 12, color: C.muted, alignSelf: 'center' },
-  cardTitle: { fontSize: 19, fontWeight: '800', color: C.ink, marginBottom: 4 },
-  ref: { fontSize: 13, color: C.muted, marginBottom: 14 },
+  metaTagText: {
+    fontFamily: F.sans,
+    fontSize: 11,
+    fontWeight: '800',
+    color: C.peachInk,
+  },
   arabic: {
-    fontSize: 23,
-    lineHeight: 42,
+    fontFamily: F.arabic,
+    fontSize: 22,
+    lineHeight: 44,
     color: C.teal900,
     textAlign: 'right',
-    marginBottom: 14,
+    marginTop: 12,
+    marginBottom: 6,
   },
-  label: { fontSize: 12, fontWeight: '800', color: C.muted, marginBottom: 4 },
-  meaning: { fontSize: 15, lineHeight: 23, color: C.ink, marginBottom: 10 },
-  translit: {
+  meaning: {
+    fontFamily: F.sans,
     fontSize: 14,
-    lineHeight: 21,
+    lineHeight: 22,
+    color: C.teal700,
+  },
+  english: {
+    fontFamily: F.sans,
+    fontSize: 13.5,
     color: C.muted,
-    fontStyle: 'italic',
-    marginBottom: 8,
+    lineHeight: 21,
+    marginTop: 5,
   },
-  english: { fontSize: 14, lineHeight: 21, color: C.ink },
-  toggleBtn: { marginTop: 12, alignSelf: 'flex-start' },
-  toggleText: { color: C.teal2, fontWeight: '700', fontSize: 14 },
-  primaryBtn: {
-    backgroundColor: C.teal,
-    borderRadius: 999,
-    minHeight: 52,
+  divider: {
+    borderTopWidth: 1,
+    borderTopColor: C.line,
+    borderStyle: 'dashed',
+    marginVertical: 12,
+  },
+  footRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 4,
+    gap: 10,
   },
-  primaryBtnText: { color: C.white, fontSize: 16, fontWeight: '800' },
+  ref: { fontFamily: F.sans, fontSize: 12.5, color: C.muted, flex: 1 },
 });

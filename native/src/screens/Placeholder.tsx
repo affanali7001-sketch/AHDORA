@@ -1,8 +1,7 @@
 /**
- * Temporary stand-in for screens owned by other Phase 2 workers
- * (Quran, Focus, Profile, Study, …). It shows an honest "coming soon"
- * instead of fake content. Each worker replaces its usage in App.tsx
- * with their real screen import when their file lands.
+ * Fallback for an unknown screen id. All 24 real screens are wired
+ * in App.tsx, so this should never render; if it does, it says so
+ * honestly instead of promising a screen that is "coming soon".
  */
 import { ScrollView, Text } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
@@ -14,8 +13,8 @@ export default function PlaceholderScreen({ lang }: ScreenProps) {
   const s = stringsFor(lang);
   return (
     <ScrollView contentContainerStyle={L.scrollNoNav} showsVerticalScrollIndicator={false}>
-      <Text style={[T.title, { marginBottom: 16 }]}>{s.comingSoon}</Text>
-      <EmptyState title={s.comingSoon} body={s.comingSoonBody} />
+      <Text style={[T.title, { marginBottom: 16 }]}>{s.screenNotFound}</Text>
+      <EmptyState title={s.screenNotFound} body={s.screenNotFoundBody} />
     </ScrollView>
   );
 }

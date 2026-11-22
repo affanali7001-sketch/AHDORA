@@ -25,7 +25,17 @@
     },
     "plugins": [
       "expo-asset",
-      "./plugins/withBundleInDebug"
-    ]
+      "./plugins/withBundleInDebug",
+      "./plugins/withAhdoraBlock",
+      "expo-font",
+      "expo-splash-screen"
+    ],
+    "experiments": {
+      "inlineModules": {
+        "watchedDirectories": [
+          "app"
+        ]
+      }
+    }
   }
 }

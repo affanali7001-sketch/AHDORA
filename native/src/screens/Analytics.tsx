@@ -1,341 +1,247 @@
 /**
- * Analytics — real data only, from the live API.
- * GET /api/study/stats (focus minutes, tasks done, streak, per-subject
- * breakdown), GET /api/rewards/summary (points, badges, recent),
- * GET /api/salah/calendar/:month (prayed/qaza/missed/pending counts),
- * GET /api/challenges/mine (active challenge counts).
+ * Analytics — rebuilt to the approved preview (§22 in the preview file).
+ * Title "Analytics", period chips Daily / Weekly / Monthly that REALLY
+ * switch the reporting period. A 7-bar chart (Mon–Sun, real focus
+ * minutes per day from completed Pomodoro sessions — the max day is
+ * peach). Stat grid: prayers in the period, study total, focus total,
+ * sleep average — ALL real; sleep has no real data source, so it
+ * honestly shows "—" with a note instead of a fake number. No
+ * percentages anywhere. No sections list.
  *
- * Only counts the server actually returns are shown. Where there is
- * no data, an honest empty state is shown. No percentages, no
- * invented statistics, ever.
+ * Data: /api/study/stats (today/week focus minutes), /api/salah/
+ * calendar/:month (per-day prayer statuses + month totals),
+ * /api/study/pomodoro/history (completed sessions with completedAt +
+ * focusMinutesEarned, for the per-day chart and the monthly total).
  */
-import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { apiFetch } from '../lib/api';
 import type { ScreenProps } from '../lib/nav';
+import { stringsFor } from '../lib/strings';
+import { C, L, T } from '../lib/theme';
+import { Card, Chip, EmptyState, PillButton } from '../components/ui';
 import {
-  myChallenges,
-  rewardsSummary,
   salahCalendar,
   studyStats,
-  type RewardsSummary,
+  type SalahCalendarDay,
   type StudyStats,
 } from '../lib/apiSocial';
 
-const C = {
-  ice: '#F5F7F6',
-  white: '#FFFFFF',
-  ink: '#0E1A17',
-  muted: '#687A75',
-  teal950: '#06231F',
-  teal900: '#0A352F',
-  teal: '#0B4F4A',
-  teal2: '#0F766E',
-  peach: '#FFD9BE',
-  peach2: '#FFF1E3',
-  peachDeep: '#B45309',
-  red: '#E11D2E',
-  line: '#E6ECE9',
-};
+type Period = 'daily' | 'weekly' | 'monthly';
+const PERIODS: Period[] = ['daily', 'weekly', 'monthly'];
+const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-const STR = {
-  en: {
-    back: '← Back',
-    title: 'Analytics',
-    sub: 'Only real numbers from your account. If a section is empty, it means there is no data yet — nothing is estimated.',
-    focusToday: 'Focus minutes today',
-    focusWeek: 'Focus minutes this week',
-    tasksToday: 'Tasks completed today',
-    streak: 'Focus streak',
-    days: 'days',
-    min: 'min',
-    points: 'Total points',
-    badges: 'Badges earned',
-    noBadges: 'No badges yet — badges are earned from real activity.',
-    recentPoints: 'Recent points',
-    noRecent: 'No points yet.',
-    salahMonth: 'Salah this month',
-    prayed: 'Prayed',
-    qaza: 'Qaza',
-    missed: 'Missed',
-    pending: 'Pending',
-    noSalah: 'No Salah records this month yet.',
-    subjects: 'Subjects this week',
-    noSubjects: 'No subjects yet.',
-    tasksDone: 'tasks done',
-    focusWeekSub: 'focus this week',
-    challenges: 'Challenges',
-    activeChallenges: 'active challenges',
-    noChallenges: 'No challenges joined yet.',
-    loading: 'Loading your analytics…',
-    retry: 'Retry',
-    emptyAll: 'Nothing to show yet — use Salah, Study, Focus or Challenges and your real numbers will appear here.',
-  },
-  hi: {
-    back: '← Wapas',
-    title: 'Analytics',
-    sub: 'Sirf aapke account ke asli numbers. Agar koi section khaali hai to matlab abhi data nahi hai — kuch estimate nahi kiya gaya.',
-    focusToday: 'Aaj ke focus minutes',
-    focusWeek: 'Is hafte ke focus minutes',
-    tasksToday: 'Aaj poore hue tasks',
-    streak: 'Focus streak',
-    days: 'din',
-    min: 'min',
-    points: 'Total points',
-    badges: 'Mile hue badges',
-    noBadges: 'Abhi koi badge nahi — badge asli activity se milte hain.',
-    recentPoints: 'Recent points',
-    noRecent: 'Abhi koi points nahi.',
-    salahMonth: 'Is mahine ki Salah',
-    prayed: 'Prayed',
-    qaza: 'Qaza',
-    missed: 'Missed',
-    pending: 'Pending',
-    noSalah: 'Is mahine abhi koi Salah record nahi hai.',
-    subjects: 'Is hafte ke subjects',
-    noSubjects: 'Abhi koi subject nahi hai.',
-    tasksDone: 'tasks poore',
-    focusWeekSub: 'is hafte focus',
-    challenges: 'Challenges',
-    activeChallenges: 'active challenges',
-    noChallenges: 'Abhi koi challenge join nahi kiya.',
-    loading: 'Aapki analytics load ho rahi hai…',
-    retry: 'Dobara try karo',
-    emptyAll: 'Abhi dikhane ko kuch nahi — Salah, Study, Focus ya Challenges use karo, aapke asli numbers yahan aa jayenge.',
-  },
-} as const;
+type HistorySession = { completedAt: string | null; focusMinutesEarned: number; status: string };
 
-function currentMonthKey(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+async function fetchHistory(): Promise<HistorySession[]> {
+  const response = await apiFetch('/api/study/pomodoro/history?limit=50');
+  const data = (await response.json().catch(() => ({}))) as {
+    sessions?: HistorySession[];
+    total?: number;
+  };
+  return Array.isArray(data.sessions) ? data.sessions : [];
 }
 
-export default function AnalyticsScreen({ lang, goTo }: ScreenProps) {
-  const s = STR[lang];
+function monthKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function dayKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate(),
+  ).padStart(2, '0')}`;
+}
+
+/** Monday of the current week (local time). */
+function mondayOfWeek(now: Date): Date {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const offset = (d.getDay() + 6) % 7; // Mon = 0
+  d.setDate(d.getDate() - offset);
+  return d;
+}
+
+export default function AnalyticsScreen({ lang }: ScreenProps) {
+  const s = stringsFor(lang);
+  const [period, setPeriod] = useState<Period>('weekly');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState('');
   const [stats, setStats] = useState<StudyStats | null>(null);
-  const [rewards, setRewards] = useState<RewardsSummary | null>(null);
-  const [salahTotals, setSalahTotals] = useState<Record<string, number> | null>(null);
-  const [activeChallengeCount, setActiveChallengeCount] = useState<number | null>(null);
+  const [days, setDays] = useState<SalahCalendarDay[]>([]);
+  const [monthTotals, setMonthTotals] = useState<Record<string, number>>({});
+  const [history, setHistory] = useState<HistorySession[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError(null);
+    setError('');
     try {
-      const [st, rw, cal, mine] = await Promise.all([
+      const [st, cal, hist] = await Promise.all([
         studyStats(),
-        rewardsSummary(),
-        salahCalendar(currentMonthKey()),
-        myChallenges(),
+        salahCalendar(monthKey(new Date())),
+        fetchHistory(),
       ]);
       setStats(st);
-      setRewards(rw);
-      setSalahTotals(cal.totals);
-      setActiveChallengeCount(mine.active.length);
+      setDays(cal.days);
+      setMonthTotals(cal.totals);
+      setHistory(hist);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Request failed. Please try again.');
+      setError(e instanceof Error ? e.message : s.errorGeneric);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [s.errorGeneric]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const hasAnyData =
-    (stats !== null &&
-      (stats.todayFocusMinutes > 0 ||
-        stats.weekFocusMinutes > 0 ||
-        stats.tasksCompletedToday > 0 ||
-        stats.streak > 0 ||
-        stats.subjectBreakdown.length > 0)) ||
-    (rewards !== null && (rewards.total > 0 || rewards.badges.length > 0)) ||
-    (salahTotals !== null &&
-      Object.values(salahTotals).some((v) => v > 0)) ||
-    (activeChallengeCount !== null && activeChallengeCount > 0);
+  // --- 7-bar chart: Mon–Sun focus minutes this week ---
+  const weekBars = useMemo(() => {
+    const monday = mondayOfWeek(new Date());
+    const bars = [0, 0, 0, 0, 0, 0, 0];
+    for (const sess of history) {
+      if (sess.status !== 'completed' || !sess.completedAt) continue;
+      const d = new Date(sess.completedAt);
+      const idx = Math.floor((d.getTime() - monday.getTime()) / 86_400_000);
+      if (idx >= 0 && idx < 7) bars[idx] += sess.focusMinutesEarned ?? 0;
+    }
+    return bars;
+  }, [history]);
 
-  const statCard = (label: string, value: string) => (
-    <View style={styles.statCard}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
+  // --- Stat grid values per period ---
+  const now = new Date();
+  const today = dayKey(now);
+  const monday = mondayOfWeek(now);
+  const weekKeys = new Set(
+    Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(monday);
+      d.setDate(d.getDate() + i);
+      return dayKey(d);
+    }),
   );
+  const prayedIn = (keys: Set<string>) =>
+    days
+      .filter((d) => keys.has(d.date))
+      .reduce((sum, d) => sum + d.prayers.filter((p) => p.status === 'prayed').length, 0);
+  const monthFocus = history
+    .filter(
+      (sess) =>
+        sess.status === 'completed' &&
+        sess.completedAt &&
+        sess.completedAt.slice(0, 7) === monthKey(now),
+    )
+    .reduce((sum, sess) => sum + (sess.focusMinutesEarned ?? 0), 0);
+
+  const prayed = period === 'daily' ? prayedIn(new Set([today])) : period === 'weekly' ? prayedIn(weekKeys) : monthTotals.prayed ?? 0;
+  const prayedTotal = period === 'daily' ? 5 : period === 'weekly' ? 35 : (monthTotals.prayed ?? 0) + (monthTotals.qaza ?? 0) + (monthTotals.missed ?? 0) + (monthTotals.pending ?? 0);
+  const focusMinutes = period === 'daily' ? stats?.todayFocusMinutes ?? null : period === 'weekly' ? stats?.weekFocusMinutes ?? null : monthFocus;
+  const hasData =
+    prayed > 0 || (focusMinutes !== null && focusMinutes > 0) || weekBars.some((v) => v > 0);
+
+  const maxBar = Math.max(...weekBars, 1);
 
   return (
-    <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-      <Pressable onPress={() => goTo('dashboard')} accessibilityRole="button">
-        <Text style={styles.back}>{s.back}</Text>
-      </Pressable>
-      <Text style={styles.title}>{s.title}</Text>
-      <Text style={styles.sub}>{s.sub}</Text>
+    <ScrollView contentContainerStyle={L.scroll} showsVerticalScrollIndicator={false}>
+      <Text style={T.title}>{s.anTitle}</Text>
+      <Text style={T.sub}>{s.anSub}</Text>
+
+      <View style={styles.chips}>
+        {PERIODS.map((p) => (
+          <Chip
+            key={p}
+            label={p === 'daily' ? s.anDaily : p === 'weekly' ? s.anWeekly : s.anMonthly}
+            selected={period === p}
+            onPress={() => setPeriod(p)}
+          />
+        ))}
+      </View>
 
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={C.teal} />
-          <Text style={styles.note}>{s.loading}</Text>
-        </View>
-      ) : error && !stats && !rewards ? (
-        <View style={styles.card}>
-          <Text style={styles.error}>{error}</Text>
-          <Pressable onPress={() => void load()} style={styles.primaryBtn} accessibilityRole="button">
-            <Text style={styles.primaryBtnText}>{s.retry}</Text>
-          </Pressable>
-        </View>
+        <ActivityIndicator color={C.teal700} style={{ marginVertical: 24 }} />
+      ) : error && !stats && days.length === 0 ? (
+        <Card>
+          <Text style={T.error}>{error}</Text>
+          <PillButton label={s.retry} onPress={() => void load()} />
+        </Card>
       ) : (
-        <>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-          {!hasAnyData ? <Text style={styles.empty}>{s.emptyAll}</Text> : null}
-
-          {stats ? (
+        <View>
+          {error ? <Text style={T.error}>{error}</Text> : null}
+          {!hasData ? (
+            <EmptyState title={s.anTitle} body={s.anNoData} />
+          ) : (
             <>
+              {/* 7-bar chart */}
+              <Card>
+                <Text style={T.cardTitle}>{s.anStudy}</Text>
+                <View style={styles.chart}>
+                  {weekBars.map((value, i) => (
+                    <View key={i} style={styles.barCol}>
+                      <Text style={styles.barValue}>{value}</Text>
+                      <View style={styles.barTrack}>
+                        <View
+                          style={[
+                            styles.barFill,
+                            {
+                              height: `${Math.max(4, (value / maxBar) * 100)}%`,
+                              backgroundColor: value === maxBar && value > 0 ? C.peachMid : C.teal500,
+                            },
+                          ]}
+                        />
+                      </View>
+                      <Text style={styles.barLabel}>{DAY_LABELS[i]}</Text>
+                    </View>
+                  ))}
+                </View>
+              </Card>
+
+              {/* Stat grid */}
               <View style={styles.statGrid}>
-                {statCard(s.focusToday, `${stats.todayFocusMinutes} ${s.min}`)}
-                {statCard(s.focusWeek, `${stats.weekFocusMinutes} ${s.min}`)}
-                {statCard(s.tasksToday, String(stats.tasksCompletedToday))}
-                {statCard(s.streak, `${stats.streak} ${s.days}`)}
+                <View style={styles.stat}>
+                  <Text style={styles.statValue}>
+                    {prayed} / {prayedTotal}
+                  </Text>
+                  <Text style={styles.statLabel}>{s.anSalah}</Text>
+                </View>
+                <View style={styles.stat}>
+                  <Text style={styles.statValue}>{focusMinutes === null ? '—' : `${focusMinutes} min`}</Text>
+                  <Text style={styles.statLabel}>{s.anStudyTot}</Text>
+                </View>
+                <View style={styles.stat}>
+                  <Text style={styles.statValue}>{focusMinutes === null ? '—' : `${focusMinutes} min`}</Text>
+                  <Text style={styles.statLabel}>{s.anFocusTot}</Text>
+                </View>
+                <View style={styles.stat}>
+                  <Text style={styles.statValue}>—</Text>
+                  <Text style={styles.statLabel}>{s.anSleepAvg}</Text>
+                </View>
               </View>
-              <Text style={styles.sectionTitle}>{s.subjects}</Text>
-              {stats.subjectBreakdown.length === 0 ? (
-                <Text style={styles.empty}>{s.noSubjects}</Text>
-              ) : (
-                stats.subjectBreakdown.map((row) => (
-                  <View key={row.subjectId} style={styles.rowCard}>
-                    <Text style={styles.rowTitle}>{row.name}</Text>
-                    <Text style={styles.rowMeta}>
-                      {row.tasksDone}/{row.tasksTotal} {s.tasksDone} · {row.focusMinutesWeek}{' '}
-                      {s.min} {s.focusWeekSub}
-                    </Text>
-                  </View>
-                ))
-              )}
+              <Text style={styles.note}>{s.anSleepNoData}</Text>
             </>
-          ) : null}
-
-          {rewards ? (
-            <>
-              <Text style={styles.sectionTitle}>{s.points}</Text>
-              <View style={styles.statGrid}>{statCard(s.points, String(rewards.total))}</View>
-              <Text style={styles.sectionTitle}>{s.badges}</Text>
-              {rewards.badges.length === 0 ? (
-                <Text style={styles.empty}>{s.noBadges}</Text>
-              ) : (
-                rewards.badges.map((b) => (
-                  <View key={b.badgeId} style={styles.rowCard}>
-                    <Text style={styles.rowTitle}>{b.title}</Text>
-                    {b.description ? <Text style={styles.rowMeta}>{b.description}</Text> : null}
-                  </View>
-                ))
-              )}
-              <Text style={styles.sectionTitle}>{s.recentPoints}</Text>
-              {rewards.recent.length === 0 ? (
-                <Text style={styles.empty}>{s.noRecent}</Text>
-              ) : (
-                rewards.recent.map((t) => (
-                  <View key={t.id} style={styles.rowCard}>
-                    <Text style={styles.rowTitle}>
-                      +{t.amount} · {t.reason}
-                    </Text>
-                    <Text style={styles.rowMeta}>{new Date(t.createdAt).toLocaleDateString()}</Text>
-                  </View>
-                ))
-              )}
-            </>
-          ) : null}
-
-          {salahTotals ? (
-            <>
-              <Text style={styles.sectionTitle}>{s.salahMonth}</Text>
-              {(salahTotals.prayed ?? 0) +
-                (salahTotals.qaza ?? 0) +
-                (salahTotals.missed ?? 0) +
-                (salahTotals.pending ?? 0) ===
-              0 ? (
-                <Text style={styles.empty}>{s.noSalah}</Text>
-              ) : (
-                <View style={styles.statGrid}>
-                  {statCard(s.prayed, String(salahTotals.prayed ?? 0))}
-                  {statCard(s.qaza, String(salahTotals.qaza ?? 0))}
-                  {statCard(s.missed, String(salahTotals.missed ?? 0))}
-                  {statCard(s.pending, String(salahTotals.pending ?? 0))}
-                </View>
-              )}
-            </>
-          ) : null}
-
-          {activeChallengeCount !== null ? (
-            <>
-              <Text style={styles.sectionTitle}>{s.challenges}</Text>
-              {activeChallengeCount === 0 ? (
-                <Text style={styles.empty}>{s.noChallenges}</Text>
-              ) : (
-                <View style={styles.statGrid}>
-                  {statCard(s.activeChallenges, String(activeChallengeCount))}
-                </View>
-              )}
-            </>
-          ) : null}
-        </>
+          )}
+        </View>
       )}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: { paddingHorizontal: 22, paddingTop: 28, paddingBottom: 40 },
-  back: { fontSize: 16, fontWeight: '700', color: C.teal, marginBottom: 16 },
-  title: { fontSize: 30, fontWeight: '800', color: C.ink, letterSpacing: -0.5 },
-  sub: { fontSize: 14, color: C.muted, marginTop: 6, marginBottom: 20, lineHeight: 20 },
-  center: { alignItems: 'center', paddingVertical: 40 },
-  note: { fontSize: 13, color: C.muted, marginTop: 10, textAlign: 'center' },
-  error: { color: C.red, fontSize: 14, fontWeight: '600', textAlign: 'center', marginBottom: 12 },
-  empty: { fontSize: 14, color: C.muted, lineHeight: 20, marginBottom: 12 },
-  sectionTitle: { fontSize: 18, fontWeight: '800', color: C.ink, marginTop: 8, marginBottom: 12 },
-  card: {
-    backgroundColor: C.white,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: C.line,
-    padding: 20,
-    marginBottom: 16,
-  },
-  primaryBtn: {
-    backgroundColor: C.teal,
-    borderRadius: 999,
-    minHeight: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-  },
-  primaryBtnText: { color: C.white, fontSize: 16, fontWeight: '800' },
-  statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 8 },
-  statCard: {
+  chips: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 14 },
+  chart: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginTop: 14, height: 150 },
+  barCol: { flex: 1, alignItems: 'center', height: '100%', justifyContent: 'flex-end' },
+  barValue: { fontFamily: 'PlusJakartaSans', fontSize: 10.5, fontWeight: '800', color: C.ink, marginBottom: 4 },
+  barTrack: { width: '70%', height: 100, justifyContent: 'flex-end' },
+  barFill: { width: '100%', borderRadius: 5 },
+  barLabel: { fontFamily: 'PlusJakartaSans', fontSize: 10.5, fontWeight: '700', color: C.muted, marginTop: 6 },
+  statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 2, marginBottom: 14 },
+  stat: {
     flex: 1,
     minWidth: '45%',
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 4,
-  },
-  statValue: { fontSize: 26, fontWeight: '800', color: C.teal900 },
-  statLabel: { fontSize: 13, color: C.muted, marginTop: 4, lineHeight: 18 },
-  rowCard: {
-    backgroundColor: C.white,
-    borderWidth: 1,
-    borderColor: C.line,
     borderRadius: 18,
     padding: 14,
-    marginBottom: 8,
   },
-  rowTitle: { fontSize: 15, fontWeight: '700', color: C.ink },
-  rowMeta: { fontSize: 13, color: C.muted, marginTop: 4, lineHeight: 18 },
+  statValue: { fontFamily: 'PlusJakartaSans', fontSize: 23, fontWeight: '800', color: C.ink },
+  statLabel: { fontFamily: 'PlusJakartaSans', fontSize: 12.5, color: C.muted, fontWeight: '600', marginTop: 2 },
+  note: { fontFamily: 'PlusJakartaSans', fontSize: 13, color: C.muted, lineHeight: 18, marginBottom: 12 },
 });

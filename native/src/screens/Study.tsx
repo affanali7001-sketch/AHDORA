@@ -1,113 +1,60 @@
 /**
- * Study — subjects + tasks from the live API.
- * GET/POST /api/study/subjects, GET/POST /api/study/tasks,
- * PATCH /api/study/tasks/:id/status. Honest empty states; no fake data.
+ * Study — rebuilt to the approved preview (§16 in the preview file).
+ * Title "Study Planner", subject chips (tappable, "+ Subject jodo" adds
+ * a real subject via the API), one "Aaj ke tasks" card with a small
+ * Done button per row, real stat grid (today's focus minutes + study
+ * streak from /api/study/stats), full-width teal button to Focus.
+ * Real subjects/tasks API only; honest empty states, no fake numbers.
  */
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
+import { stringsFor } from '../lib/strings';
+import { C, L, T } from '../lib/theme';
+import { Card, Chip, Input, PillButton } from '../components/ui';
 import {
   createSubject,
-  createTask,
   listSubjects,
   listTasks,
   setTaskStatus,
+  studyStats,
+  type StudyStats,
   type StudySubject,
   type StudyTask,
 } from '../lib/apiSocial';
 
-const C = {
-  ice: '#F5F7F6',
-  white: '#FFFFFF',
-  ink: '#0E1A17',
-  muted: '#687A75',
-  teal950: '#06231F',
-  teal900: '#0A352F',
-  teal: '#0B4F4A',
-  teal2: '#0F766E',
-  peach: '#FFD9BE',
-  peach2: '#FFF1E3',
-  peachDeep: '#B45309',
-  red: '#E11D2E',
-  line: '#E6ECE9',
-};
-
-const STR = {
-  en: {
-    back: '← Back',
-    title: 'Study',
-    sub: 'Your subjects and tasks, saved on your account.',
-    subjects: 'Subjects',
-    noSubjects: 'No subjects yet. Add your first subject below.',
-    addSubject: 'Add subject',
-    subjectPlaceholder: 'e.g. Mathematics',
-    tasks: 'Tasks',
-    noTasks: 'No tasks yet. Add one below — it will be saved to your account.',
-    addTask: 'Add task',
-    taskPlaceholder: 'e.g. Revise Chapter 4',
-    due: 'Due',
-    noDue: 'No due date',
-    done: 'Done',
-    markDone: 'Mark done',
-    reopen: 'Reopen',
-    loading: 'Loading your study data…',
-    retry: 'Retry',
-    priority: 'Priority',
-  },
-  hi: {
-    back: '← Wapas',
-    title: 'Study',
-    sub: 'Aapke subjects aur tasks, aapke account par saved.',
-    subjects: 'Subjects',
-    noSubjects: 'Abhi koi subject nahi hai. Neeche apna pehla subject add karo.',
-    addSubject: 'Subject add karo',
-    subjectPlaceholder: 'jaise Mathematics',
-    tasks: 'Tasks',
-    noTasks: 'Abhi koi task nahi hai. Neeche ek add karo — ye aapke account par save hoga.',
-    addTask: 'Task add karo',
-    taskPlaceholder: 'jaise Chapter 4 revise karo',
-    due: 'Due',
-    noDue: 'Koi due date nahi',
-    done: 'Ho gaya',
-    markDone: 'Done karo',
-    reopen: 'Wapas kholo',
-    loading: 'Aapka study data load ho raha hai…',
-    retry: 'Dobara try karo',
-    priority: 'Priority',
-  },
-} as const;
+function cap(value: string): string {
+  return value.length > 0 ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
 
 export default function StudyScreen({ lang, goTo }: ScreenProps) {
-  const s = STR[lang];
+  const s = stringsFor(lang);
   const [subjects, setSubjects] = useState<StudySubject[]>([]);
   const [tasks, setTasks] = useState<StudyTask[]>([]);
+  const [stats, setStats] = useState<StudyStats | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [addingSubject, setAddingSubject] = useState(false);
   const [newSubject, setNewSubject] = useState('');
-  const [newTask, setNewTask] = useState('');
   const [busy, setBusy] = useState(false);
+  const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError(null);
+    setError('');
     try {
-      const [subs, tks] = await Promise.all([listSubjects(), listTasks()]);
+      const [subs, tks, st] = await Promise.all([listSubjects(), listTasks(), studyStats()]);
       setSubjects(subs);
       setTasks(tks);
+      setStats(st);
+      if (subs.length > 0) setSelectedId((prev) => prev ?? subs[0].id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Request failed. Please try again.');
+      setError(e instanceof Error ? e.message : s.errorGeneric);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [s.errorGeneric]);
 
   useEffect(() => {
     void load();
@@ -117,241 +64,173 @@ export default function StudyScreen({ lang, goTo }: ScreenProps) {
     const name = newSubject.trim();
     if (!name || busy) return;
     setBusy(true);
-    setError(null);
+    setError('');
     try {
       const created = await createSubject(name);
       setSubjects((prev) => [...prev, created]);
+      setSelectedId(created.id);
       setNewSubject('');
+      setAddingSubject(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Request failed. Please try again.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function addTask() {
-    const title = newTask.trim();
-    if (!title || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const created = await createTask({ title });
-      setTasks((prev) => [created, ...prev]);
-      setNewTask('');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Request failed. Please try again.');
+      setError(e instanceof Error ? e.message : s.errorGeneric);
     } finally {
       setBusy(false);
     }
   }
 
   async function toggleTask(task: StudyTask) {
+    if (busyTaskId) return;
     const next = task.status === 'Completed' ? 'Pending' : 'Completed';
+    setBusyTaskId(task.id);
     try {
       const updated = await setTaskStatus(task.id, next);
       setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Request failed. Please try again.');
+      setError(e instanceof Error ? e.message : s.errorGeneric);
+    } finally {
+      setBusyTaskId(null);
     }
   }
 
   const subjectName = (id: string | null) =>
     subjects.find((sub) => sub.id === id)?.name ?? null;
+  const visibleTasks = selectedId ? tasks.filter((t) => t.subjectId === selectedId) : tasks;
+  const todayTasks = visibleTasks;
 
   return (
-    <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-      <Pressable onPress={() => goTo('dashboard')} accessibilityRole="button">
-        <Text style={styles.back}>{s.back}</Text>
-      </Pressable>
-      <Text style={styles.title}>{s.title}</Text>
-      <Text style={styles.sub}>{s.sub}</Text>
+    <ScrollView contentContainerStyle={L.scroll} showsVerticalScrollIndicator={false}>
+      <Text style={T.title}>{s.studyTitle}</Text>
+      <Text style={T.sub}>{s.studySub}</Text>
 
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={C.teal} />
-          <Text style={styles.note}>{s.loading}</Text>
-        </View>
+        <ActivityIndicator color={C.teal700} style={{ marginVertical: 24 }} />
       ) : error && subjects.length === 0 && tasks.length === 0 ? (
-        <View style={styles.card}>
-          <Text style={styles.error}>{error}</Text>
-          <Pressable onPress={() => void load()} style={styles.primaryBtn} accessibilityRole="button">
-            <Text style={styles.primaryBtnText}>{s.retry}</Text>
-          </Pressable>
-        </View>
+        <Card>
+          <Text style={T.error}>{error}</Text>
+          <PillButton label={s.retry} onPress={() => void load()} />
+        </Card>
       ) : (
-        <>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+        <View>
+          {error ? <Text style={T.error}>{error}</Text> : null}
 
-          <Text style={styles.sectionTitle}>{s.subjects}</Text>
-          {subjects.length === 0 ? (
-            <Text style={styles.empty}>{s.noSubjects}</Text>
-          ) : (
-            <View style={styles.chipRow}>
-              {subjects.map((sub) => (
-                <View key={sub.id} style={styles.chip}>
-                  <Text style={styles.chipText}>{sub.name}</Text>
-                </View>
-              ))}
+          {/* Subject chips */}
+          <View style={styles.chips}>
+            {subjects.map((sub) => (
+              <Chip
+                key={sub.id}
+                label={sub.name}
+                selected={selectedId === sub.id}
+                onPress={() => setSelectedId(sub.id)}
+              />
+            ))}
+            <Chip
+              label={`+ ${s.studyAdd}`}
+              tone="peach"
+              onPress={() => setAddingSubject((v) => !v)}
+            />
+          </View>
+          {addingSubject ? (
+            <View style={styles.addRow}>
+              <Input
+                value={newSubject}
+                onChangeText={setNewSubject}
+                placeholder={s.studyAddNamePh}
+                editable={!busy}
+                onSubmitEditing={() => void addSubject()}
+                style={{ flex: 1 }}
+              />
+              <PillButton label={s.studyAdd} small onPress={() => void addSubject()} busy={busy} />
+              <PillButton
+                label={s.studyAddCancel}
+                small
+                variant="ghost"
+                onPress={() => {
+                  setAddingSubject(false);
+                  setNewSubject('');
+                }}
+              />
             </View>
-          )}
-          <View style={styles.addRow}>
-            <TextInput
-              style={styles.input}
-              value={newSubject}
-              onChangeText={setNewSubject}
-              placeholder={s.subjectPlaceholder}
-              placeholderTextColor={C.muted}
-              editable={!busy}
-              onSubmitEditing={() => void addSubject()}
-            />
-            <Pressable
-              onPress={() => void addSubject()}
-              style={[styles.addBtn, busy && styles.btnDisabled]}
-              disabled={busy}
-              accessibilityRole="button"
-            >
-              <Text style={styles.addBtnText}>{s.addSubject}</Text>
-            </Pressable>
+          ) : null}
+          {subjects.length === 0 && !addingSubject ? (
+            <Text style={styles.note}>{s.studyNoSubjects}</Text>
+          ) : null}
+
+          {/* Today's tasks — one card, small Done button per row */}
+          <Card>
+            <Text style={T.cardTitle}>{s.studyToday}</Text>
+            {todayTasks.length === 0 ? (
+              <Text style={[T.cardBody, { marginTop: 8 }]}>{s.studyNoTasks}</Text>
+            ) : (
+              todayTasks.map((task) => {
+                const done = task.status === 'Completed';
+                const subName = subjectName(task.subjectId);
+                const metaParts: string[] = [];
+                if (subName) metaParts.push(subName);
+                if (task.dueDate) metaParts.push(task.dueDate);
+                metaParts.push(`${cap(task.priority)} priority`);
+                if (task.durationMinutes) metaParts.push(`${task.durationMinutes} min`);
+                return (
+                  <View key={task.id} style={styles.taskRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.taskTitle, done && styles.taskDone]}>{task.title}</Text>
+                      <Text style={styles.taskMeta}>{metaParts.join(' · ')}</Text>
+                    </View>
+                    <PillButton
+                      label={s.taskDone}
+                      small
+                      variant={done ? 'ghost' : 'primary'}
+                      onPress={() => void toggleTask(task)}
+                      disabled={busyTaskId === task.id}
+                    />
+                  </View>
+                );
+              })
+            )}
+          </Card>
+
+          {/* Real stats */}
+          <View style={styles.statGrid}>
+            <View style={styles.stat}>
+              <Text style={styles.statValue}>{stats ? `${stats.todayFocusMinutes} min` : '—'}</Text>
+              <Text style={styles.statLabel}>{s.studyTodayMin}</Text>
+            </View>
+            <View style={styles.stat}>
+              <Text style={styles.statValue}>🔥 {stats ? stats.streak : '—'}</Text>
+              <Text style={styles.statLabel}>{s.studyStreak}</Text>
+            </View>
           </View>
 
-          <Text style={styles.sectionTitle}>{s.tasks}</Text>
-          {tasks.length === 0 ? (
-            <Text style={styles.empty}>{s.noTasks}</Text>
-          ) : (
-            tasks.map((task) => {
-              const done = task.status === 'Completed';
-              const subName = subjectName(task.subjectId);
-              return (
-                <View key={task.id} style={styles.taskCard}>
-                  <View style={styles.taskTop}>
-                    <Text style={[styles.taskTitle, done && styles.taskDone]}>{task.title}</Text>
-                    <Text style={styles.taskMeta}>
-                      {subName ? `${subName} · ` : ''}
-                      {s.priority}: {task.priority}
-                    </Text>
-                    <Text style={styles.taskMeta}>
-                      {s.due}: {task.dueDate ?? s.noDue}
-                    </Text>
-                  </View>
-                  <Pressable
-                    onPress={() => void toggleTask(task)}
-                    style={[styles.taskBtn, done && styles.taskBtnDone]}
-                    accessibilityRole="button"
-                  >
-                    <Text style={[styles.taskBtnText, done && styles.taskBtnTextDone]}>
-                      {done ? s.done : s.markDone}
-                    </Text>
-                  </Pressable>
-                </View>
-              );
-            })
-          )}
-          <View style={styles.addRow}>
-            <TextInput
-              style={styles.input}
-              value={newTask}
-              onChangeText={setNewTask}
-              placeholder={s.taskPlaceholder}
-              placeholderTextColor={C.muted}
-              editable={!busy}
-              onSubmitEditing={() => void addTask()}
-            />
-            <Pressable
-              onPress={() => void addTask()}
-              style={[styles.addBtn, busy && styles.btnDisabled]}
-              disabled={busy}
-              accessibilityRole="button"
-            >
-              <Text style={styles.addBtnText}>{s.addTask}</Text>
-            </Pressable>
-          </View>
-        </>
+          <PillButton label={s.studyFocusBtn} block onPress={() => goTo('focus')} />
+        </View>
       )}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: { paddingHorizontal: 22, paddingTop: 28, paddingBottom: 40 },
-  back: { fontSize: 16, fontWeight: '700', color: C.teal, marginBottom: 16 },
-  title: { fontSize: 30, fontWeight: '800', color: C.ink, letterSpacing: -0.5 },
-  sub: { fontSize: 14, color: C.muted, marginTop: 6, marginBottom: 20, lineHeight: 20 },
-  center: { alignItems: 'center', paddingVertical: 40 },
-  note: { fontSize: 13, color: C.muted, marginTop: 10, textAlign: 'center' },
-  error: { color: C.red, fontSize: 14, fontWeight: '600', textAlign: 'center', marginBottom: 12 },
-  card: {
-    backgroundColor: C.white,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: C.line,
-    padding: 20,
-    marginBottom: 16,
+  chips: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 14 },
+  addRow: { flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 4, marginBottom: 8 },
+  note: { fontSize: 13, color: C.muted, marginTop: 4, lineHeight: 18 },
+  taskRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: C.line,
   },
-  sectionTitle: { fontSize: 18, fontWeight: '800', color: C.ink, marginTop: 8, marginBottom: 10 },
-  empty: { fontSize: 14, color: C.muted, lineHeight: 20, marginBottom: 12 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 12 },
-  chip: {
-    backgroundColor: C.peach2,
-    borderWidth: 1,
-    borderColor: C.peach,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginRight: 8,
-    marginBottom: 8,
-  },
-  chipText: { color: C.peachDeep, fontSize: 14, fontWeight: '700' },
-  addRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
-  input: {
+  taskTitle: { fontFamily: 'PlusJakartaSans', fontSize: 14.5, fontWeight: '700', color: C.ink },
+  taskDone: { textDecorationLine: 'line-through', color: C.muted },
+  taskMeta: { fontFamily: 'PlusJakartaSans', fontSize: 12.5, color: C.muted, marginTop: 2 },
+  statGrid: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  stat: {
     flex: 1,
     backgroundColor: C.white,
     borderWidth: 1,
     borderColor: C.line,
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: C.ink,
+    borderRadius: 18,
+    padding: 14,
   },
-  addBtn: {
-    backgroundColor: C.teal,
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addBtnText: { color: C.white, fontSize: 14, fontWeight: '800' },
-  btnDisabled: { opacity: 0.6 },
-  primaryBtn: {
-    backgroundColor: C.teal,
-    borderRadius: 999,
-    minHeight: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-  },
-  primaryBtnText: { color: C.white, fontSize: 16, fontWeight: '800' },
-  taskCard: {
-    backgroundColor: C.white,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: C.line,
-    padding: 16,
-    marginBottom: 10,
-  },
-  taskTop: { marginBottom: 10 },
-  taskTitle: { fontSize: 16, fontWeight: '700', color: C.ink },
-  taskDone: { textDecorationLine: 'line-through', color: C.muted },
-  taskMeta: { fontSize: 13, color: C.muted, marginTop: 4 },
-  taskBtn: {
-    backgroundColor: C.peach2,
-    borderWidth: 1,
-    borderColor: C.peach,
-    borderRadius: 999,
-    paddingVertical: 9,
-    alignItems: 'center',
-  },
-  taskBtnDone: { backgroundColor: C.teal, borderColor: C.teal },
-  taskBtnText: { color: C.peachDeep, fontSize: 14, fontWeight: '800' },
-  taskBtnTextDone: { color: C.white },
+  statValue: { fontFamily: 'PlusJakartaSans', fontSize: 23, fontWeight: '800', color: C.ink },
+  statLabel: { fontFamily: 'PlusJakartaSans', fontSize: 12.5, color: C.muted, fontWeight: '600', marginTop: 2 },
 });

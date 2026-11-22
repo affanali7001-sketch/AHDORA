@@ -1,32 +1,64 @@
 /**
- * Dashboard — the post-login landing.
- * Real aggregated data only: today's prayer times + today's salah
- * statuses + the server-side rewards summary. Where there is no data,
- * an honest empty state is shown — never a fake stat.
+ * Dashboard — rebuilt to the approved preview (§6): title + sub, a
+ * 2×2 stat grid with REAL values, the next-prayer card (with the
+ * "Namaz ke time badlo" button INSIDE it), the challenge card with a
+ * real progress bar, and the sleep card. No greeting block, no
+ * today's-salah list, no points card. All data is live; where there
+ * is no data yet, an honest empty state is shown — never a fake
+ * number, never a percentage, and the configured sleep schedule is
+ * never presented as actual sleep.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
-import { stringsFor } from '../lib/strings';
-import { C, L, T } from '../lib/theme';
-import { Card, EmptyState, PillButton, SectionTitle } from '../components/ui';
+import { stringsFor, type AppLanguage } from '../lib/strings';
+import { C, F, L, T } from '../lib/theme';
+import { Card, Chip, EmptyState, PillButton, ProgressBar } from '../components/ui';
 import {
   fetchPrayerTimes,
-  fetchRewardsSummary,
   fetchSalahDay,
   formatTime12h,
+  loadProfileWithCompletion,
   PRAYER_NAMES,
   todayKey,
   type PrayerRecord,
   type PrayerTimesResponse,
-  type RewardsSummary,
+  type ProfileForm,
 } from '../lib/apiCore';
+import {
+  myChallenges,
+  studyStats,
+  type ChallengeParticipation,
+  type StudyStats,
+} from '../lib/apiSocial';
+
+/** Minutes from now until an HH:mm time today (null when unparsable). */
+function minutesUntil(timeHHmm: string, now = new Date()): number | null {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(timeHHmm.trim());
+  if (!match) return null;
+  const target = new Date(now);
+  target.setHours(Number(match[1]), Number(match[2]), 0, 0);
+  return Math.round((target.getTime() - now.getTime()) / 60000);
+}
+
+/** Preview wording: "1 ghanta 12 minute baaki" / "1 hour 12 minutes left". */
+function longCountdown(mins: number, lang: AppLanguage): string {
+  if (mins <= 0) return lang === 'hi' ? 'Abhi ka waqt hai' : 'Right now';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (lang === 'hi') return h > 0 ? `${h} ghanta ${m} minute baaki` : `${m} minute baaki`;
+  return h > 0
+    ? `${h} hour${h > 1 ? 's' : ''} ${m} minute${m !== 1 ? 's' : ''} left`
+    : `${m} minute${m !== 1 ? 's' : ''} left`;
+}
 
 export default function DashboardScreen({ lang, user, goTo }: ScreenProps) {
   const s = stringsFor(lang);
   const [times, setTimes] = useState<PrayerTimesResponse | null>(null);
   const [day, setDay] = useState<PrayerRecord | null>(null);
-  const [rewards, setRewards] = useState<RewardsSummary | null>(null);
+  const [stats, setStats] = useState<StudyStats | null>(null);
+  const [challenge, setChallenge] = useState<ChallengeParticipation | null>(null);
+  const [profile, setProfile] = useState<ProfileForm | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -37,16 +69,23 @@ export default function DashboardScreen({ lang, user, goTo }: ScreenProps) {
     Promise.allSettled([
       fetchPrayerTimes(),
       fetchSalahDay(todayKey()),
-      fetchRewardsSummary(),
-    ]).then(([timesResult, dayResult, rewardsResult]) => {
+      studyStats(),
+      myChallenges(),
+      loadProfileWithCompletion(user?.name ?? ''),
+    ]).then(([timesResult, dayResult, statsResult, challengesResult, profileResult]) => {
       if (!active) return;
       if (timesResult.status === 'fulfilled') setTimes(timesResult.value);
       if (dayResult.status === 'fulfilled') setDay(dayResult.value);
-      if (rewardsResult.status === 'fulfilled') setRewards(rewardsResult.value);
+      if (statsResult.status === 'fulfilled') setStats(statsResult.value);
+      if (challengesResult.status === 'fulfilled') {
+        setChallenge(challengesResult.value.active[0] ?? null);
+      }
+      if (profileResult.status === 'fulfilled') setProfile(profileResult.value.profile);
       if (
         timesResult.status === 'rejected' &&
         dayResult.status === 'rejected' &&
-        rewardsResult.status === 'rejected'
+        statsResult.status === 'rejected' &&
+        challengesResult.status === 'rejected'
       ) {
         setError(s.loadFailed);
       }
@@ -55,152 +94,123 @@ export default function DashboardScreen({ lang, user, goTo }: ScreenProps) {
     return () => {
       active = false;
     };
-  }, [s.loadFailed]);
+  }, [s.loadFailed, user?.name]);
 
   useEffect(load, [load]);
 
   const prayedCount = day
     ? PRAYER_NAMES.filter((name) => day[name].status === 'prayed').length
-    : 0;
-  const recordedCount = day
-    ? PRAYER_NAMES.filter((name) => day[name].status !== 'pending').length
-    : 0;
+    : null;
   const next = times?.nextPrayer ?? null;
+  const countdown = next ? minutesUntil(next.time) : null;
+
+  const sleepSchedule =
+    profile && profile.sleepStartTime && profile.sleepEndTime
+      ? `${formatTime12h(profile.sleepStartTime)} – ${formatTime12h(profile.sleepEndTime)}`
+      : '';
 
   return (
     <ScrollView contentContainerStyle={L.scroll} showsVerticalScrollIndicator={false}>
-      <Text style={T.eyebrow}>{s.dashTitle}</Text>
-      <Text style={[T.title, { marginTop: 6 }]}>{s.dashboardHello}</Text>
-      <Text style={[T.title, { color: C.teal }]}>{user?.name ?? ''}</Text>
-      <Text style={[T.sub, { marginBottom: 18 }]}>{s.dashSub}</Text>
+      <Text style={T.title}>{s.dashTitle}</Text>
+      <Text style={[T.sub, { marginBottom: 14 }]}>{s.dashSub}</Text>
 
       {loading ? (
         <ActivityIndicator color={C.teal} style={{ marginVertical: 24 }} />
       ) : (
         <View>
-          {/* Next prayer */}
-          {next ? (
-            <Card>
-              <Text style={T.cardTitle}>{s.dashNextPrayer}</Text>
-              <Text style={{ fontSize: 24, fontWeight: '800', color: C.teal900, marginTop: 6 }}>
-                {next.name} · {formatTime12h(next.time)}
+          {/* 2×2 stat grid — real values only */}
+          <View style={styles.statGrid}>
+            <View style={styles.stat}>
+              <Text style={styles.statValue}>
+                {prayedCount !== null ? `${prayedCount} / 5` : '—'}
               </Text>
-              {times?.city ? (
-                <Text style={[T.cardBody, { marginTop: 4 }]}>{times.city}</Text>
-              ) : null}
+              <Text style={styles.statLabel}>{s.dashSalah}</Text>
+            </View>
+            <View style={styles.stat}>
+              <Text style={styles.statValue}>
+                {stats ? `${stats.todayFocusMinutes} min` : '—'}
+              </Text>
+              <Text style={styles.statLabel}>{s.dashStudy}</Text>
+            </View>
+            <View style={styles.stat}>
+              <Text style={styles.statValue}>
+                {stats ? `${stats.todayFocusMinutes} min` : '—'}
+              </Text>
+              <Text style={styles.statLabel}>{s.dashFocus}</Text>
+            </View>
+            <View style={styles.stat}>
+              <Text style={styles.statValue}>
+                {challenge ? `🔥 ${challenge.streak}` : '—'}
+              </Text>
+              <Text style={styles.statLabel}>{s.dashStreak}</Text>
+            </View>
+          </View>
+
+          {/* Next prayer — edit button lives INSIDE this card */}
+          {next && countdown !== null ? (
+            <Card>
+              <View style={styles.rowBetween}>
+                <Text style={T.cardTitle}>{s.dashNextPrayer}</Text>
+                <Chip
+                  label={`${next.name} · ${formatTime12h(next.time)}`}
+                  tone="peach"
+                />
+              </View>
+              <Text style={[T.cardBody, { marginTop: 8 }]}>
+                {longCountdown(countdown, lang)}. {s.dashReminderNote}
+              </Text>
+              <View style={{ marginTop: 12 }}>
+                <PillButton
+                  label={s.dashEditTimes}
+                  variant="peach"
+                  small
+                  onPress={() => goTo('prayer')}
+                />
+              </View>
             </Card>
           ) : (
             <EmptyState title={s.dashNextPrayer} body={s.noPrayerToday} />
           )}
 
-          {/* Today's salah */}
-          <SectionTitle title={s.dashTodaySalah} />
-          {day && recordedCount > 0 ? (
-            <Card>
-              <Text style={{ fontSize: 20, fontWeight: '800', color: C.ink }}>
-                {prayedCount}/5 {s.dashPrayedOf}
-              </Text>
-              <View style={{ marginTop: 10 }}>
-                {PRAYER_NAMES.map((name) => {
-                  const entry = day[name];
-                  const time = times?.perPrayer?.[name]?.time ?? times?.timings?.[name] ?? '';
-                  return (
-                    <View
-                      key={name}
-                      style={{
-                        flexDirection: 'row',
-                        justifyContent: 'space-between',
-                        paddingVertical: 6,
-                      }}
-                    >
-                      <Text style={{ fontSize: 15, fontWeight: '700', color: C.ink }}>
-                        {name}
-                        {time ? ` · ${formatTime12h(time)}` : ''}
-                      </Text>
-                      <Text
-                        style={{
-                          fontSize: 14,
-                          fontWeight: '700',
-                          color:
-                            entry.status === 'prayed'
-                              ? C.teal2
-                              : entry.status === 'missed'
-                                ? C.red
-                                : entry.status === 'qaza'
-                                  ? C.peachDeep
-                                  : C.muted,
-                        }}
-                      >
-                        {entry.status === 'prayed'
-                          ? s.statusPrayed
-                          : entry.status === 'missed'
-                            ? s.statusMissed
-                            : entry.status === 'qaza'
-                              ? s.statusQaza
-                              : s.statusPending}
-                      </Text>
-                    </View>
-                  );
-                })}
+          {/* Challenge */}
+          <Card>
+            <Text style={T.cardTitle}>{s.dashChallenge}</Text>
+            {challenge ? (
+              <View>
+                <Text style={[T.cardBody, { marginTop: 6 }]}>
+                  {challenge.challenge.title} · Day {challenge.currentDay} /{' '}
+                  {challenge.totalDays}
+                </Text>
+                {challenge.totalDays > 0 ? (
+                  <View style={{ marginTop: 10 }}>
+                    <ProgressBar
+                      value={challenge.completedDays}
+                      max={challenge.totalDays}
+                    />
+                  </View>
+                ) : null}
               </View>
-              <View style={{ marginTop: 12 }}>
-                <PillButton label={s.dashViewCalendar} variant="ghost" onPress={() => goTo('salahCalendar')} />
-              </View>
-            </Card>
-          ) : (
-            <View>
-              <EmptyState title={s.dashTodaySalah} body={s.dashNoSalahYet} />
-              <PillButton label={s.dashMarkNow} onPress={() => goTo('prayer')} />
+            ) : (
+              <Text style={[T.cardBody, { marginTop: 6 }]}>{s.dashNoChallenge}</Text>
+            )}
+            <View style={{ marginTop: 10 }}>
+              <PillButton
+                label={s.dashChBtn}
+                variant="ghost"
+                small
+                onPress={() => goTo('challenges')}
+              />
             </View>
-          )}
+          </Card>
 
-          {/* Points & badges */}
-          <SectionTitle title={s.dashPoints} />
-          {rewards && (rewards.total > 0 || rewards.badges.length > 0 || rewards.recent.length > 0) ? (
-            <Card>
-              <Text style={{ fontSize: 28, fontWeight: '800', color: C.teal900 }}>
-                {rewards.total}
-              </Text>
-              <Text style={T.cardBody}>
-                {s.dashBadges}: {rewards.badges.length}
-              </Text>
-              {rewards.badges.length > 0 ? (
-                <View style={{ marginTop: 10 }}>
-                  {rewards.badges.slice(0, 3).map((badge) => (
-                    <Text key={badge.badgeId} style={[T.cardBody, { marginTop: 2 }]}>
-                      • {badge.title}
-                    </Text>
-                  ))}
-                </View>
-              ) : null}
-              {rewards.recent.length > 0 ? (
-                <View style={{ marginTop: 12 }}>
-                  <Text style={T.label}>{s.dashRecentPoints}</Text>
-                  {rewards.recent.slice(0, 5).map((tx) => (
-                    <View
-                      key={tx.id}
-                      style={{
-                        flexDirection: 'row',
-                        justifyContent: 'space-between',
-                        paddingVertical: 4,
-                      }}
-                    >
-                      <Text style={{ fontSize: 13, color: C.muted }}>{tx.reason}</Text>
-                      <Text style={{ fontSize: 13, fontWeight: '800', color: C.teal }}>
-                        +{tx.amount}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              ) : null}
-            </Card>
-          ) : (
-            <EmptyState title={s.dashPoints} body={s.dashNoPointsYet} />
-          )}
-
-          <View style={{ marginTop: 8 }}>
-            <PillButton label={s.dashEditTimes} variant="peach" onPress={() => goTo('prayer')} />
-          </View>
+          {/* Sleep — schedule is shown as a schedule, never as actual sleep */}
+          <Card>
+            <Text style={T.cardTitle}>{s.dashSleep}</Text>
+            <Text style={[T.cardBody, { marginTop: 6 }]}>
+              {s.dashSleepNoRecord}
+              {sleepSchedule ? ` · Schedule: ${sleepSchedule}` : ''}
+            </Text>
+          </Card>
         </View>
       )}
 
@@ -208,3 +218,41 @@ export default function DashboardScreen({ lang, user, goTo }: ScreenProps) {
     </ScrollView>
   );
 }
+
+const styles = StyleSheet.create({
+  statGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 12,
+  },
+  stat: {
+    flexGrow: 1,
+    flexBasis: '47%',
+    backgroundColor: C.white,
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 18,
+    padding: 14,
+  },
+  statValue: {
+    fontFamily: F.sans,
+    fontSize: 23,
+    fontWeight: '800',
+    color: C.ink,
+    letterSpacing: -0.2,
+  },
+  statLabel: {
+    fontFamily: F.sans,
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: C.muted,
+    marginTop: 2,
+  },
+  rowBetween: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+});

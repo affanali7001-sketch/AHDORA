@@ -13,7 +13,7 @@
  * remains only as a default fallback. Worker A owns Welcome, Login,
  * Onboarding, Home, Dashboard, Prayer and SalahCalendar.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -23,19 +23,32 @@ import {
   View,
 } from 'react-native';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
+import { Ionicons } from '@expo/vector-icons';
+import { useFonts } from 'expo-font';
+import * as SplashScreen from 'expo-splash-screen';
+import {
+  PlusJakartaSans_400Regular,
+  PlusJakartaSans_500Medium,
+  PlusJakartaSans_600SemiBold,
+  PlusJakartaSans_700Bold,
+  PlusJakartaSans_800ExtraBold,
+} from '@expo-google-fonts/plus-jakarta-sans';
+import { Amiri_400Regular, Amiri_700Bold } from '@expo-google-fonts/amiri';
 import { logout, type AuthUser } from './src/lib/api';
 import { loadProfileWithCompletion } from './src/lib/apiCore';
 import { PILL_NAV, type ScreenId, type ScreenProps } from './src/lib/nav';
 import { stringsFor, type AppLanguage } from './src/lib/strings';
-import { C } from './src/lib/theme';
+import { C, F } from './src/lib/theme';
 import WelcomeScreen from './src/screens/Welcome';
+import LanguageScreen from './src/screens/Language';
 import LoginScreen from './src/screens/Login';
+import SignupScreen from './src/screens/Signup';
 import OnboardingScreen from './src/screens/Onboarding';
 import HomeScreen from './src/screens/Home';
 import DashboardScreen from './src/screens/Dashboard';
 import PrayerScreen from './src/screens/Prayer';
 import SalahCalendarScreen from './src/screens/SalahCalendar';
-import QuranBookScreen from './src/screens/QuranBook';
+import QuranBookScreen, { QuranReaderScreen } from './src/screens/QuranBook';
 import LifeAyahsScreen from './src/screens/LifeAyahs';
 import DuasScreen from './src/screens/Duas';
 import TasbeehScreen from './src/screens/Tasbeeh';
@@ -60,11 +73,53 @@ const PILL_LABELS: Record<string, keyof ReturnType<typeof stringsFor>> = {
   profile: 'navProfile',
 };
 
+/** Preview pill-nav icons (Ionicons, 20px): home, grid, book, target, person. */
+const PILL_ICONS: Record<string, { on: keyof typeof Ionicons.glyphMap; off: keyof typeof Ionicons.glyphMap }> = {
+  home: { on: 'home', off: 'home-outline' },
+  dashboard: { on: 'grid', off: 'grid-outline' },
+  quran: { on: 'book', off: 'book-outline' },
+  focus: { on: 'locate', off: 'locate-outline' },
+  profile: { on: 'person', off: 'person-outline' },
+};
+
+// Keep the splash screen visible until the fonts are ready, so text never
+// renders in the wrong font (SDK 58 expo-font + expo-splash-screen pattern).
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
 export default function App() {
-  const [screen, setScreen] = useState<ScreenId>('welcome');
+  const [screen, setScreen] = useState<ScreenId>('language');
   const [lang, setLang] = useState<AppLanguage>('hi');
   const [user, setUser] = useState<AuthUser | null>(null);
   const [checkingOnboarding, setCheckingOnboarding] = useState(false);
+
+  // One family name per typeface; fontWeight selects the face (SDK 58
+  // expo-font FontFamilyDefinition array form). Family names must match
+  // F.sans / F.arabic in src/lib/theme.ts.
+  const [fontsLoaded, fontError] = useFonts([
+    {
+      fontFamily: F.sans,
+      fontDefinitions: [
+        { path: PlusJakartaSans_400Regular, weight: 400 },
+        { path: PlusJakartaSans_500Medium, weight: 500 },
+        { path: PlusJakartaSans_600SemiBold, weight: 600 },
+        { path: PlusJakartaSans_700Bold, weight: 700 },
+        { path: PlusJakartaSans_800ExtraBold, weight: 800 },
+      ],
+    },
+    {
+      fontFamily: F.arabic,
+      fontDefinitions: [
+        { path: Amiri_400Regular, weight: 400 },
+        { path: Amiri_700Bold, weight: 700 },
+      ],
+    },
+  ]);
+
+  useEffect(() => {
+    if (fontsLoaded || fontError) {
+      SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [fontsLoaded, fontError]);
 
   const s = stringsFor(lang);
 
@@ -108,12 +163,25 @@ export default function App() {
 
   const showPillNav = user !== null && screen !== 'onboarding' && !checkingOnboarding;
 
+  // Fonts gate: nothing renders until Plus Jakarta Sans + Amiri are loaded
+  // (or loading failed, in which case the system font is the fallback).
+  if (!fontsLoaded && !fontError) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <ExpoStatusBar style="dark" />
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={C.teal700} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe}>
       <ExpoStatusBar style="dark" />
       {checkingOnboarding ? (
         <View style={styles.center}>
-          <ActivityIndicator size="large" color={C.teal} />
+          <ActivityIndicator size="large" color={C.teal700} />
           <Text style={styles.loadingText}>{s.loading}</Text>
         </View>
       ) : (
@@ -123,14 +191,24 @@ export default function App() {
             <View style={styles.pillNav}>
               {PILL_NAV.map((id) => {
                 const active = screen === id;
+                const icon = PILL_ICONS[id];
                 return (
                   <Pressable
                     key={id}
                     onPress={() => goTo(id)}
-                    style={[styles.pillItem, active && styles.pillItemActive]}
+                    style={({ pressed }) => [
+                      styles.pillItem,
+                      active && styles.pillItemActive,
+                      pressed && styles.pillItemPressed,
+                    ]}
                     accessibilityRole="button"
                     accessibilityState={{ selected: active }}
                   >
+                    <Ionicons
+                      name={active ? icon.on : icon.off}
+                      size={20}
+                      color={active ? C.teal900 : C.navInactive}
+                    />
                     <Text style={[styles.pillText, active && styles.pillTextActive]}>
                       {s[PILL_LABELS[id]]}
                     </Text>
@@ -149,8 +227,12 @@ function renderScreen(screen: ScreenId, props: ScreenProps) {
   switch (screen) {
     case 'welcome':
       return <WelcomeScreen {...props} />;
+    case 'language':
+      return <LanguageScreen {...props} />;
     case 'login':
       return <LoginScreen {...props} />;
+    case 'signup':
+      return <SignupScreen {...props} />;
     case 'onboarding':
       return <OnboardingScreen {...props} />;
     case 'home':
@@ -163,6 +245,8 @@ function renderScreen(screen: ScreenId, props: ScreenProps) {
       return <SalahCalendarScreen {...props} />;
     case 'quran':
       return <QuranBookScreen {...props} />;
+    case 'reader':
+      return <QuranReaderScreen {...props} />;
     case 'lifeAyahs':
       return <LifeAyahsScreen {...props} />;
     case 'duas':
@@ -201,14 +285,15 @@ const styles = StyleSheet.create({
   body: { flex: 1 },
   screenWrap: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  loadingText: { marginTop: 12, fontSize: 14, color: C.muted },
+  loadingText: { fontFamily: F.sans, marginTop: 12, fontSize: 14, color: C.muted },
   pillNav: {
     position: 'absolute',
     left: 16,
     right: 16,
-    bottom: 18,
+    bottom: 16,
     flexDirection: 'row',
-    backgroundColor: C.teal950,
+    gap: 2,
+    backgroundColor: C.teal900,
     borderRadius: 999,
     padding: 6,
     shadowColor: '#000',
@@ -220,10 +305,13 @@ const styles = StyleSheet.create({
   pillItem: {
     flex: 1,
     borderRadius: 999,
-    paddingVertical: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     alignItems: 'center',
+    gap: 2,
   },
-  pillItemActive: { backgroundColor: C.teal },
-  pillText: { fontSize: 12, fontWeight: '700', color: '#B9CFC9' },
-  pillTextActive: { color: C.white },
+  pillItemActive: { backgroundColor: C.white },
+  pillItemPressed: { transform: [{ scale: 0.94 }] },
+  pillText: { fontFamily: F.sans, fontSize: 11.5, fontWeight: '700', color: C.navInactive },
+  pillTextActive: { color: C.teal900 },
 });

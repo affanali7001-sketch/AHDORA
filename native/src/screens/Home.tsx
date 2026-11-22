@@ -1,39 +1,60 @@
 /**
- * Home — the landing after login: dark teal header, location + date
- * card, next-prayer banner, a prominent Quran Book card (mushaf-style
- * mini page + real today's reading progress), then the tile grid.
- * All data is live; tiles that lead to not-yet-built screens simply
- * navigate there (the shell shows an honest placeholder for them).
+ * Home — rebuilt to the approved preview (§5): dark-teal gradient
+ * header (TealHead) with Arabic salam, the real user's name, the real
+ * date + live Hijri date, and a translucent next-prayer card with a
+ * real countdown; then the 12 preview tiles (icon + label only, no
+ * subtitle, no arrow); then the "Aaj ek nazar me" card with REAL
+ * values. All data is live; where there is no data yet, an honest
+ * empty state is shown — never a fake number.
  */
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ScreenId, ScreenProps } from '../lib/nav';
 import { stringsFor } from '../lib/strings';
-import { C, L, S, T } from '../lib/theme';
-import { Card, EmptyState, PillButton, ProgressBar, SectionTitle } from '../components/ui';
+import { C, F, L, T } from '../lib/theme';
+import { Card, Chip, EmptyState, PillButton, TealHead, Tile, TileGrid } from '../components/ui';
 import {
   fetchPrayerTimes,
-  fetchQuranHistory,
+  fetchSalahDay,
   formatTime12h,
-  loadProfileWithCompletion,
+  PRAYER_NAMES,
+  todayKey,
+  type PrayerRecord,
   type PrayerTimesResponse,
-  type QuranHistory,
 } from '../lib/apiCore';
+import {
+  myChallenges,
+  studyStats,
+  type ChallengeParticipation,
+  type StudyStats,
+} from '../lib/apiSocial';
 
-type Tile = { id: ScreenId; title: string; sub: string };
+/** Minutes from now until an HH:mm time today (null when unparsable). */
+function minutesUntil(timeHHmm: string, now = new Date()): number | null {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(timeHHmm.trim());
+  if (!match) return null;
+  const target = new Date(now);
+  target.setHours(Number(match[1]), Number(match[2]), 0, 0);
+  return Math.round((target.getTime() - now.getTime()) / 60000);
+}
+
+/** Preview tag format: "1h 12m" / "45m". */
+function shortCountdown(mins: number): string {
+  if (mins <= 0) return '0m';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+type HomeTile = { id: ScreenId; label: string; icon: string; peach?: boolean };
 
 export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
   const s = stringsFor(lang);
   const [times, setTimes] = useState<PrayerTimesResponse | null>(null);
-  const [city, setCity] = useState('');
-  const [quran, setQuran] = useState<QuranHistory | null>(null);
+  const [day, setDay] = useState<PrayerRecord | null>(null);
+  const [stats, setStats] = useState<StudyStats | null>(null);
+  const [challenge, setChallenge] = useState<ChallengeParticipation | null>(null);
+  const [challengeLoaded, setChallengeLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -43,16 +64,24 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
     setError('');
     Promise.allSettled([
       fetchPrayerTimes(),
-      fetchQuranHistory(),
-      loadProfileWithCompletion(user?.name ?? ''),
-    ]).then(([timesResult, quranResult, profileResult]) => {
+      fetchSalahDay(todayKey()),
+      studyStats(),
+      myChallenges(),
+    ]).then(([timesResult, dayResult, statsResult, challengesResult]) => {
       if (!active) return;
       if (timesResult.status === 'fulfilled') setTimes(timesResult.value);
-      if (quranResult.status === 'fulfilled') setQuran(quranResult.value);
-      if (profileResult.status === 'fulfilled' && profileResult.value.profile) {
-        setCity(profileResult.value.profile.city);
+      if (dayResult.status === 'fulfilled') setDay(dayResult.value);
+      if (statsResult.status === 'fulfilled') setStats(statsResult.value);
+      if (challengesResult.status === 'fulfilled') {
+        setChallenge(challengesResult.value.active[0] ?? null);
       }
-      if (timesResult.status === 'rejected' && quranResult.status === 'rejected') {
+      setChallengeLoaded(true);
+      if (
+        timesResult.status === 'rejected' &&
+        dayResult.status === 'rejected' &&
+        statsResult.status === 'rejected' &&
+        challengesResult.status === 'rejected'
+      ) {
         setError(s.loadFailed);
       }
       setLoading(false);
@@ -60,191 +89,169 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
     return () => {
       active = false;
     };
-  }, [s.loadFailed, user?.name]);
+  }, [s.loadFailed]);
 
   useEffect(load, [load]);
 
-  const todayLabel = new Date().toLocaleDateString('en-IN', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
-
-  const tiles: Tile[] = [
-    { id: 'prayer', title: s.tilePrayer, sub: s.tilePrayerSub },
-    { id: 'salahCalendar', title: s.tileCalendar, sub: s.tileCalendarSub },
-    { id: 'quran', title: s.navQuran, sub: s.quranBookSub },
-    { id: 'study', title: s.tileStudy, sub: s.tileStudySub },
-    { id: 'focus', title: s.tileFocus, sub: s.tileFocusSub },
-    { id: 'challenges', title: s.tileChallenges, sub: s.tileChallengesSub },
-    { id: 'friends', title: s.tileFriends, sub: s.tileFriendsSub },
-    { id: 'tasbeeh', title: s.tileTasbeeh, sub: s.tileTasbeehSub },
-    { id: 'duas', title: s.tileDuas, sub: s.tileDuasSub },
-    { id: 'lifeAyahs', title: s.tileLifeAyahs, sub: s.tileLifeAyahsSub },
-    { id: 'hijri', title: s.tileHijri, sub: s.tileHijriSub },
-    { id: 'mosque', title: s.tileMosque, sub: s.tileMosqueSub },
-    { id: 'sleep', title: s.tileSleep, sub: s.tileSleepSub },
-    { id: 'appBlock', title: s.tileAppBlock, sub: s.tileAppBlockSub },
-    { id: 'analytics', title: s.tileAnalytics, sub: s.tileAnalyticsSub },
-    { id: 'notifications', title: s.tileNotifications, sub: s.tileNotificationsSub },
-  ];
+  const now = new Date();
+  const dateLine = now
+    .toLocaleDateString('en-GB', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    })
+    .replace(', ', ' · ');
+  const hijriDate = times?.hijri?.month
+    ? `${times.hijri.month} ${times.hijri.year ?? ''}`.trim()
+    : '';
 
   const next = times?.nextPrayer ?? null;
-  const hijriDate = times?.hijri?.date
-    ? `${times.hijri.date} ${times.hijri.month ?? ''} ${times.hijri.year ?? ''}`.trim()
-    : '';
+  const countdown = next ? minutesUntil(next.time) : null;
+
+  const prayedCount = day
+    ? PRAYER_NAMES.filter((name) => day[name].status === 'prayed').length
+    : null;
+
+  const tiles: HomeTile[] = [
+    { id: 'dashboard', label: s.navDashboard, icon: '🏠' },
+    { id: 'prayer', label: s.tilePrayer, icon: '🕌' },
+    { id: 'quran', label: s.quranBookTitle, icon: '📖', peach: true },
+    { id: 'lifeAyahs', label: s.tileLifeAyahs, icon: '✨' },
+    { id: 'duas', label: s.tileDuas, icon: '🤲' },
+    { id: 'tasbeeh', label: s.tileTasbeeh, icon: '📿', peach: true },
+    { id: 'study', label: s.tileStudy, icon: '📚' },
+    { id: 'focus', label: s.tileFocus, icon: '⏱️' },
+    { id: 'sleep', label: s.tileSleep, icon: '😴' },
+    { id: 'challenges', label: s.tileChallenges, icon: '🏆', peach: true },
+    { id: 'salahCalendar', label: s.calTile, icon: '📅' },
+    { id: 'analytics', label: s.tileAnalytics, icon: '📈' },
+  ];
+
+  const summaryParts: string[] = [];
+  if (prayedCount !== null) summaryParts.push(`Namaz ${prayedCount}/5`);
+  if (stats) summaryParts.push(`Study ${stats.todayFocusMinutes} min`);
+  if (challenge) summaryParts.push(`Challenge Day ${challenge.currentDay}`);
+  const summary =
+    summaryParts.length > 0
+      ? `${summaryParts.join(' · ')} ${s.homeTodayDetail}`
+      : s.homeEmpty;
 
   return (
     <ScrollView contentContainerStyle={L.scroll} showsVerticalScrollIndicator={false}>
-      {/* Dark teal header */}
-      <View style={styles.header}>
-        <Text style={styles.headerSalam}>{s.homeGreeting}</Text>
-        <Text style={styles.headerName}>{user?.name ?? ''}</Text>
-        <Text style={styles.headerDate}>{todayLabel}</Text>
-        {hijriDate ? <Text style={styles.headerHijri}>{hijriDate}</Text> : null}
-      </View>
-
-      {/* Location + date card */}
-      <Card>
-        <Text style={T.cardTitle}>{city || s.homeLocationUnknown}</Text>
-        <Text style={T.cardBody}>
-          {s.homeDateLine}: {todayLabel}
+      <TealHead>
+        <Text style={styles.arabic}>{s.salamArabic}</Text>
+        <Text style={styles.greeting}>
+          {s.homeGreeting} {user?.name ?? ''}
         </Text>
-        {times?.method ? (
-          <Text style={[T.cardBody, { marginTop: 4 }]}>{times.method}</Text>
-        ) : null}
-      </Card>
+        <Text style={styles.dateLine}>
+          {dateLine}
+          {hijriDate ? ` · ${hijriDate}` : ''}
+        </Text>
+        {loading ? (
+          <ActivityIndicator color={C.white} style={{ marginTop: 16 }} />
+        ) : next && countdown !== null ? (
+          <View style={styles.nextCard}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.nextLabel}>{s.nextPrayer}</Text>
+              <Text style={styles.nextName}>
+                {next.name} · {formatTime12h(next.time)}
+              </Text>
+            </View>
+            <Chip label={shortCountdown(countdown)} tone="peach" />
+          </View>
+        ) : (
+          <Text style={[styles.dateLine, { marginTop: 14 }]}>{s.noPrayerToday}</Text>
+        )}
+      </TealHead>
 
-      {/* Next-prayer banner */}
-      {loading ? (
-        <ActivityIndicator color={C.teal} style={{ marginVertical: 16 }} />
-      ) : next ? (
-        <View style={styles.nextBanner}>
-          <Text style={styles.nextLabel}>{s.nextPrayer}</Text>
-          <Text style={styles.nextName}>{next.name}</Text>
-          <Text style={styles.nextTime}>{formatTime12h(next.time)}</Text>
-          <PillButton
-            label={`${s.tilePrayer} →`}
-            variant="dark"
-            onPress={() => goTo('prayer')}
+      <TileGrid>
+        {tiles.map((tile) => (
+          <Tile
+            key={tile.id}
+            label={tile.label}
+            peach={tile.peach}
+            onPress={() => goTo(tile.id)}
+            icon={
+              <Text style={[styles.tileIcon, tile.peach && styles.tileIconPeach]}>
+                {tile.icon}
+              </Text>
+            }
           />
+        ))}
+      </TileGrid>
+
+      {error && !times && !day && !stats && !challengeLoaded ? (
+        <View style={{ marginTop: 14 }}>
+          <EmptyState title={s.homeToday} body={error} />
         </View>
       ) : (
-        <EmptyState title={s.nextPrayer} body={s.noPrayerToday} />
+        <Card>
+          <Text style={T.cardTitle}>{s.homeToday}</Text>
+          <Text style={[T.cardBody, { marginTop: 6 }]}>{summary}</Text>
+          <View style={{ marginTop: 12 }}>
+            <PillButton
+              label={s.homeDashBtn}
+              variant="ghost"
+              small
+              onPress={() => goTo('dashboard')}
+            />
+          </View>
+        </Card>
       )}
 
       {error ? <Text style={T.error}>{error}</Text> : null}
-
-      {/* Quran Book card — prominent, no hunting */}
-      <SectionTitle title={s.quranBookTitle} sub={s.quranBookSub} />
-      <Pressable onPress={() => goTo('quran')} accessibilityRole="button">
-        <View style={styles.mushaf}>
-          <View style={styles.mushafInner}>
-            <Text style={styles.mushafSurah}>Al-Fatihah · 1</Text>
-            <Text style={styles.mushafArabic}>بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ</Text>
-            <Text style={styles.mushafPage}>Page 1 / 604</Text>
-          </View>
-        </View>
-      </Pressable>
-      <Card>
-        <Text style={T.cardTitle}>{s.quranTodayRead}</Text>
-        {quran ? (
-          <View>
-            <Text style={[T.cardBody, { marginTop: 4 }]}>
-              {quran.ayahsOpenedToday} {s.ayahsReadToday} · {s.ofTarget} {quran.dailyTarget}{' '}
-              {s.targetAyahs}
-            </Text>
-            <View style={{ marginTop: 10 }}>
-              <ProgressBar value={quran.ayahsOpenedToday} max={quran.dailyTarget} />
-            </View>
-          </View>
-        ) : (
-          <Text style={[T.cardBody, { marginTop: 4 }]}>{s.noReadingYet}</Text>
-        )}
-        <View style={{ marginTop: 14 }}>
-          <PillButton
-            label={quran && quran.ayahsOpenedToday > 0 ? s.continueReading : s.startReading}
-            onPress={() => goTo('quran')}
-          />
-        </View>
-      </Card>
-
-      {/* Tile grid */}
-      <SectionTitle title={s.homeTilesTitle} />
-      <View style={styles.grid}>
-        {tiles.map((tile) => (
-          <Pressable
-            key={tile.id}
-            style={styles.tile}
-            onPress={() => goTo(tile.id)}
-            accessibilityRole="button"
-          >
-            <Text style={styles.tileTitle}>{tile.title}</Text>
-            <Text style={styles.tileSub}>{tile.sub}</Text>
-            <Text style={styles.tileArrow}>→</Text>
-          </Pressable>
-        ))}
-      </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    backgroundColor: C.teal950,
-    borderRadius: S.radius,
-    padding: 20,
-    marginBottom: S.gap,
+  arabic: {
+    fontFamily: F.arabic,
+    fontSize: 27,
+    lineHeight: 40,
+    color: C.white,
   },
-  headerSalam: { fontSize: 14, color: C.peach, fontWeight: '700' },
-  headerName: { fontSize: 24, fontWeight: '800', color: C.white, marginTop: 4 },
-  headerDate: { fontSize: 13, color: '#B9CFC9', marginTop: 6 },
-  headerHijri: { fontSize: 13, color: '#B9CFC9', marginTop: 2 },
-  nextBanner: {
-    backgroundColor: C.teal,
-    borderRadius: S.radius,
-    padding: 20,
-    marginBottom: S.gap,
-  },
-  nextLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 2, color: C.peach2 },
-  nextName: { fontSize: 26, fontWeight: '800', color: C.white, marginTop: 6 },
-  nextTime: { fontSize: 18, color: C.peach2, marginTop: 2, marginBottom: 14 },
-  mushaf: {
-    backgroundColor: C.teal900,
-    borderRadius: S.radius,
-    padding: 6,
-    marginBottom: S.gap,
-  },
-  mushafInner: {
-    borderWidth: 1,
-    borderColor: C.peach,
-    borderRadius: 20,
-    backgroundColor: C.white,
-    paddingVertical: 22,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-  },
-  mushafSurah: { fontSize: 12, fontWeight: '800', letterSpacing: 1, color: C.teal },
-  mushafArabic: {
+  greeting: {
+    fontFamily: F.sans,
     fontSize: 22,
-    color: C.ink,
-    textAlign: 'center',
-    marginTop: 12,
-    lineHeight: 36,
+    fontWeight: '800',
+    color: C.white,
+    marginTop: 6,
+    lineHeight: 27,
   },
-  mushafPage: { fontSize: 12, color: C.muted, marginTop: 12 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-  tile: {
-    width: '48%',
-    backgroundColor: C.white,
-    borderRadius: S.radiusSm,
+  dateLine: {
+    fontFamily: F.sans,
+    fontSize: 13,
+    color: C.navInactive,
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  nextCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    backgroundColor: 'rgba(255,255,255,0.1)',
     borderWidth: 1,
-    borderColor: C.line,
-    padding: 14,
-    marginBottom: 12,
+    borderColor: 'rgba(255,255,255,0.16)',
+    borderRadius: 20,
+    padding: 16,
+    marginTop: 14,
   },
-  tileTitle: { fontSize: 15, fontWeight: '800', color: C.ink },
-  tileSub: { fontSize: 12, color: C.muted, marginTop: 3, lineHeight: 16 },
-  tileArrow: { fontSize: 16, color: C.teal2, fontWeight: '800', marginTop: 8 },
+  nextLabel: {
+    fontFamily: F.sans,
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: C.navInactive,
+  },
+  nextName: {
+    fontFamily: F.sans,
+    fontSize: 20,
+    fontWeight: '800',
+    color: C.white,
+    marginTop: 2,
+  },
+  tileIcon: { fontSize: 22, color: C.teal700 },
+  tileIconPeach: { color: C.peachInk },
 });

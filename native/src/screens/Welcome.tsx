@@ -1,163 +1,89 @@
 /**
- * Welcome screen — Salam + the AHDORA meaning + language selector.
- * Look refreshed to the approved preview design; behaviour unchanged.
+ * Welcome screen (preview §2) — Salam + AHDORA meaning as plain rows
+ * (no card, no heading, no circles) + one "Shuru karein" button.
+ * The preview shows no language toggle here — language lives on the
+ * Language screen, which runs before this one.
  */
-import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
-import { MEANING, stringsFor, type AppLanguage } from '../lib/strings';
-import { C, L, S, T } from '../lib/theme';
+import { MEANING, stringsFor } from '../lib/strings';
+import { C, F, L, T } from '../lib/theme';
 import { PillButton } from '../components/ui';
 
-export function LanguageToggle({
-  lang,
-  onLang,
-}: {
-  lang: AppLanguage;
-  onLang: (l: AppLanguage) => void;
-}) {
-  return (
-    <View style={styles.langRow}>
-      <Pressable
-        onPress={() => onLang('en')}
-        style={[styles.langBtn, lang === 'en' && styles.langBtnOn]}
-        accessibilityRole="button"
-        accessibilityState={{ selected: lang === 'en' }}
-      >
-        <Text style={[styles.langText, lang === 'en' && styles.langTextOn]}>English</Text>
-      </Pressable>
-      <Pressable
-        onPress={() => onLang('hi')}
-        style={[styles.langBtn, lang === 'hi' && styles.langBtnOn]}
-        accessibilityRole="button"
-        accessibilityState={{ selected: lang === 'hi' }}
-      >
-        <Text style={[styles.langText, lang === 'hi' && styles.langTextOn]}>Hinglish</Text>
-      </Pressable>
-    </View>
-  );
-}
-
-export default function WelcomeScreen({ lang, onLang, goTo }: ScreenProps) {
+export default function WelcomeScreen({ lang, goTo }: ScreenProps) {
   const s = stringsFor(lang);
-  const [signupNote, setSignupNote] = useState(false);
   return (
     <ScrollView contentContainerStyle={L.scrollNoNav} showsVerticalScrollIndicator={false}>
-      <Text style={styles.salamArabic}>{s.salamArabic}</Text>
+      <Text style={styles.arabic}>{s.salamArabic}</Text>
       <Text style={styles.salam}>{s.salam}</Text>
 
       <Text style={[T.eyebrow, styles.eyebrow]}>{s.eyebrow}</Text>
-      <Text style={styles.title}>{s.welcomeTitle}</Text>
-      <Text style={styles.sub}>{s.welcomeSub}</Text>
+      <Text style={styles.title}>{s.welTitle}</Text>
+      <Text style={styles.sub}>{s.welSub}</Text>
 
-      <View style={styles.meaningCard}>
-        <Text style={styles.meaningTitle}>{s.meaningTitle}</Text>
+      <View style={styles.meaning}>
         {MEANING.map((m) => (
           <View key={`${m.letter}-${m.word}`} style={styles.meaningRow}>
-            <View style={styles.meaningLetter}>
-              <Text style={styles.meaningLetterText}>{m.letter}</Text>
-            </View>
+            <Text style={styles.meaningLetter}>{m.letter}</Text>
             <Text style={styles.meaningDash}>—</Text>
             <Text style={styles.meaningWord}>{m.word}</Text>
           </View>
         ))}
       </View>
 
-      <Text style={styles.langLabel}>{s.languageLabel}</Text>
-      <LanguageToggle lang={lang} onLang={onLang} />
-
-      <PillButton label={`${s.logIn} →`} onPress={() => goTo('login')} />
-      <PillButton
-        label={s.createAccount}
-        variant="peach"
-        onPress={() => setSignupNote(true)}
-      />
-      {signupNote && <Text style={T.note}>{s.signupLater}</Text>}
+      <View style={{ marginTop: 26 }}>
+        <PillButton label={s.welBtn} onPress={() => goTo('login')} block />
+      </View>
+      <Text style={[T.note, styles.note]}>{s.welNote}</Text>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  salamArabic: {
+  arabic: {
+    fontFamily: F.arabic,
     fontSize: 26,
-    color: C.teal,
-    textAlign: 'center',
-    marginBottom: 6,
+    color: C.teal700,
+    marginTop: 8,
+    marginBottom: 2,
   },
   salam: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: C.teal900,
-    textAlign: 'center',
-    marginBottom: 26,
-  },
-  eyebrow: { textAlign: 'center', marginBottom: 8 },
-  title: {
-    fontSize: 34,
+    fontFamily: F.sans,
+    fontSize: 31,
     fontWeight: '800',
     color: C.ink,
-    textAlign: 'center',
     letterSpacing: -0.5,
   },
-  sub: {
-    fontSize: 15,
-    color: C.muted,
-    textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 24,
-  },
-  meaningCard: {
-    backgroundColor: C.white,
-    borderRadius: S.radius,
-    borderWidth: 1,
-    borderColor: C.line,
-    paddingVertical: 18,
-    paddingHorizontal: 20,
-    marginBottom: 24,
-  },
-  meaningTitle: {
-    fontSize: 13,
+  eyebrow: { marginTop: 14 },
+  title: {
+    fontFamily: F.sans,
+    fontSize: 24,
     fontWeight: '800',
-    letterSpacing: 1,
+    color: C.ink,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  sub: {
+    fontFamily: F.sans,
+    fontSize: 14,
     color: C.muted,
-    textTransform: 'uppercase',
-    marginBottom: 12,
+    lineHeight: 22,
   },
-  meaningRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5 },
-  meaningLetter: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: C.teal,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  meaningLetterText: { color: C.white, fontSize: 17, fontWeight: '800' },
-  meaningDash: { color: C.muted, marginHorizontal: 12, fontSize: 15 },
-  meaningWord: { fontSize: 18, fontWeight: '700', color: C.ink },
-  langLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: C.muted,
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  langRow: {
+  meaning: { marginTop: 18 },
+  meaningRow: {
     flexDirection: 'row',
-    backgroundColor: C.white,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: C.line,
-    padding: 4,
-    marginBottom: 24,
+    alignItems: 'baseline',
+    gap: 12,
+    paddingVertical: 5,
   },
-  langBtn: {
-    flex: 1,
-    borderRadius: 999,
-    paddingVertical: 10,
-    alignItems: 'center',
+  meaningLetter: {
+    fontFamily: F.sans,
+    fontSize: 19,
+    fontWeight: '800',
+    color: C.teal500,
+    width: 20,
   },
-  langBtnOn: { backgroundColor: C.teal950 },
-  langText: { fontSize: 14, fontWeight: '700', color: C.muted },
-  langTextOn: { color: C.white },
+  meaningDash: { fontFamily: F.sans, fontSize: 16.5, color: C.muted },
+  meaningWord: { fontFamily: F.sans, fontSize: 16.5, color: C.muted },
+  note: { marginTop: 12 },
 });
