@@ -5,6 +5,7 @@ import {
   filterDuasByTopic,
   isDuaTopic,
   type Dua,
+  type DuaTopic,
 } from './duasData.js';
 
 /**
@@ -39,8 +40,10 @@ describe('duasData', () => {
       }
       // An exact reference (collection + number), never a vague claim.
       expect(dua.source.trim().length, dua.id).toBeGreaterThan(0);
+      // Collections used across the library: the original six plus
+      // Ibn Majah, an-Nasa'i and Ibn Hibban (2026-11-23 expansion).
       expect(dua.source, `${dua.id}: source must name a collection and number`).toMatch(
-        /(Bukhari|Muslim|Abi Dawud|Tirmidhi|Ahmad|Quran)/,
+        /(Bukhari|Muslim|Abi Dawud|Tirmidhi|Ahmad|Quran|Ibn Majah|Nasa|Ibn Hibban)/,
       );
       expect(dua.source, `${dua.id}: source must include a hadith number`).toMatch(/\d/);
     }
@@ -81,7 +84,7 @@ describe('duasData', () => {
     expect(sleep.length).toBeGreaterThan(0);
     expect(sleep.length).toBeLessThan(DUAS.length);
     for (const dua of sleep) expect(dua.topics).toContain('sleep');
-    expect(filterDuasByTopic(DUAS, 'wudu')).toHaveLength(1);
+    expect(filterDuasByTopic(DUAS, 'wudu')).toHaveLength(4);
   });
 
   it('isDuaTopic accepts known topics and rejects the rest', () => {
@@ -91,7 +94,23 @@ describe('duasData', () => {
     expect(isDuaTopic('wudu')).toBe(true);
     expect(isDuaTopic('anxiety')).toBe(true);
     expect(isDuaTopic('overthinking')).toBe(true);
-    expect(isDuaTopic('evening')).toBe(false);
+    // Topics added in the 2026-11-23 expansion (22 -> 100+ duas).
+    expect(isDuaTopic('evening')).toBe(true);
+    expect(isDuaTopic('prayer')).toBe(true);
+    expect(isDuaTopic('adhan')).toBe(true);
+    expect(isDuaTopic('mosque')).toBe(true);
+    expect(isDuaTopic('food')).toBe(true);
+    expect(isDuaTopic('travel')).toBe(true);
+    expect(isDuaTopic('distress')).toBe(true);
+    expect(isDuaTopic('gratitude')).toBe(true);
+    expect(isDuaTopic('protection')).toBe(true);
+    expect(isDuaTopic('sickness')).toBe(true);
+    expect(isDuaTopic('forgiveness')).toBe(true);
+    expect(isDuaTopic('knowledge')).toBe(true);
+    expect(isDuaTopic('family')).toBe(true);
+    expect(isDuaTopic('work')).toBe(true);
+    expect(isDuaTopic('rain')).toBe(true);
+    expect(isDuaTopic('notatopic')).toBe(false);
     expect(isDuaTopic('')).toBe(false);
   });
 
@@ -112,7 +131,9 @@ describe('duasData', () => {
   });
 
   it('has the Phase 13 anxiety / overthinking / sleep duas', () => {
-    expect(filterDuasByTopic(DUAS, 'anxiety').map((dua) => dua.id)).toEqual([
+    // The Phase 13 entries stay first in each topic; the 2026-11-23
+    // expansion appends more entries to the same topics afterwards.
+    expect(filterDuasByTopic(DUAS, 'anxiety').map((dua) => dua.id).slice(0, 3)).toEqual([
       'pareshani-ghabrahat',
       'allahumma-inni-abduka',
       'rehmat-ki-ummed',
@@ -124,7 +145,7 @@ describe('duasData', () => {
       'taawwudh',
       'namaz-mein-waswasa',
     ]);
-    expect(filterDuasByTopic(DUAS, 'sleep')).toHaveLength(8);
+    expect(filterDuasByTopic(DUAS, 'sleep')).toHaveLength(12);
     expect(DUAS.map((dua) => dua.id)).toContain('aslamtu-nafsi');
     expect(DUAS.map((dua) => dua.id)).toContain('sone-se-pehle-teen-qul');
     expect(DUAS.map((dua) => dua.id)).toContain('tasbeeh-e-fatimah');
@@ -138,7 +159,59 @@ describe('duasData', () => {
     for (const id of ['sone-se-pehle', 'bistar-par-lete-waqt', 'jaagne-par']) {
       expect(DUAS.filter((dua) => dua.id === id)).toHaveLength(1);
     }
-    expect(DUAS).toHaveLength(22);
+  });
+
+  it('has at least 100 verified duas after the 2026-11-23 expansion', () => {
+    expect(DUAS.length).toBeGreaterThanOrEqual(100);
+    // The original 22 are all still present, byte-identical ids.
+    for (const id of [
+      'sone-se-pehle',
+      'bistar-par-lete-waqt',
+      'neend-na-aaye-ayat-kursi',
+      'neend-na-aaye-baqarah-aakhri',
+      'jaagne-par',
+      'khana-shuru-karne-se-pehle',
+      'khane-ke-baad',
+      'ghar-se-nikalte-waqt',
+      'pareshani-mein',
+      'toilet-jane-se-pehle',
+      'wuzu-ke-baad',
+      'pareshani-ghabrahat',
+      'allahumma-inni-abduka',
+      'rehmat-ki-ummed',
+      'yunus-ki-dua',
+      'hasbunallahu',
+      'amantu-billahi',
+      'taawwudh',
+      'namaz-mein-waswasa',
+      'aslamtu-nafsi',
+      'sone-se-pehle-teen-qul',
+      'tasbeeh-e-fatimah',
+    ]) {
+      expect(DUAS.map((dua) => dua.id), `missing original dua ${id}`).toContain(id);
+    }
+    // Every new category has real coverage, not a single token entry.
+    for (const topic of ['evening', 'prayer', 'adhan', 'mosque', 'food', 'travel']) {
+      expect(filterDuasByTopic(DUAS, topic as DuaTopic).length).toBeGreaterThanOrEqual(3);
+    }
+    for (const topic of ['distress', 'gratitude', 'protection', 'sickness', 'forgiveness']) {
+      expect(filterDuasByTopic(DUAS, topic as DuaTopic).length).toBeGreaterThanOrEqual(4);
+    }
+    for (const topic of ['knowledge', 'family', 'work', 'rain']) {
+      expect(filterDuasByTopic(DUAS, topic as DuaTopic).length).toBeGreaterThanOrEqual(4);
+    }
+    // The expansion's key sources are present with their exact numbers.
+    const byId = new Map(DUAS.map((dua) => [dua.id, dua]));
+    expect(byId.get('sayyid-al-istighfar')?.source).toContain('Bukhari 6306');
+    expect(byId.get('subah-asbahna')?.source).toContain('Muslim 2723');
+    expect(byId.get('bika-asbahna')?.source).toContain('Tirmidhi 3391');
+    expect(byId.get('adhan-ke-baad')?.source).toContain('Bukhari 614');
+    expect(byId.get('safar-ki-dua')?.source).toContain('Muslim 1342');
+    expect(byId.get('ya-hayyu-ya-qayyum')?.source).toContain('Tirmidhi 3524');
+    expect(byId.get('istikhara')?.source).toContain('Bukhari 1166');
+    expect(byId.get('baarish-par')?.source).toContain('Bukhari 1032');
+    expect(byId.get('rabbana-atina')?.source).toContain('Quran 2:201');
+    expect(byId.get('la-ba-sa-tahurun')?.source).toContain('Bukhari 5656');
   });
 
   it('keeps the weak-chain insomnia dua out', () => {
