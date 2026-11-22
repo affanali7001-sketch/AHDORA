@@ -24,7 +24,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Audio } from 'expo-av';
+import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
 import type { ScreenProps } from '../lib/nav';
 import type { AppLanguage } from '../lib/strings';
 import {
@@ -252,7 +252,7 @@ export default function QuranBookScreen({ lang }: ScreenProps) {
   const [sessionPages, setSessionPages] = useState(0);
   const [sessionSeconds, setSessionSeconds] = useState(0);
 
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const soundRef = useRef<AudioPlayer | null>(null);
   const queueRef = useRef<AudioItem[]>([]);
   const queueIndexRef = useRef(0);
   const modeRef = useRef<AudioMode>(null);
@@ -343,16 +343,7 @@ export default function QuranBookScreen({ lang }: ScreenProps) {
     const sound = soundRef.current;
     soundRef.current = null;
     if (sound) {
-      try {
-        await sound.stopAsync();
-      } catch {
-        /* already stopped */
-      }
-      try {
-        await sound.unloadAsync();
-      } catch {
-        /* already unloaded */
-      }
+      sound.remove();
     }
   }
 
@@ -375,26 +366,30 @@ export default function QuranBookScreen({ lang }: ScreenProps) {
         /* ignore */
       }
     }
-    const tryLoad = async (uri: string): Promise<Audio.Sound> => {
-      const { sound } = await Audio.Sound.createAsync(
-        { uri },
-        { shouldPlay: true },
-        (status) => {
-          if (!status.isLoaded) return;
-          if (status.didJustFinish) {
-            void playAt(queueIndexRef.current + 1);
+    const tryLoad = (uri: string): AudioPlayer => {
+      const player = createAudioPlayer({ uri }, { updateInterval: 500 });
+      player.addListener('playbackStatusUpdate', (status) => {
+        if (status.didJustFinish) {
+          void playAt(queueIndexRef.current + 1);
+        } else if (status.error) {
+          if (item.fallbackUri && uri === item.uri) {
+            player.replace({ uri: item.fallbackUri });
+            player.play();
+          } else {
+            setAudioError(s.audioFailed);
+            void stopAudio();
           }
-        },
-      );
-      return sound;
+        }
+      });
+      player.play();
+      return player;
     };
     try {
-      soundRef.current = await tryLoad(item.uri);
+      soundRef.current = tryLoad(item.uri);
     } catch {
-      // Tilawat fallback: same reciter on the AlQuran Cloud CDN.
       if (item.fallbackUri) {
         try {
-          soundRef.current = await tryLoad(item.fallbackUri);
+          soundRef.current = tryLoad(item.fallbackUri);
         } catch {
           setAudioError(s.audioFailed);
           await stopAudio();
