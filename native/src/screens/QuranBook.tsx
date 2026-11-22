@@ -360,11 +360,7 @@ export default function QuranBookScreen({ lang }: ScreenProps) {
     const old = soundRef.current;
     soundRef.current = null;
     if (old) {
-      try {
-        await old.unloadAsync();
-      } catch {
-        /* ignore */
-      }
+      old.remove();
     }
     const tryLoad = (uri: string): AudioPlayer => {
       const player = createAudioPlayer({ uri }, { updateInterval: 500 });
