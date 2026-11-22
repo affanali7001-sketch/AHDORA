@@ -346,22 +346,26 @@ export function matchHijriEventKey(holiday: string): HijriEventKey | null {
 /**
  * From a flat list of normalised Aladhan days (any span, sorted or
  * not), return the NEXT occurrence of each key event on or after
- * `today` (ISO), one entry per key, sorted by date. The user's day
+ * `earliest` (ISO, defaults to `today`), one entry per key, sorted
+ * by date. `earliest` lets the ?year= mode list a whole past or
+ * future year instead of only what is still ahead. The user's day
  * offset is applied the same way /month does it: the event is
  * dated on the Gregorian day whose SHIFTED Hijri day carries the
- * holiday. Days before today are skipped, and a key is recorded
- * only at its first occurrence (Eid spans are not repeated).
- * Pure function — no fetch, no DB — so it is unit-testable.
+ * holiday. Days before `earliest` are skipped, and a key is
+ * recorded only at its first occurrence (Eid spans are not
+ * repeated). Pure function — no fetch, no DB — so it is
+ * unit-testable.
  */
 export function collectHijriEvents(
   days: AladhanDay[],
   today: string,
   offset: number,
+  earliest: string = today,
 ): HijriEvent[] {
   const sorted = [...days].sort((a, b) => a.gregorian.date.localeCompare(b.gregorian.date));
   const found = new Map<HijriEventKey, HijriEvent>();
   for (const day of sorted) {
-    if (day.gregorian.date < today) continue;
+    if (day.gregorian.date < earliest) continue;
     const shifted = shiftedLookup(sorted, day.gregorian.date, offset) ?? day;
     const daysUntil = Math.round(
       (Date.parse(day.gregorian.date) - Date.parse(today)) / 86400000,
@@ -404,6 +408,11 @@ export function collectHijriEvents(
  * /month: calendar info, not per-user data (the signed-in user's
  * timezone and moon-sighting offset still apply).
  *
+ * ?year=YYYY — instead of "next occurrence", list that whole
+ * Gregorian year (2028, 2029, 2030 … 2050), so any year can be
+ * browsed. daysUntil is still counted from today, so past events
+ * in the year come back negative. Invalid year → 400.
+ *
  * Why this endpoint exists: the Hijri screen only scanned the
  * current month + 2 ahead, so Ramadan/Eid/Bakrid — months away —
  * never appeared at all. This scans 14 Gregorian months forward
@@ -419,10 +428,25 @@ hijriRouter.get('/events', optionalAuth, async (req, res) => {
     const offset = profile?.hijriDayOffset ?? 0;
     const today = dateKeyInTimezone(timezone);
     const [todayYear = 2026, todayMonth = 1] = today.split('-').map(Number);
+    const yearParam = typeof req.query.year === 'string' ? req.query.year.trim() : '';
+    let year: number | null = null;
+    if (yearParam) {
+      year = Number(yearParam);
+      if (!Number.isInteger(year) || year < 1900 || year > 2200) {
+        res.status(400).json({ error: 'Year must be between 1900 and 2200.' });
+        return;
+      }
+    }
+    // Default mode: 14 months from today. Year mode: that year's
+    // 12 months, listed from 1 January (past events included).
     const months: { year: number; month: number }[] = [];
-    for (let i = 0; i < 14; i++) {
-      const total = todayYear * 12 + (todayMonth - 1) + i;
-      months.push({ year: Math.floor(total / 12), month: (total % 12) + 1 });
+    if (year !== null) {
+      for (let m = 1; m <= 12; m++) months.push({ year, month: m });
+    } else {
+      for (let i = 0; i < 14; i++) {
+        const total = todayYear * 12 + (todayMonth - 1) + i;
+        months.push({ year: Math.floor(total / 12), month: (total % 12) + 1 });
+      }
     }
     // allSettled: one failed month must not hide the events in the
     // months that did load. Each month gets one retry first
@@ -438,12 +462,18 @@ hijriRouter.get('/events', optionalAuth, async (req, res) => {
       res.status(502).json({ error: 'Hijri events could not be loaded from Aladhan. Please try again later.' });
       return;
     }
-    const events = collectHijriEvents(allDays, today, offset);
+    const events = collectHijriEvents(
+      allDays,
+      today,
+      offset,
+      year !== null ? `${year}-01-01` : today,
+    );
     res.json({
       source: SOURCE,
       convention: CONVENTION,
       today,
       adjustmentDays: offset,
+      ...(year !== null ? { year } : {}),
       events,
     });
   } catch {

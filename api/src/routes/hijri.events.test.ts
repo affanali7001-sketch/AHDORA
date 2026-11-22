@@ -161,6 +161,23 @@ describe('collectHijriEvents', () => {
     expect(events.find((event) => event.key === 'new-year')?.label).toBe('Islamic New Year');
   });
 
+  it('lists a whole future year when earliest is that year (the ?year= mode)', () => {
+    // User request 2026-11-22: any year must be browsable (2028,
+    // 2029, 2030 … 2050), not just the next occurrence.
+    const days = [
+      rawDay('28-01-2028', '1', 'Ramadan', '1449', ['1st Day of Ramadan']),
+      rawDay('27-02-2028', '1', 'Shawwāl', '1449', ['Eid al-Fitr']),
+      rawDay('05-06-2028', '10', 'Dhū al-Hijjah', '1449', ['Eid al-Adha']),
+    ]
+      .map(normaliseAladhanDay)
+      .filter((day): day is NonNullable<typeof day> => day !== null);
+    const events = collectHijriEvents(days, '2026-11-22', 0, '2028-01-01');
+    expect(events.map((event) => event.key)).toEqual(['ramadan', 'eid-fitr', 'eid-adha']);
+    // daysUntil is still counted from today, so 2028 events are
+    // hundreds of days away.
+    expect(events.find((event) => event.key === 'ramadan')?.daysUntil).toBeGreaterThan(400);
+  });
+
   it('counts today as 0 days away', () => {
     const events = collectHijriEvents(ramadanDays(), '2027-02-08', 0);
     expect(events.find((event) => event.key === 'ramadan')?.daysUntil).toBe(0);

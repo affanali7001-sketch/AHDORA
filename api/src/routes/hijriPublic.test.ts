@@ -34,6 +34,9 @@ const FAKE_HOLIDAYS: Record<string, string[]> = {
   '2027-03-10': ['Eid al-Fitr'],
   '2027-05-15': ['Arafa'],
   '2027-05-27': ['Eid al-Adha'],
+  // 2028 stub dates for the ?year= test (fake data, like the 2027 ones above).
+  '2028-01-28': ['1st Day of Ramadan'],
+  '2028-02-27': ['Eid al-Fitr'],
 };
 
 /** Fake Aladhan month payload for whatever month/year the route asks for. */
@@ -241,6 +244,27 @@ describe('GET /api/hijri/events (public)', () => {
     // fetched it, or Eid-ul-Fitr would be missing.
     const fitr = data.events.find((event) => event.key === 'eid-fitr');
     expect(fitr?.gregorianDate).toBe('2027-03-10');
+  });
+
+  it('lists a whole year with ?year= (2028 must be browsable, not just the next occurrence)', async () => {
+    const response = await fetch(`${base}/api/hijri/events?year=2028`);
+    expect(response.status).toBe(200);
+    const data = (await response.json()) as {
+      year: number;
+      events: { key: string; gregorianDate: string; daysUntil: number }[];
+    };
+    expect(data.year).toBe(2028);
+    expect(data.events.map((event) => event.key)).toEqual(['ramadan', 'eid-fitr']);
+    const ramadan = data.events.find((event) => event.key === 'ramadan');
+    expect(ramadan?.gregorianDate).toBe('2028-01-28');
+    expect(ramadan?.daysUntil).toBeGreaterThan(400);
+  });
+
+  it('rejects an out-of-range or non-numeric year with 400', async () => {
+    for (const bad of ['1800', '2201', 'abc']) {
+      const response = await fetch(`${base}/api/hijri/events?year=${bad}`);
+      expect(response.status).toBe(400);
+    }
   });
 
   it('never leaks the raw 401 string to a guest', async () => {
