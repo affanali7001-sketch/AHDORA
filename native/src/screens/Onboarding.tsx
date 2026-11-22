@@ -43,11 +43,19 @@ const METHODS = [
   'Islamic Society of North America (ISNA)',
 ];
 
-const SEMESTERS = [
-  { label: '3rd Semester', value: '3' },
-  { label: '4th Semester', value: '4' },
-  { label: '5th Semester', value: '5' },
-];
+const ORDINALS = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th'];
+
+/** Semesters run 1–10 (a 5-year course), not 3–5. */
+const SEMESTERS = ORDINALS.map((ord, i) => ({
+  label: `${ord} Semester`,
+  value: String(i + 1),
+}));
+
+/** School classes 1–12 have no semester at all. */
+const CLASSES = Array.from({ length: 12 }, (_, i) => ({
+  label: `Class ${i + 1}`,
+  value: String(i + 1),
+}));
 
 const STUDY_HOURS = ['1', '2', '3', '4+'];
 
@@ -60,6 +68,10 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
     freshOnboarding ? 'prompt' : null,
   );
   const [step, setStep] = useState(0);
+  // School (Class 1–12, no semester) vs Diploma/Degree (Semester
+  // 1–10). Derived from the saved profile when it loads: a saved
+  // classYear means school, a saved semester means college.
+  const [eduType, setEduType] = useState<'school' | 'college'>('college');
   const [form, setForm] = useState<ProfileForm>(() => {
     const f = emptyProfileForm(user?.name ?? '');
     if (!f.dailyStudyTarget) f.dailyStudyTarget = '2';
@@ -86,6 +98,7 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
             // profile's own target always wins over the default.
             dailyStudyTarget: result.profile!.dailyStudyTarget || prev.dailyStudyTarget,
           }));
+          setEduType(result.profile.classYear?.trim() ? 'school' : 'college');
         }
         if (result.onboardingStep > 0 && result.onboardingStep < 8) {
           setStep(result.onboardingStep);
@@ -129,6 +142,19 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
     });
   };
 
+  /** Switch School <-> Diploma/Degree: the other side's value is cleared, so a school student never carries a semester and a college student never carries a class. */
+  const pickEduType = (type: 'school' | 'college') => {
+    setEduType(type);
+    setError('');
+    if (type === 'school') {
+      update('semester', '');
+      update('education', 'School');
+    } else {
+      update('classYear', '');
+      update('education', 'Diploma / Degree');
+    }
+  };
+
   /** Per-step validation — only the fields the preview shows on that step. */
   function validate(targetStep: number): boolean {
     const fields: Record<string, string> = {};
@@ -137,7 +163,12 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
       if (!form.city.trim()) fields.city = s.obRequired;
     } else if (targetStep === 1) {
       if (!form.course.trim()) fields.course = s.obRequired;
-      if (!form.semester.trim()) fields.semester = s.obRequired;
+      // School (Class 1–12) has no semester — never ask for it.
+      if (eduType === 'school') {
+        if (!form.classYear.trim()) fields.classYear = s.obRequired;
+      } else if (!form.semester.trim()) {
+        fields.semester = s.obRequired;
+      }
     } else if (targetStep === 2) {
       if (!form.collegeStart.trim()) fields.collegeStart = s.obRequired;
       if (!form.collegeEnd.trim()) fields.collegeEnd = s.obRequired;
@@ -227,9 +258,16 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
     SEMESTERS.find((o) => o.value === form.semester)?.label ??
     (form.semester ? `${form.semester} Semester` : '—');
 
+  const eduLabel =
+    eduType === 'school'
+      ? form.classYear
+        ? `Class ${form.classYear}`
+        : '—'
+      : semesterLabel;
+
   const reviewLines = [
     `${form.name || '—'} · ${form.city || '—'}`,
-    `${form.course || '—'} · ${semesterLabel}`,
+    `${form.course || '—'} · ${eduLabel}`,
     `College ${form.collegeStart ? formatTime12h(form.collegeStart) : '?'} – ${
       form.collegeEnd ? formatTime12h(form.collegeEnd) : '?'
     } · Study ${form.dailyStudyTarget || '?'} ${lang === 'hi' ? 'ghante/roz' : 'hours/day'}`,
@@ -279,27 +317,57 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
 
       {step === 1 && (
         <View>
-          <Field label={s.obCourse}>
+          <Text style={styles.optionLabel}>{s.obEducation}</Text>
+          <OptionRow
+            label={s.obEduSchool}
+            selected={eduType === 'school'}
+            onPress={() => pickEduType('school')}
+          />
+          <OptionRow
+            label={s.obEduCollege}
+            selected={eduType === 'college'}
+            onPress={() => pickEduType('college')}
+          />
+          <Field label={eduType === 'school' ? s.obSchool : s.obCourse}>
             <Input
               value={form.course}
               onChangeText={(v) => update('course', v)}
-              placeholder="Diploma — Computer Science"
+              placeholder={eduType === 'school' ? s.obSchoolPh : s.obCoursePh}
               autoCapitalize="words"
             />
           </Field>
           {fieldError('course')}
-          <Text style={styles.optionLabel}>{s.obSemester}</Text>
-          <View style={styles.chipRow}>
-            {SEMESTERS.map((opt) => (
-              <Chip
-                key={opt.value}
-                label={opt.label}
-                selected={form.semester === opt.value}
-                onPress={() => update('semester', opt.value)}
-              />
-            ))}
-          </View>
-          {fieldError('semester')}
+          {eduType === 'school' ? (
+            <>
+              <Text style={styles.optionLabel}>{s.obClass}</Text>
+              <View style={styles.chipRow}>
+                {CLASSES.map((opt) => (
+                  <Chip
+                    key={opt.value}
+                    label={opt.label}
+                    selected={form.classYear === opt.value}
+                    onPress={() => update('classYear', opt.value)}
+                  />
+                ))}
+              </View>
+              {fieldError('classYear')}
+            </>
+          ) : (
+            <>
+              <Text style={styles.optionLabel}>{s.obSemester}</Text>
+              <View style={styles.chipRow}>
+                {SEMESTERS.map((opt) => (
+                  <Chip
+                    key={opt.value}
+                    label={opt.label}
+                    selected={form.semester === opt.value}
+                    onPress={() => update('semester', opt.value)}
+                  />
+                ))}
+              </View>
+              {fieldError('semester')}
+            </>
+          )}
         </View>
       )}
 

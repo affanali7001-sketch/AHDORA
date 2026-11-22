@@ -40,6 +40,28 @@ function profileStr(profile: ProfileData | null, key: string): string {
   return typeof value === 'string' ? value : '';
 }
 
+function ordinal(n: number): string {
+  if (n === 1) return '1st';
+  if (n === 2) return '2nd';
+  if (n === 3) return '3rd';
+  return `${n}th`;
+}
+
+/** "Class 8" for a school student, "4th Semester" for a college student — never a bare number. */
+function eduDetail(profile: ProfileData | null): string {
+  const classYear = profileStr(profile, 'classYear').trim();
+  if (classYear) {
+    const n = Number(classYear);
+    return Number.isInteger(n) ? `Class ${n}` : classYear;
+  }
+  const semester = profileStr(profile, 'semester').trim();
+  if (semester) {
+    const n = Number(semester);
+    return Number.isInteger(n) ? `${ordinal(n)} Semester` : semester;
+  }
+  return '';
+}
+
 export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProps) {
   const s = stringsFor(lang);
   const [loading, setLoading] = useState(true);
@@ -159,7 +181,7 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
   const initial = (user?.name ?? '?').trim().charAt(0).toUpperCase() || '?';
   const subParts = [
     profileStr(profile, 'course'),
-    profileStr(profile, 'semester'),
+    eduDetail(profile),
     profileStr(profile, 'city'),
   ].filter((v) => v.length > 0);
 
