@@ -69,6 +69,12 @@ function installFetchStub(): void {
     }
     const match = /api\.aladhan\.com\/v1\/gToHCalendar\/(\d+)\/(\d+)/.exec(url);
     if (match) {
+      // Fail March 2027 once when armed: /events must retry the
+      // month instead of silently dropping Eid-ul-Fitr from it.
+      if (failMarchOnce && match[1] === '3' && match[2] === '2027') {
+        failMarchOnce = false;
+        return new Response('upstream error', { status: 500 });
+      }
       const payload = aladhanMonthPayload(Number(match[1]), Number(match[2]));
       return new Response(JSON.stringify(payload), {
         status: 200,
@@ -78,6 +84,9 @@ function installFetchStub(): void {
     throw new Error(`unexpected upstream fetch in test: ${url}`);
   });
 }
+
+/** Armed by the retry test: the next gToHCalendar/3/2027 call 500s once. */
+let failMarchOnce = false;
 
 /** Today's date key in Asia/Kolkata (the default timezone for guests). */
 function kolkataToday(): string {
@@ -219,6 +228,19 @@ describe('GET /api/hijri/events (public)', () => {
     expect(ramadan?.daysUntil).toBeGreaterThan(0);
     const adha = data.events.find((event) => event.key === 'eid-adha');
     expect(adha?.gregorianDate).toBe('2027-05-27');
+  });
+
+  it('retries a month fetch that fails once instead of dropping its events', async () => {
+    failMarchOnce = true;
+    const response = await fetch(`${base}/api/hijri/events`);
+    expect(response.status).toBe(200);
+    const data = (await response.json()) as {
+      events: { key: string; gregorianDate: string }[];
+    };
+    // March 2027 500'd on the first try; the retry must have
+    // fetched it, or Eid-ul-Fitr would be missing.
+    const fitr = data.events.find((event) => event.key === 'eid-fitr');
+    expect(fitr?.gregorianDate).toBe('2027-03-10');
   });
 
   it('never leaks the raw 401 string to a guest', async () => {

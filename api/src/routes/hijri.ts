@@ -143,6 +143,20 @@ async function fetchGregorianMonthCalendar(month: number, year: number): Promise
   return days;
 }
 
+/** Fetch one Gregorian month with a single retry — Aladhan is
+ * occasionally slow and a dropped month silently hides the events
+ * inside it (verified live 2026-11-22: one /events call missed
+ * Eid-ul-Fitr + Mawlid, the next missed Ashura). The month cache
+ * means a retry only re-fetches months that actually failed. */
+async function fetchMonthWithRetry(month: number, year: number): Promise<AladhanDay[]> {
+  try {
+    return await fetchGregorianMonthCalendar(month, year);
+  } catch {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return fetchGregorianMonthCalendar(month, year);
+  }
+}
+
 async function fetchSingleDay(dateKey: string): Promise<AladhanDay | null> {
   const [year, month, day] = dateKey.split('-').map(Number);
   if (!year || !month || !day) return null;
@@ -411,10 +425,11 @@ hijriRouter.get('/events', optionalAuth, async (req, res) => {
       months.push({ year: Math.floor(total / 12), month: (total % 12) + 1 });
     }
     // allSettled: one failed month must not hide the events in the
-    // months that did load. If every month fails, there is nothing
+    // months that did load. Each month gets one retry first
+    // (fetchMonthWithRetry). If every month fails, there is nothing
     // to answer from and the route 502s like /month does.
     const settled = await Promise.allSettled(
-      months.map((m) => fetchGregorianMonthCalendar(m.month, m.year)),
+      months.map((m) => fetchMonthWithRetry(m.month, m.year)),
     );
     const allDays = settled.flatMap((result) =>
       result.status === 'fulfilled' ? result.value : [],
