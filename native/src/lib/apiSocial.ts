@@ -205,7 +205,11 @@ export type ProfileData = {
 
 export type SalahCalendarDay = {
   date: string;
-  prayers: { name: string; status: string }[];
+  // The server returns prayers as an OBJECT keyed by prayer name
+  // ({ Fajr: { status, ... }, Dhuhr: {...}, ... }), NOT an array.
+  // (The old array type here crashed Analytics: d.prayers.filter on an
+  // object is "undefined is not a function".)
+  prayers: Record<string, { status: string; updatedAt: string | null; wasMissed: boolean }>;
 };
 
 /* ------------------------------------------------------------------ */

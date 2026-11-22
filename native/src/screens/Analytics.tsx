@@ -121,7 +121,12 @@ export default function AnalyticsScreen({ lang }: ScreenProps) {
   const prayedIn = (keys: Set<string>) =>
     days
       .filter((d) => keys.has(d.date))
-      .reduce((sum, d) => sum + d.prayers.filter((p) => p.status === 'prayed').length, 0);
+      .reduce(
+        (sum, d) =>
+          sum +
+          Object.values(d.prayers ?? {}).filter((p) => p && p.status === 'prayed').length,
+        0,
+      );
   const monthFocus = history
     .filter(
       (sess) =>

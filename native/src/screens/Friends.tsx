@@ -185,6 +185,7 @@ export default function FriendsScreen({ lang, goTo }: ScreenProps) {
         />
       </Field>
       {searching ? <Text style={styles.note}>{s.loading}</Text> : null}
+      <Text style={styles.note}>{s.frSearchHint}</Text>
 
       {loading ? (
         <ActivityIndicator color={C.teal700} style={{ marginVertical: 24 }} />

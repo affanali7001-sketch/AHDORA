@@ -41,6 +41,10 @@ export type ScreenId =
 export type ScreenProps = {
   lang: AppLanguage;
   goTo: (s: ScreenId) => void;
+  /** Go to the previous screen (no-op when there is none). */
+  goBack: () => void;
+  /** True when goBack has somewhere to go. */
+  canGoBack: boolean;
   user: AuthUser | null;
   onLang: (l: AppLanguage) => void;
   onLoginSuccess: (u: AuthUser) => void;

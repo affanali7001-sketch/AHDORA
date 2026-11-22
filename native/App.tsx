@@ -16,6 +16,7 @@
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   Pressable,
   SafeAreaView,
   StyleSheet,
@@ -88,6 +89,10 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function App() {
   const [screen, setScreen] = useState<ScreenId>('language');
+  // Back stack: every goTo pushes the screen we leave, so any screen
+  // opened from a tile (or from another screen) gets a working back
+  // button. The five pill-nav screens are top-level and show no back bar.
+  const [history, setHistory] = useState<ScreenId[]>([]);
   const [lang, setLang] = useState<AppLanguage>('hi');
   const [user, setUser] = useState<AuthUser | null>(null);
   const [checkingOnboarding, setCheckingOnboarding] = useState(false);
@@ -121,10 +126,33 @@ export default function App() {
     }
   }, [fontsLoaded, fontError]);
 
+  // Android hardware back button: go back through the history stack
+  // instead of exiting the app. When there is no history, the system
+  // handles the press (exits).
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (history.length > 0) {
+        goBack();
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, [history]);
+
   const s = stringsFor(lang);
 
   function goTo(next: ScreenId) {
+    if (next === screen) return;
+    setHistory((prev) => [...prev, screen]);
     setScreen(next);
+  }
+
+  function goBack() {
+    if (history.length === 0) return;
+    const last = history[history.length - 1];
+    setHistory(history.slice(0, -1));
+    setScreen(last);
   }
 
   async function handleLoginSuccess(u: AuthUser) {
@@ -148,12 +176,15 @@ export default function App() {
   async function handleLogout() {
     await logout();
     setUser(null);
+    setHistory([]);
     setScreen('welcome');
   }
 
   const props: ScreenProps = {
     lang,
     goTo,
+    goBack,
+    canGoBack: history.length > 0,
     user,
     onLang: setLang,
     onLoginSuccess: handleLoginSuccess,
@@ -162,6 +193,13 @@ export default function App() {
   };
 
   const showPillNav = user !== null && screen !== 'onboarding' && !checkingOnboarding;
+  // Back bar on every screen that is not a top-level pill screen and not
+  // part of the auth/onboarding flow — only when there is somewhere to go.
+  const showBackBar =
+    user !== null &&
+    screen !== 'onboarding' &&
+    !PILL_NAV.includes(screen) &&
+    history.length > 0;
 
   // Fonts gate: nothing renders until Plus Jakarta Sans + Amiri are loaded
   // (or loading failed, in which case the system font is the fallback).
@@ -186,6 +224,16 @@ export default function App() {
         </View>
       ) : (
         <View style={styles.body}>
+          {showBackBar ? (
+            <Pressable
+              onPress={goBack}
+              style={styles.backBar}
+              accessibilityRole="button"
+              accessibilityLabel={s.back}
+            >
+              <Text style={styles.backText}>← {s.back}</Text>
+            </Pressable>
+          ) : null}
           <View style={styles.screenWrap}>{renderScreen(screen, props)}</View>
           {showPillNav ? (
             <View style={styles.pillNav}>
@@ -209,7 +257,7 @@ export default function App() {
                       size={20}
                       color={active ? C.teal900 : C.navInactive}
                     />
-                    <Text style={[styles.pillText, active && styles.pillTextActive]}>
+                    <Text style={[styles.pillText, active && styles.pillTextActive]} numberOfLines={1}>
                       {s[PILL_LABELS[id]]}
                     </Text>
                   </Pressable>
@@ -306,12 +354,29 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 999,
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 4,
     alignItems: 'center',
     gap: 2,
   },
   pillItemActive: { backgroundColor: C.white },
   pillItemPressed: { transform: [{ scale: 0.94 }] },
-  pillText: { fontFamily: F.sans, fontSize: 11.5, fontWeight: '700', color: C.navInactive },
+  pillText: {
+    fontFamily: F.sans,
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: C.navInactive,
+    textAlign: 'center',
+  },
   pillTextActive: { color: C.teal900 },
+  backBar: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 2,
+  },
+  backText: {
+    fontFamily: F.sans,
+    fontSize: 15,
+    fontWeight: '700',
+    color: C.teal700,
+  },
 });

@@ -14,10 +14,12 @@ import { C, L, T } from '../lib/theme';
 import { Card, Chip, Input, PillButton } from '../components/ui';
 import {
   createSubject,
+  listFriends,
   listSubjects,
   listTasks,
   setTaskStatus,
   studyStats,
+  type PublicUser,
   type StudyStats,
   type StudySubject,
   type StudyTask,
@@ -32,6 +34,7 @@ export default function StudyScreen({ lang, goTo }: ScreenProps) {
   const [subjects, setSubjects] = useState<StudySubject[]>([]);
   const [tasks, setTasks] = useState<StudyTask[]>([]);
   const [stats, setStats] = useState<StudyStats | null>(null);
+  const [friends, setFriends] = useState<PublicUser[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -44,10 +47,16 @@ export default function StudyScreen({ lang, goTo }: ScreenProps) {
     setLoading(true);
     setError('');
     try {
-      const [subs, tks, st] = await Promise.all([listSubjects(), listTasks(), studyStats()]);
+      const [subs, tks, st, frs] = await Promise.all([
+        listSubjects(),
+        listTasks(),
+        studyStats(),
+        listFriends().catch(() => [] as PublicUser[]),
+      ]);
       setSubjects(subs);
       setTasks(tks);
       setStats(st);
+      setFriends(frs);
       if (subs.length > 0) setSelectedId((prev) => prev ?? subs[0].id);
     } catch (e) {
       setError(e instanceof Error ? e.message : s.errorGeneric);
@@ -200,6 +209,37 @@ export default function StudyScreen({ lang, goTo }: ScreenProps) {
             </View>
           </View>
 
+          {/* Challenge a friend — study together */}
+          <Card>
+            <Text style={T.cardTitle}>{s.studyChallengeTitle}</Text>
+            <Text style={[T.cardBody, { marginTop: 6 }]}>{s.studyChallengeBody}</Text>
+            {friends.length === 0 ? (
+              <Text style={[T.cardBody, { marginTop: 8 }]}>{s.studyNoFriendsCh}</Text>
+            ) : (
+              friends.slice(0, 3).map((f) => (
+                <View key={f.id} style={styles.friendRow}>
+                  <View style={styles.friendAvatar}>
+                    <Text style={styles.friendAvatarText}>{f.initial}</Text>
+                  </View>
+                  <Text style={[styles.friendName, { flex: 1 }]}>{f.name}</Text>
+                  <PillButton
+                    label={s.frChallenge}
+                    small
+                    onPress={() => goTo('challenges')}
+                  />
+                </View>
+              ))
+            )}
+            <View style={{ marginTop: 12 }}>
+              <PillButton
+                label={friends.length === 0 ? s.frTitle : s.studyChallengeBtn}
+                variant="peach"
+                block
+                onPress={() => goTo(friends.length === 0 ? 'friends' : 'challenges')}
+              />
+            </View>
+          </Card>
+
           <PillButton label={s.studyFocusBtn} block onPress={() => goTo('focus')} />
         </View>
       )}
@@ -222,6 +262,24 @@ const styles = StyleSheet.create({
   taskTitle: { fontFamily: 'PlusJakartaSans', fontSize: 14.5, fontWeight: '700', color: C.ink },
   taskDone: { textDecorationLine: 'line-through', color: C.muted },
   taskMeta: { fontFamily: 'PlusJakartaSans', fontSize: 12.5, color: C.muted, marginTop: 2 },
+  friendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: C.line,
+  },
+  friendAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: C.teal700,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  friendAvatarText: { fontFamily: 'PlusJakartaSans', fontSize: 15, fontWeight: '800', color: C.white },
+  friendName: { fontFamily: 'PlusJakartaSans', fontSize: 14.5, fontWeight: '700', color: C.ink },
   statGrid: { flexDirection: 'row', gap: 10, marginBottom: 14 },
   stat: {
     flex: 1,
