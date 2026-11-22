@@ -1,1 +1,27 @@
-{"expo":{"android":{"adaptiveIcon":{"backgroundColor":"#E6F4FE","backgroundImage":"./assets/android-icon-background.png","foregroundImage":"./assets/android-icon-foreground.png","monochromeImage":"./assets/android-icon-monochrome.png"},"package":"com.ahdora.app","predictiveBackGestureEnabled":false},"icon":"./assets/icon.png","ios":{"bundleIdentifier":"com.ahdora.app","supportsTablet":true},"name":"AHDORA","orientation":"portrait","slug":"ahdora","userInterfaceStyle":"light","version":"1.0.0","web":{"favicon":"./assets/favicon.png"}}}
+{
+  "expo": {
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "com.ahdora.app",
+      "predictiveBackGestureEnabled": false
+    },
+    "icon": "./assets/icon.png",
+    "ios": {
+      "bundleIdentifier": "com.ahdora.app",
+      "supportsTablet": true
+    },
+    "name": "AHDORA",
+    "orientation": "portrait",
+    "slug": "ahdora",
+    "userInterfaceStyle": "light",
+    "version": "1.0.0",
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
