@@ -178,6 +178,7 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
     { id: 'khatmah', label: s.tileKhatmah, icon: '📖', peach: true },
     { id: 'qibla', label: s.tileQibla, icon: '🧭' },
     { id: 'fasting', label: s.tileFasting, icon: '🌙', peach: true },
+    { id: 'moodRemedy', label: s.tileMood, icon: '💛', peach: true },
     { id: 'study', label: s.tileStudy, icon: '📚' },
     { id: 'focus', label: s.tileFocus, icon: '⏱️' },
     { id: 'sleep', label: s.tileSleep, icon: '😴' },

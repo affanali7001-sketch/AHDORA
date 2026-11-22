@@ -34,6 +34,7 @@ export type ScreenId =
   | 'khatmah'
   | 'qibla'
   | 'fasting'
+  | 'moodRemedy'
   | 'mosque'
   | 'study'
   | 'focus'

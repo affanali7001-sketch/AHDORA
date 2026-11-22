@@ -61,6 +61,7 @@ import HifzScreen from './src/screens/Hifz';
 import KhatmahScreen from './src/screens/Khatmah';
 import QiblaScreen from './src/screens/Qibla';
 import FastingScreen from './src/screens/Fasting';
+import MoodRemedyScreen from './src/screens/MoodRemedy';
 import IslamicCalendarScreen from './src/screens/IslamicCalendar';
 import SearchScreen from './src/screens/Search';
 import MosqueScreen from './src/screens/Mosque';
@@ -370,6 +371,8 @@ function renderScreen(screen: ScreenId, props: ScreenProps) {
       return <QiblaScreen {...props} />;
     case 'fasting':
       return <FastingScreen {...props} />;
+    case 'moodRemedy':
+      return <MoodRemedyScreen {...props} />;
     case 'islamic-calendar':
       return <IslamicCalendarScreen {...props} />;
     case 'search':
