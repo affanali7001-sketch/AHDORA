@@ -383,6 +383,36 @@ export async function signup(
   };
 }
 
+/**
+ * Change password while signed in (old password required).
+ * The server rotates the session and returns the new token in the
+ * body — persist it so the user stays logged in (same as login).
+ * Throws an Error carrying the server's message.
+ */
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  await refreshCsrfToken();
+  const response = await apiFetch('/api/auth/change-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+  const data = await parseJson<{ sessionToken?: unknown; error?: unknown }>(response);
+  if (!response.ok) {
+    const message =
+      typeof data.error === 'string' && data.error.length > 0
+        ? data.error
+        : 'Request failed. Please try again.';
+    throw new Error(message);
+  }
+  // Persist the rotated session token (same reason as login above).
+  if (typeof data.sessionToken === 'string' && data.sessionToken.length > 0) {
+    await saveSessionToken(data.sessionToken);
+  }
+}
+
 /** Real logout against the live API. Best effort — local state is cleared regardless. */
 export async function logout(): Promise<void> {
   try {
