@@ -2,17 +2,18 @@
  * System (notification-bar) prayer alerts — LOCAL notifications only.
  *
  * What this does: schedules one local notification per enabled prayer
- * at that prayer's time TODAY, using expo-notifications (SDK 58 docs:
- * https://docs.expo.dev/versions/v58.0.0/sdk/notifications/).
+ * at that prayer's time TODAY and TOMORROW, using expo-notifications
+ * (SDK 58 docs: https://docs.expo.dev/versions/v58.0.0/sdk/notifications/).
  * The alert appears in the Android notification bar like any other
  * app's notification, even when AHDORA is closed — the OS delivers
  * scheduled local notifications; no server, no push, no FCM.
  *
  * HONEST LIMITS (do not claim more than this):
- * - Only TODAY is scheduled, from the real prayer times the app
- *   loaded (fetchPrayerTimes). The app must be opened at least once
- *   (Prayer screen, or the Notifications toggle) after install and
- *   after each day's times load, or that day has no alerts.
+ * - Today + tomorrow are scheduled, from the real prayer times the
+ *   app loaded (fetchPrayerTimes). The app must be opened at least
+ *   once a day (on startup, or the Prayer screen, or the
+ *   Notifications toggle) after install and after each day's times
+ *   load, or later days have no alerts.
  * - Delivery is best-effort on Android 12+: exact-time delivery
  *   needs the SCHEDULE_EXACT_ALARM permission, which Android 14
  *   denies by default for newly installed apps. This code does NOT
@@ -37,6 +38,7 @@ import * as Notifications from 'expo-notifications';
 import {
   fetchPrayerTimes,
   PRAYER_NAMES,
+  tomorrowKey,
   type PrayerName,
   type PrayerTimesResponse,
 } from './apiCore';
@@ -168,37 +170,40 @@ export async function cancelPrayerNotifications(): Promise<void> {
   await storeIds([]);
 }
 
-function timeToTodayDate(hhmm: string): Date | null {
+/** "HH:mm" on the date today + `dayOffset` days (0 = today, 1 = tomorrow). */
+function timeToDate(hhmm: string, dayOffset: number): Date | null {
   const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
   if (!match) return null;
   const date = new Date();
+  date.setDate(date.getDate() + dayOffset);
   date.setHours(Number(match[1]), Number(match[2]), 0, 0);
   return date;
 }
 
 /**
- * Cancel any previously scheduled AHDORA prayer alerts, then schedule
- * one local notification per enabled prayer at that prayer's time
- * TODAY (DATE trigger, exact clock time). Prayers whose time has
- * already passed today are skipped. `enabled` is keyed by prayer
- * name — pass each prayer's real reminder flag, never a guess.
- * Silently does nothing when permission is not granted. Never throws.
+ * Schedule one day's alerts into the shared `ids` list. No cancel,
+ * no store — the caller owns those (see refreshPrayerNotifications),
+ * so scheduling today and tomorrow in one refresh can never cancel
+ * the other day's ids. Prayers whose time has already passed on
+ * that date are skipped; for tomorrow every prayer is still in the
+ * future, so all 5 get scheduled. Silently does nothing when
+ * permission is not granted. Never throws.
  */
-export async function schedulePrayerNotifications(
+async function scheduleDay(
   times: PrayerTimesResponse,
   enabled: { [prayer: string]: boolean },
+  dayOffset: number,
+  ids: string[],
 ): Promise<void> {
   ensureHandler();
   try {
-    await cancelPrayerNotifications();
     if ((await getNotificationPermissionStatus()) !== 'granted') return;
     const now = new Date();
-    const ids: string[] = [];
     for (const prayer of PRAYER_NAMES) {
       if (!enabled[prayer]) continue;
       const timeStr =
         times.perPrayer[prayer]?.time ?? times.timings[prayer] ?? '';
-      const date = timeToTodayDate(timeStr);
+      const date = timeToDate(timeStr, dayOffset);
       if (!date || date.getTime() <= now.getTime()) continue;
       try {
         const id = await Notifications.scheduleNotificationAsync({
@@ -220,6 +225,30 @@ export async function schedulePrayerNotifications(
         // One prayer failing must not block the others.
       }
     }
+  } catch {
+    // Scheduling must never throw into a screen.
+  }
+}
+
+/**
+ * Cancel any previously scheduled AHDORA prayer alerts, then schedule
+ * one local notification per enabled prayer at that prayer's time
+ * on the date today + `dayOffset` (0 = today, 1 = tomorrow; DATE
+ * trigger, exact clock time). Prayers whose time has already passed
+ * on that date are skipped. `enabled` is keyed by prayer name —
+ * pass each prayer's real reminder flag, never a guess. Silently
+ * does nothing when permission is not granted. Never throws.
+ */
+export async function schedulePrayerNotifications(
+  times: PrayerTimesResponse,
+  enabled: { [prayer: string]: boolean },
+  dayOffset = 0,
+): Promise<void> {
+  ensureHandler();
+  try {
+    await cancelPrayerNotifications();
+    const ids: string[] = [];
+    await scheduleDay(times, enabled, dayOffset, ids);
     await storeIds(ids);
   } catch {
     // Scheduling must never throw into a screen.
@@ -227,11 +256,14 @@ export async function schedulePrayerNotifications(
 }
 
 /**
- * One-call refresh for the Prayer screen / Notifications toggle:
- * if system prayer alerts are enabled and permission is granted,
- * fetch today's real prayer times and schedule the alerts whose
- * per-prayer reminder flag is on. Returns how many were scheduled
- * and why it stopped when it did. Never throws.
+ * One-call refresh for app startup, the Prayer screen and the
+ * Notifications toggle: if system prayer alerts are enabled and
+ * permission is granted, fetch TODAY's and TOMORROW's real prayer
+ * times and schedule the alerts whose per-prayer reminder flag is
+ * on (each day's flags from its own response). Returns how many
+ * were scheduled in total and why it stopped when it did. If
+ * tomorrow's fetch fails, today is still scheduled. If today's
+ * fetch fails, nothing is scheduled. Never throws.
  */
 export async function refreshPrayerNotifications(): Promise<RefreshResult> {
   try {
@@ -241,18 +273,37 @@ export async function refreshPrayerNotifications(): Promise<RefreshResult> {
     if ((await getNotificationPermissionStatus()) !== 'granted') {
       return { scheduled: 0, status: 'no-permission' };
     }
-    let times: PrayerTimesResponse;
+    let today: PrayerTimesResponse;
     try {
-      times = await fetchPrayerTimes();
+      today = await fetchPrayerTimes();
     } catch {
       return { scheduled: 0, status: 'no-times' };
     }
-    const enabled: { [key: string]: boolean } = {};
-    for (const prayer of PRAYER_NAMES) {
-      enabled[prayer] = times.perPrayer[prayer]?.reminder ?? true;
+    // Tomorrow's times are best-effort: if the fetch fails, today
+    // is still scheduled (see below).
+    let tomorrow: PrayerTimesResponse | null = null;
+    try {
+      tomorrow = await fetchPrayerTimes(tomorrowKey());
+    } catch {
+      tomorrow = null;
     }
-    await schedulePrayerNotifications(times, enabled);
-    const ids = await readStoredIds();
+    // One cancel for the whole refresh, then both days into the
+    // same id list — so the two days never cancel each other.
+    await cancelPrayerNotifications();
+    const ids: string[] = [];
+    const enabledToday: { [key: string]: boolean } = {};
+    for (const prayer of PRAYER_NAMES) {
+      enabledToday[prayer] = today.perPrayer[prayer]?.reminder ?? true;
+    }
+    await scheduleDay(today, enabledToday, 0, ids);
+    if (tomorrow) {
+      const enabledTomorrow: { [key: string]: boolean } = {};
+      for (const prayer of PRAYER_NAMES) {
+        enabledTomorrow[prayer] = tomorrow.perPrayer[prayer]?.reminder ?? true;
+      }
+      await scheduleDay(tomorrow, enabledTomorrow, 1, ids);
+    }
+    await storeIds(ids);
     return { scheduled: ids.length, status: 'ok' };
   } catch {
     return { scheduled: 0, status: 'no-times' };

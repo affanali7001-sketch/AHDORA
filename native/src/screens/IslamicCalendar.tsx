@@ -42,17 +42,50 @@ import {
 import type { ScreenProps } from '../lib/nav';
 import { stringsFor } from '../lib/strings';
 import { C, F, L, T } from '../lib/theme';
-import { Card, Chip, EmptyState, PillButton } from '../components/ui';
+import { Card, Chip, EmptyState, Input, PillButton } from '../components/ui';
 import {
   fetchHijriEvents,
   fetchHijriMonth,
   fetchHijriToday,
   type HijriDay,
   type HijriEvent,
+  type HijriEventKey,
   type HijriEventsResponse,
   type HijriMonth,
   type HijriToday,
 } from '../lib/apiWorship';
+
+/**
+ * Ask a question (user request 2026-11-22): "Eid kab hai?" or
+ * "Bakrid kab hai 2028 me?" → the real date below. Keywords are
+ * matched specific-before-broad (Bakrid/Adha before plain Eid,
+ * which means Eid-ul-Fitr). A 4-digit year 2026–2050 in the
+ * question picks that year; without one, the next occurrence.
+ */
+function parseQuestion(q: string): { key: HijriEventKey; year?: number } | null {
+  const text = q.toLowerCase();
+  const yearMatch = text.match(/\b(20[2-5]\d)\b/);
+  const year = yearMatch ? Number(yearMatch[1]) : undefined;
+  if (/\b(bakrid|bakra|adha|qurbani)\b/.test(text)) return { key: 'eid-adha', year };
+  if (/\b(eid|eed)\b/.test(text)) return { key: 'eid-fitr', year };
+  if (/\b(ramzan|ramadan|roza|roze)\b/.test(text)) return { key: 'ramadan', year };
+  if (/\b(qadr|shab-e-qadr|shabe qadr|laylat)\b/.test(text)) return { key: 'qadr', year };
+  if (/\b(arafah|arafa)\b/.test(text)) return { key: 'arafah', year };
+  if (/\b(miraj|meraj|isra)\b/.test(text)) return { key: 'miraj', year };
+  if (/\b(barat|baraat|shab-e-barat)\b/.test(text)) return { key: 'barat', year };
+  if (/\b(ashura|ashoora|muharram)\b/.test(text)) return { key: 'ashura', year };
+  if (/\b(milad|mawlid|maulid)\b/.test(text)) return { key: 'mawlid', year };
+  if (/\b(naya saal|new year|islamic new year)\b/.test(text)) return { key: 'new-year', year };
+  return null;
+}
+
+/** Quick questions (one tap = ask). The first two are the user's own examples. */
+const ASK_EXAMPLES = [
+  'Eid kab hai?',
+  'Bakrid kab hai 2028 me?',
+  'Ramzan kab hai?',
+  'Shab-e-Qadr kab hai?',
+];
 
 /** Eastern Arabic (Urdu) numerals. */
 const URDU_DIGITS = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
@@ -210,6 +243,36 @@ export default function IslamicCalendarScreen({ lang }: ScreenProps) {
   const [jumpOpen, setJumpOpen] = useState(false);
   const [jumpYear, setJumpYear] = useState(view.year);
   const [jumpMonth, setJumpMonth] = useState(view.month);
+  // Ask a question.
+  const [askText, setAskText] = useState('');
+  const [askAnswer, setAskAnswer] = useState<HijriEvent | null>(null);
+  const [askMsg, setAskMsg] = useState('');
+  const [askBusy, setAskBusy] = useState(false);
+
+  async function askQuestion(question: string): Promise<void> {
+    const parsed = parseQuestion(question);
+    if (!parsed) {
+      setAskAnswer(null);
+      setAskMsg(s.askNoMatch);
+      return;
+    }
+    setAskBusy(true);
+    setAskMsg('');
+    setAskAnswer(null);
+    try {
+      const data = await fetchHijriEvents(parsed.year);
+      const found = data.events.find((e) => e.key === parsed.key) ?? null;
+      if (!found) {
+        setAskMsg(s.askNotFound);
+      } else {
+        setAskAnswer(found);
+      }
+    } catch (e) {
+      setAskMsg(e instanceof Error ? e.message : s.loadFailed);
+    } finally {
+      setAskBusy(false);
+    }
+  }
 
   const load = useCallback(() => {
     let active = true;
@@ -381,6 +444,64 @@ export default function IslamicCalendarScreen({ lang }: ScreenProps) {
     <ScrollView contentContainerStyle={L.scroll} showsVerticalScrollIndicator={false}>
       <Text style={T.title}>{s.islamicCalTitle}</Text>
       <Text style={[T.sub, { marginBottom: 14 }]}>{s.islamicCalSub}</Text>
+
+      {/* Ask a question (user request 2026-11-22): type or tap a
+          question — "Eid kab hai?", "Bakrid kab hai 2028 me?" —
+          and the real date appears below, from the live events
+          endpoint (never invented). */}
+      <Card>
+        <Text style={T.cardTitle}>{s.askTitle}</Text>
+        <Text style={[T.cardBody, { marginTop: 4 }]}>{s.askSub}</Text>
+        <View style={styles.askRow}>
+          <Input
+            value={askText}
+            onChangeText={(t) => {
+              setAskText(t);
+              setAskMsg('');
+            }}
+            placeholder={s.askPh}
+            style={styles.askInput}
+          />
+          <PillButton
+            label={s.askBtn}
+            variant="primary"
+            disabled={askBusy || askText.trim().length === 0}
+            onPress={() => void askQuestion(askText)}
+          />
+        </View>
+        <View style={styles.askChips}>
+          {ASK_EXAMPLES.map((example) => (
+            <Chip
+              key={example}
+              label={example}
+              onPress={() => {
+                setAskText(example);
+                void askQuestion(example);
+              }}
+            />
+          ))}
+        </View>
+        {askBusy ? (
+          <ActivityIndicator color={C.teal} style={{ marginTop: 12 }} />
+        ) : null}
+        {askMsg ? <Text style={[T.error, { marginTop: 10 }]}>{askMsg}</Text> : null}
+        {askAnswer ? (
+          <View style={styles.askAnswer}>
+            <Text style={styles.askAnswerUrdu}>
+              {URDU_EVENT_NAMES[askAnswer.key] ?? askAnswer.label}
+            </Text>
+            <Text style={styles.askAnswerName}>
+              {EVENT_NAMES[askAnswer.key]?.[lang] ?? askAnswer.label}
+            </Text>
+            <Text style={styles.askAnswerDate}>
+              {gregShort(askAnswer.gregorianDate)}
+              {' · '}
+              {askAnswer.hijriDay} {askAnswer.hijriMonth} {askAnswer.hijriYear}
+            </Text>
+            <Chip label={countdownText(askAnswer.daysUntil)} tone="peach" />
+          </View>
+        ) : null}
+      </Card>
 
       {/* Month grid FIRST at the top (user request 2026-11-22):
           this Hijri/Islamic calendar grid IS the calendar —
@@ -625,6 +746,21 @@ export default function IslamicCalendarScreen({ lang }: ScreenProps) {
 }
 
 const styles = StyleSheet.create({
+  /* ---- Ask a question ---- */
+  askRow: { flexDirection: 'row', gap: 8, marginTop: 12, alignItems: 'center' },
+  askInput: { flex: 1 },
+  askChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  askAnswer: {
+    marginTop: 12,
+    backgroundColor: C.teal100,
+    borderRadius: 16,
+    padding: 14,
+    gap: 4,
+    alignItems: 'flex-start',
+  },
+  askAnswerUrdu: { fontFamily: F.arabic, fontSize: 20, fontWeight: '700', color: C.teal900 },
+  askAnswerName: { fontFamily: F.sans, fontSize: 16, fontWeight: '800', color: C.ink },
+  askAnswerDate: { fontFamily: F.sans, fontSize: 13.5, color: C.muted },
   heroLabel: { fontFamily: F.sans, fontSize: 12.5, fontWeight: '800', color: C.muted },
   heroNameUr: {
     fontFamily: F.arabic,

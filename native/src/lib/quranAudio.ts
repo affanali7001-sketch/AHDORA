@@ -124,9 +124,28 @@ let generation = 0;
  * durations of finished tracks) — reported to recordListened. */
 let pageSeconds = 0;
 let lastNotifiedSecond = -1;
+/** One curated Life Ayah, enough to rebuild its audio queue. */
+export type LifeAyahRef = {
+  surah: number;
+  ayahStart: number;
+  ayahEnd: number;
+  globalAyahStart: number;
+  /** Title for the tilawat queue. */
+  title: string;
+  /** Title for the tarjuma queue. */
+  titleTarjuma: string;
+};
+
 /** True while the current queue is a Life Ayah (startLifeAyah) rather
- * than a mushaf page — the auto-play chain never runs for Life Ayahs. */
+ * than a mushaf page. A Life Ayah runs the continue chain (see
+ * onQueueFinished): tilawat → tarjuma → next ayah, while autoPlay
+ * is on and a playlist was passed. */
 let lifeAyah = false;
+/** The 4 curated Life Ayahs in order, when the screen passed them —
+ * the continue chain walks this list (see onQueueFinished). */
+let lifePlaylist: LifeAyahRef[] = [];
+/** Index of the Life Ayah currently playing in lifePlaylist. */
+let lifeIndex = 0;
 /** Active sleep timer (minutes timeout or 'para-end' flag). */
 let sleepTimer: QuranSleepTimerOption = null;
 let sleepTimerHandle: ReturnType<typeof setTimeout> | null = null;
@@ -397,10 +416,54 @@ async function playAt(index: number, gen: number): Promise<void> {
  */
 async function onQueueFinished(gen: number): Promise<void> {
   if (gen !== generation) return;
-  // A Life Ayah queue ends here: just stop. No tarjuma auto-start,
-  // no next-page advance, no recording (the screen never recorded).
+  // A Life Ayah queue ends here. Continue chain (user request
+  // 2026-11-22): while autoPlay is on and the screen passed the
+  // 4-ayah playlist, tilawat → tarjuma of the SAME ayah, then the
+  // NEXT ayah's tilawat — immediately, no tap needed. After the
+  // last ayah's tarjuma, stop. autoPlay off (or no playlist) →
+  // stop, as before. No recording (the screen never recorded).
   if (lifeAyah) {
-    stopInternal();
+    if (!autoPlay || lifePlaylist.length === 0) {
+      stopInternal();
+      return;
+    }
+    const finishedMode = mode;
+    const current = lifePlaylist[lifeIndex];
+    if (!current) {
+      stopInternal();
+      return;
+    }
+    if (finishedMode === 'tilawat') {
+      // Same ayah, now its tarjuma.
+      await startLifeAyah(
+        current.surah,
+        current.ayahStart,
+        current.ayahEnd,
+        current.globalAyahStart,
+        'urdu',
+        current.titleTarjuma,
+        lifePlaylist,
+        lifeIndex,
+      );
+      return;
+    }
+    // Tarjuma done → next ayah's tilawat, or stop at the end.
+    const nextIndex = lifeIndex + 1;
+    if (nextIndex >= lifePlaylist.length) {
+      stopInternal();
+      return;
+    }
+    const nextAyah = lifePlaylist[nextIndex];
+    await startLifeAyah(
+      nextAyah.surah,
+      nextAyah.ayahStart,
+      nextAyah.ayahEnd,
+      nextAyah.globalAyahStart,
+      'tilawat',
+      nextAyah.title,
+      lifePlaylist,
+      nextIndex,
+    );
     return;
   }
   const finishedMode = mode;
@@ -484,6 +547,8 @@ export async function startQuranPage(pg: number, md: 'tilawat' | 'urdu'): Promis
   mode = md;
   page = pg;
   lifeAyah = false;
+  lifePlaylist = [];
+  lifeIndex = 0;
   title = pageTitle(md, pg, null);
   hasAudio = true;
   emit(true);
@@ -536,8 +601,9 @@ function buildLifeQueue(
  * playing in the background, obeys the sleep timer, and gets the
  * seek fix. `globalAyahStart` is the global number (1..6236) of
  * `ayahStart` (surah starts: Al-Baqarah 8, Ar-Ra'd 1708, Taha 2349,
- * Al-Mu'minun 2674). When the queue ends it just stops — the
- * auto-play chain never runs for a Life Ayah.
+ * Al-Mu'minun 2674). When the queue ends, the continue chain runs
+ * (see onQueueFinished): with a playlist, tilawat → tarjuma of the
+ * same ayah → next ayah's tilawat, while autoPlay is on.
  */
 export async function startLifeAyah(
   surahNumber: number,
@@ -546,6 +612,8 @@ export async function startLifeAyah(
   globalAyahStart: number,
   md: 'tilawat' | 'urdu',
   titleText: string,
+  playlist: LifeAyahRef[] = [],
+  playlistIndex = 0,
 ): Promise<void> {
   const gen = ++generation;
   error = null;
@@ -561,6 +629,8 @@ export async function startLifeAyah(
   pageSeconds = 0;
   mode = md;
   lifeAyah = true;
+  lifePlaylist = playlist;
+  lifeIndex = playlistIndex;
   mushaf = null;
   title = titleText;
   hasAudio = true;

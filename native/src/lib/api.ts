@@ -383,6 +383,36 @@ export async function signup(
   };
 }
 
+/**
+ * Change password while signed in (old password required).
+ * The server rotates the session and returns the new token in the
+ * body — persist it so the user stays logged in (same as login).
+ * Throws an Error carrying the server's message.
+ */
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  await refreshCsrfToken();
+  const response = await apiFetch('/api/auth/change-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+  const data = await parseJson<{ sessionToken?: unknown; error?: unknown }>(response);
+  if (!response.ok) {
+    const message =
+      typeof data.error === 'string' && data.error.length > 0
+        ? data.error
+        : 'Request failed. Please try again.';
+    throw new Error(message);
+  }
+  // Persist the rotated session token (same reason as login above).
+  if (typeof data.sessionToken === 'string' && data.sessionToken.length > 0) {
+    await saveSessionToken(data.sessionToken);
+  }
+}
+
 /** Real logout against the live API. Best effort — local state is cleared regardless. */
 export async function logout(): Promise<void> {
   try {
@@ -417,11 +447,31 @@ export async function fetchMe(): Promise<AuthUser | null> {
 /**
  * Restore a saved session on app start (Instagram-style: login once,
  * stay logged in). Loads the token from SecureStore and validates it
- * against /me. Returns the user when the session is alive, else null
- * (and the dead token is cleared so a stale value never lingers).
+ * against /me. Returns the user when the session is alive, else null.
+ *
+ * IMPORTANT: the stored token is dropped ONLY when the server says
+ * the session is dead (401). A transient failure — slow/no network,
+ * a 500, a timeout — must NOT wipe the token, or one bad request on
+ * a slow connection would log the user out on every restart.
  */
 export async function restoreSession(): Promise<AuthUser | null> {
-  const user = await fetchMe();
-  if (!user) await clearSessionToken();
-  return user;
+  const token = await loadSessionToken();
+  if (!token) return null;
+  try {
+    const response = await apiFetch('/api/auth/me', { method: 'GET' });
+    if (response.status === 401) {
+      // Server says the session is dead (expired/revoked) — drop it.
+      await clearSessionToken();
+      return null;
+    }
+    if (!response.ok) {
+      // Transient failure — keep the token so the next launch retries.
+      return null;
+    }
+    const data = await parseJson<{ user?: AuthUser }>(response);
+    return data.user ?? null;
+  } catch {
+    // Transport failure (offline/timeout) — keep the token.
+    return null;
+  }
 }

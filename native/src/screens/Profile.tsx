@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
-import { apiFetch } from '../lib/api';
+import { apiFetch, changePassword } from '../lib/api';
 import type { ScreenProps } from '../lib/nav';
 import { stringsFor } from '../lib/strings';
 import { C, L, T } from '../lib/theme';
@@ -72,6 +72,11 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
   const [loggingOut, setLoggingOut] = useState(false);
   const [resetNote, setResetNote] = useState('');
   const [resetBusy, setResetBusy] = useState(false);
+  const [showPass, setShowPass] = useState(false);
+  const [oldPass, setOldPass] = useState('');
+  const [newPass, setNewPass] = useState('');
+  const [passBusy, setPassBusy] = useState(false);
+  const [passNote, setPassNote] = useState('');
   const [showDelete, setShowDelete] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -131,6 +136,23 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
       setError(e instanceof Error ? e.message : s.errorGeneric);
     } finally {
       setResetBusy(false);
+    }
+  }
+
+  async function changePass() {
+    if (!oldPass || !newPass || passBusy) return;
+    setPassBusy(true);
+    setPassNote('');
+    setError('');
+    try {
+      await changePassword(oldPass, newPass);
+      setOldPass('');
+      setNewPass('');
+      setPassNote(s.pfPassChanged);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : s.errorGeneric);
+    } finally {
+      setPassBusy(false);
     }
   }
 
@@ -247,16 +269,55 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
                 <Text style={styles.rowSub}>{s.pfPassS}</Text>
               </View>
               <PillButton
-                label={s.pfPassBtn}
+                label={s.pfPassOpen}
                 small
                 variant="ghost"
-                onPress={() => void sendResetLink()}
-                disabled={resetBusy}
-                busy={resetBusy}
+                onPress={() => setShowPass((v) => !v)}
               />
             </View>
             {resetNote ? <Text style={styles.okNote}>{resetNote}</Text> : null}
           </Card>
+
+          {/* Change password — old + new password, no reset link as
+              the main flow. The "Forget password" link under the old
+              password sends the reset email instead. */}
+          {showPass ? (
+            <Card>
+              <Text style={[T.cardBody, { marginBottom: 12 }]}>{s.pfPassS}</Text>
+              <Input
+                value={oldPass}
+                onChangeText={setOldPass}
+                placeholder={s.pfPassOldPh}
+                secureTextEntry
+              />
+              <Pressable
+                onPress={() => void sendResetLink()}
+                disabled={resetBusy}
+                accessibilityRole="button"
+              >
+                <Text style={styles.forgotLink}>{s.pfPassForgot}</Text>
+              </Pressable>
+              {resetNote ? <Text style={styles.okNote}>{resetNote}</Text> : null}
+              <Input
+                value={newPass}
+                onChangeText={setNewPass}
+                placeholder={s.pfPassNewPh}
+                secureTextEntry
+                style={{ marginTop: 10 }}
+              />
+              <View style={{ marginTop: 12 }}>
+                <PillButton
+                  label={s.pfPassChangeBtn}
+                  variant="primary"
+                  block
+                  onPress={() => void changePass()}
+                  disabled={!oldPass || !newPass || passBusy}
+                  busy={passBusy}
+                />
+              </View>
+              {passNote ? <Text style={styles.okNote}>{passNote}</Text> : null}
+            </Card>
+          ) : null}
 
           {/* Points & badges — real server totals */}
           <Card>
@@ -371,6 +432,14 @@ const styles = StyleSheet.create({
   rowSub: { fontFamily: 'PlusJakartaSans', fontSize: 12.5, color: C.muted, lineHeight: 18, marginTop: 2 },
   honestNote: { fontFamily: 'PlusJakartaSans', fontSize: 12.5, color: C.muted, lineHeight: 18, marginTop: 8 },
   okNote: { fontFamily: 'PlusJakartaSans', fontSize: 13, fontWeight: '700', color: C.teal500, marginTop: 8, lineHeight: 18 },
+  forgotLink: {
+    fontFamily: 'PlusJakartaSans',
+    fontSize: 13,
+    fontWeight: '700',
+    color: C.teal700,
+    marginTop: 8,
+    textAlign: 'left',
+  },
   logoutBtn: {
     backgroundColor: C.white,
     borderWidth: 1,

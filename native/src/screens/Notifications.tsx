@@ -277,14 +277,6 @@ export default function NotificationsScreen({ lang }: ScreenProps) {
             <Text style={T.cardTitle}>{s.ntQuiet}</Text>
             <Text style={[T.cardBody, { marginTop: 6 }]}>{quietText}</Text>
           </Card>
-
-          <Card>
-            <Text style={T.cardTitle}>{s.ntSampleH}</Text>
-            <View style={styles.sampleCard}>
-              <Text style={styles.sampleApp}>AHDORA</Text>
-              <Text style={styles.sampleBody}>{s.ntSampleBody}</Text>
-            </View>
-          </Card>
         </View>
       ) : null}
     </ScrollView>
@@ -307,7 +299,4 @@ const styles = StyleSheet.create({
   permOn: { color: C.teal700 },
   permOff: { color: C.red },
   note: { fontFamily: 'PlusJakartaSans', fontSize: 13, color: C.muted, lineHeight: 18, marginBottom: 12 },
-  sampleCard: { backgroundColor: C.teal900, borderRadius: 20, padding: 14, marginTop: 10 },
-  sampleApp: { fontFamily: 'PlusJakartaSans', fontSize: 13, fontWeight: '800', color: C.white },
-  sampleBody: { fontFamily: 'PlusJakartaSans', fontSize: 14, color: C.white, lineHeight: 22, marginTop: 5 },
 });

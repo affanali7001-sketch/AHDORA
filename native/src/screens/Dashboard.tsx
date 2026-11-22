@@ -17,8 +17,10 @@ import { Card, Chip, EmptyState, PillButton, ProgressBar } from '../components/u
 import {
   fetchPrayerTimes,
   fetchSalahDay,
+  fetchTomorrowFajr,
   formatTime12h,
   loadProfileWithCompletion,
+  minutesUntilTomorrow,
   PRAYER_NAMES,
   todayKey,
   type PrayerRecord,
@@ -55,6 +57,10 @@ function longCountdown(mins: number, lang: AppLanguage): string {
 export default function DashboardScreen({ lang, user, goTo }: ScreenProps) {
   const s = stringsFor(lang);
   const [times, setTimes] = useState<PrayerTimesResponse | null>(null);
+  // Tomorrow's Fajr, only when every prayer today is done — the
+  // server returns nextPrayer null after Isha, and showing "No
+  // prayer times yet" then is wrong (the times did load).
+  const [tomorrowFajr, setTomorrowFajr] = useState<string | null>(null);
   const [day, setDay] = useState<PrayerRecord | null>(null);
   const [stats, setStats] = useState<StudyStats | null>(null);
   const [challenge, setChallenge] = useState<ChallengeParticipation | null>(null);
@@ -74,7 +80,18 @@ export default function DashboardScreen({ lang, user, goTo }: ScreenProps) {
       loadProfileWithCompletion(user?.name ?? ''),
     ]).then(([timesResult, dayResult, statsResult, challengesResult, profileResult]) => {
       if (!active) return;
-      if (timesResult.status === 'fulfilled') setTimes(timesResult.value);
+      if (timesResult.status === 'fulfilled') {
+        setTimes(timesResult.value);
+        // All of today's prayers done (after Isha) → the next real
+        // prayer is tomorrow's Fajr, not "no times".
+        if (timesResult.value.nextPrayer === null) {
+          void fetchTomorrowFajr().then((fajr) => {
+            if (active) setTomorrowFajr(fajr);
+          });
+        } else {
+          setTomorrowFajr(null);
+        }
+      }
       if (dayResult.status === 'fulfilled') setDay(dayResult.value);
       if (statsResult.status === 'fulfilled') setStats(statsResult.value);
       if (challengesResult.status === 'fulfilled') {
@@ -101,8 +118,13 @@ export default function DashboardScreen({ lang, user, goTo }: ScreenProps) {
   const prayedCount = day
     ? PRAYER_NAMES.filter((name) => day[name].status === 'prayed').length
     : null;
-  const next = times?.nextPrayer ?? null;
-  const countdown = next ? minutesUntil(next.time) : null;
+  const next = times?.nextPrayer ?? (tomorrowFajr ? { name: 'Fajr' as const, time: tomorrowFajr } : null);
+  const isTomorrow = times?.nextPrayer == null && tomorrowFajr !== null;
+  const countdown = next
+    ? isTomorrow
+      ? minutesUntilTomorrow(next.time)
+      : minutesUntil(next.time)
+    : null;
 
   const sleepSchedule =
     profile && profile.sleepStartTime && profile.sleepEndTime
@@ -150,7 +172,10 @@ export default function DashboardScreen({ lang, user, goTo }: ScreenProps) {
           {next && countdown !== null ? (
             <Card>
               <View style={styles.rowBetween}>
-                <Text style={T.cardTitle}>{s.dashNextPrayer}</Text>
+                <Text style={T.cardTitle}>
+                  {s.dashNextPrayer}
+                  {isTomorrow ? ` · ${s.tomorrowTag}` : ''}
+                </Text>
                 <Chip
                   label={`${next.name} · ${formatTime12h(next.time)}`}
                   tone="peach"

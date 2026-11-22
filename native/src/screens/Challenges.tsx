@@ -19,19 +19,27 @@ import { stringsFor, type AppLanguage } from '../lib/strings';
 import { C, L, T } from '../lib/theme';
 import { Card, Chip, EmptyState, Input, PillButton, TealHead } from '../components/ui';
 import {
+  acceptChallengeInvite,
+  acceptFriendRequest,
   checkInChallenge,
+  declineChallengeInvite,
   discoverPeople,
   joinTemplate,
   leaveChallenge,
+  listChallengeInvites,
   listChallengeTemplates,
+  listFriendRequests,
   listFriends,
   myChallenges,
+  rejectFriendRequest,
   sendFriendRequest,
+  type ChallengeInvite,
   type ChallengeParticipation,
   type ChallengeTemplate,
+  type FriendRequestItem,
   type PublicUser,
 } from '../lib/apiSocial';
-import { takeChallengeUserTarget, type ChallengeUserTarget } from '../lib/navTarget';
+import { setChallengeUserTarget, takeChallengeUserTarget, type ChallengeUserTarget } from '../lib/navTarget';
 
 const DARES: Record<AppLanguage, string[]> = {
   en: [
@@ -110,6 +118,9 @@ export default function ChallengesScreen({ lang }: ScreenProps) {
   const [friends, setFriends] = useState<(PublicUser & { since: string })[]>([]);
   const [allUsers, setAllUsers] = useState<PublicUser[]>([]);
   const [inviteQuery, setInviteQuery] = useState('');
+  const [challengeUserQuery, setChallengeUserQuery] = useState('');
+  const [incoming, setIncoming] = useState<FriendRequestItem[]>([]);
+  const [invites, setInvites] = useState<ChallengeInvite[]>([]);
   const [targetUser, setTargetUser] = useState<ChallengeUserTarget | null>(null);
   const [reqSentIds, setReqSentIds] = useState<Set<string>>(new Set());
   const [friendProgress, setFriendProgress] = useState<
@@ -130,15 +141,19 @@ export default function ChallengesScreen({ lang }: ScreenProps) {
     setLoading(true);
     setError('');
     try {
-      const [mine, temps, fr, disc] = await Promise.all([
+      const [mine, temps, fr, disc, reqs, inv] = await Promise.all([
         myChallenges(),
         listChallengeTemplates(),
         listFriends(),
         discoverPeople(50).catch(() => [] as PublicUser[]),
+        listFriendRequests(),
+        listChallengeInvites(),
       ]);
       setActive(mine.active);
       setTemplates(temps);
       setFriends(fr);
+      setIncoming(reqs.incoming);
+      setInvites(inv.incoming);
       // Invite picker shows EVERYONE (friends + new people), not
       // just friends — the server only allows inviting friends, so
       // non-friends get a "Send request" button instead (after they
@@ -184,6 +199,7 @@ export default function ChallengesScreen({ lang }: ScreenProps) {
   }, []);
 
   const hero = active.find((p) => p.totalDays === 30) ?? active[0] ?? null;
+  const pendingCount = incoming.length + invites.length;
 
   async function shareChallenge() {
     if (!hero) return;
@@ -212,6 +228,36 @@ export default function ChallengesScreen({ lang }: ScreenProps) {
     } finally {
       setBusyId(null);
     }
+  }
+
+  /** Accept / reject a pending friend request or challenge invite,
+      then reload so the pending card reflects the new state. */
+  async function actReq(id: string, fn: (id: string) => Promise<void>) {
+    if (busyId) return;
+    setBusyId(id);
+    setError('');
+    try {
+      await fn(id);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : s.errorGeneric);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  /** Challenge button on the always-visible user card: with an
+      active challenge, pre-select this person and open the invite
+      picker; with none, say so honestly instead of opening a picker
+      that cannot invite anyone. */
+  function challengeUser(person: PublicUser) {
+    if (!hero) {
+      setNotice(s.chNoChallenge);
+      return;
+    }
+    setChallengeUserTarget({ id: person.id, name: person.name });
+    setTargetUser({ id: person.id, name: person.name });
+    setShowInvitePicker(true);
   }
 
   async function checkIn() {
@@ -385,6 +431,157 @@ export default function ChallengesScreen({ lang }: ScreenProps) {
           ) : (
             <EmptyState title={s.chTitle} body={s.chNoActive} />
           )}
+
+          {/* Pending requests — incoming friend requests + challenge
+              invites, with Accept / Reject, exactly like Friends.
+              Always visible: a request should not be buried under
+              Discover or inside the invite picker. */}
+          <Card>
+            <Text style={T.cardTitle}>{pendingCount > 0 ? `${s.frPending} (${pendingCount})` : s.frPending}</Text>
+            {incoming.length === 0 && invites.length === 0 ? (
+              <Text style={[T.cardBody, { marginTop: 6 }]}>{s.frNoPending}</Text>
+            ) : (
+              <>
+                {incoming.map((r, i) =>
+                  r.other ? (
+                    <View key={r.id} style={styles.friendRow}>
+                      <View style={[styles.avatar, i % 2 === 1 && styles.avatarPeach]}>
+                        <Text style={[styles.avatarText, i % 2 === 1 && styles.avatarTextPeach]}>
+                          {r.other.initial}
+                        </Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.friendName}>{r.other.name}</Text>
+                        <Text style={styles.friendSub}>{s.frSentYou}</Text>
+                      </View>
+                      <View style={styles.reqBtns}>
+                        <PillButton
+                          label={s.frAccept}
+                          small
+                          onPress={() => void actReq(r.id, acceptFriendRequest)}
+                          disabled={busyId === r.id}
+                        />
+                        <PillButton
+                          label={s.frReject}
+                          small
+                          variant="ghost"
+                          onPress={() => void actReq(r.id, rejectFriendRequest)}
+                          disabled={busyId === r.id}
+                        />
+                      </View>
+                    </View>
+                  ) : null,
+                )}
+                {invites.map((inv) => (
+                  <View key={inv.id} style={styles.friendRow}>
+                    <View style={styles.avatar}>
+                      <Text style={styles.avatarText}>{inv.other?.initial ?? '?'}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.friendName}>{inv.other?.name ?? ''}</Text>
+                      <Text style={styles.friendSub}>
+                        {inv.challenge?.title ?? 'Challenge'} · {inv.challenge?.durationDays ?? ''} days
+                      </Text>
+                    </View>
+                    <View style={styles.reqBtns}>
+                      <PillButton
+                        label={s.frAccept}
+                        small
+                        onPress={() => void actReq(inv.id, acceptChallengeInvite)}
+                        disabled={busyId === inv.id}
+                      />
+                      <PillButton
+                        label={s.frReject}
+                        small
+                        variant="ghost"
+                        onPress={() => void actReq(inv.id, declineChallengeInvite)}
+                        disabled={busyId === inv.id}
+                      />
+                    </View>
+                  </View>
+                ))}
+              </>
+            )}
+          </Card>
+
+          {/* Challenge a friend — everyone (friends + new people),
+              with a name search, always visible (not gated on an
+              active challenge and not hidden inside the invite
+              picker). Non-friends get a Request button too, exactly
+              like Study. */}
+          <Card>
+            <Text style={T.cardTitle}>{s.chUsersT}</Text>
+            <Text style={[T.cardBody, { marginTop: 6 }]}>{s.chUsersBody}</Text>
+            <View style={{ marginTop: 10 }}>
+              <Input
+                value={challengeUserQuery}
+                onChangeText={setChallengeUserQuery}
+                placeholder={s.chInviteSearchPh}
+                autoCapitalize="words"
+                autoCorrect={false}
+              />
+            </View>
+            {(() => {
+              const q = challengeUserQuery.trim().toLowerCase();
+              const friendIds = new Set(friends.map((f) => f.id));
+              const rows = allUsers
+                .filter((u) => !q || u.name.toLowerCase().includes(q))
+                .slice(0, 5);
+              if (rows.length === 0) {
+                return (
+                  <Text style={[T.cardBody, { marginTop: 8 }]}>{s.chNoUsers}</Text>
+                );
+              }
+              return rows.map((u, i) => {
+                const isFriend = friendIds.has(u.id);
+                const reqSent = reqSentIds.has(u.id);
+                return (
+                  <View key={u.id} style={styles.friendRow}>
+                    <View style={[styles.avatar, i % 2 === 1 && styles.avatarPeach]}>
+                      <Text style={[styles.avatarText, i % 2 === 1 && styles.avatarTextPeach]}>
+                        {u.initial}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.friendName}>{u.name}</Text>
+                      <Text style={styles.friendSub}>
+                        ⭐ {typeof u.points === 'number' ? u.points : 0} {s.frPoints}
+                      </Text>
+                    </View>
+                    <View style={styles.userBtns}>
+                      {!isFriend ? (
+                        <PillButton
+                          label={reqSent ? s.frSent : s.frReq}
+                          small
+                          variant={reqSent ? 'ghost' : 'primary'}
+                          onPress={() => {
+                            if (busyId || reqSent) return;
+                            setBusyId(u.id);
+                            void sendFriendRequest(u.id)
+                              .then(() => {
+                                setReqSentIds((prev) => new Set(prev).add(u.id));
+                                setNotice(s.frSent);
+                              })
+                              .catch((e) => {
+                                setError(e instanceof Error ? e.message : s.errorGeneric);
+                              })
+                              .finally(() => setBusyId(null));
+                          }}
+                          disabled={reqSent || busyId === u.id}
+                        />
+                      ) : null}
+                      <PillButton
+                        label={s.frChallenge}
+                        small
+                        variant="ghost"
+                        onPress={() => challengeUser(u)}
+                      />
+                    </View>
+                  </View>
+                );
+              });
+            })()}
+          </Card>
 
           {/* Invite picker — EVERYONE (friends + new people), with
               search. The server only lets you invite friends, so a
@@ -617,6 +814,8 @@ const styles = StyleSheet.create({
   checkedIn: { fontFamily: 'PlusJakartaSans', fontSize: 13, fontWeight: '700', color: C.navInactive, textAlign: 'center', marginTop: 4 },
   leave: { fontFamily: 'PlusJakartaSans', fontSize: 13, fontWeight: '700', color: C.peach, textAlign: 'center', marginTop: 10 },
   friendRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: C.line },
+  reqBtns: { flexDirection: 'row', gap: 6 },
+  userBtns: { flexDirection: 'column', gap: 6, alignItems: 'flex-end' },
   targetRow: {
     backgroundColor: C.teal100,
     borderRadius: 12,

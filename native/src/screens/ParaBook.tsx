@@ -168,6 +168,9 @@ const STRINGS: Record<
     autoPlay: string;
     autoPlayNote: string;
     stopAudio: string;
+    playTilawat: string;
+    playTarjuma: string;
+    stopBtn: string;
     audioLoading: string;
     playerNote: string;
     urduNote: string;
@@ -199,6 +202,9 @@ const STRINGS: Record<
     autoPlay: 'Auto-play',
     autoPlayNote: 'Tilawat → Urdu tarjuma → next page, automatically',
     stopAudio: 'Stop audio',
+    playTilawat: '▶ Tilawat suno',
+    playTarjuma: '▶ Tarjuma suno',
+    stopBtn: '■ Roko',
     audioLoading: 'Audio is loading…',
     playerNote: 'No pause after an ayah — from Bismillah to the last ayah in one flow.',
     urduNote: 'Hear the meaning in Urdu — ayah by ayah, in the same flow.',
@@ -229,6 +235,9 @@ const STRINGS: Record<
     autoPlay: 'Auto-play',
     autoPlayNote: 'Tilawat → Urdu tarjuma → agla page, apne aap',
     stopAudio: 'Audio roko',
+    playTilawat: '▶ Tilawat suno',
+    playTarjuma: '▶ Tarjuma suno',
+    stopBtn: '■ Roko',
     audioLoading: 'Audio load ho raha hai…',
     playerNote: 'Ek aayat ke baad rukawat nahi — Bismillah se aakhri aayat tak ek flow me.',
     urduNote: 'Urdu me ma’ani suno — aayat-dar-aayat, usi flow me.',
@@ -625,6 +634,83 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
           </View>
         </View>
         {readerSub ? <Text style={styles.readerSub}>{readerSub}</Text> : null}
+      </View>
+
+      {/* Audio controls at the TOP of the reader (user request
+          2026-11-23): the play buttons were buried below the
+          tarjuma inside the page scroll, so the user had to hunt
+          for them. Same layout as the Quran Book's top audio card
+          and the Life Ayahs' two big buttons — Tilawat + Tarjuma
+          side by side, auto-play switch, seek row. The per-page
+          PlayerCards below the tarjuma stay as they are. */}
+      <View style={styles.topAudioCard}>
+        <View style={styles.voiceRow}>
+          <View style={{ flex: 1 }}>
+            <PillButton
+              label={
+                audio.mode === 'tilawat' && audio.page === currentPage && audio.playing
+                  ? s.stopBtn
+                  : s.playTilawat
+              }
+              variant="ghost"
+              small
+              block
+              busy={audio.busy && audio.mode === 'tilawat' && audio.page === currentPage}
+              onPress={() => {
+                if (audio.mode === 'tilawat' && audio.page === currentPage) {
+                  toggleQuranAudio();
+                } else {
+                  void startQuranPage(currentPage, 'tilawat');
+                }
+              }}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <PillButton
+              label={
+                audio.mode === 'urdu' && audio.page === currentPage && audio.playing
+                  ? s.stopBtn
+                  : s.playTarjuma
+              }
+              variant="peach"
+              small
+              block
+              busy={audio.busy && audio.mode === 'urdu' && audio.page === currentPage}
+              onPress={() => {
+                if (audio.mode === 'urdu' && audio.page === currentPage) {
+                  toggleQuranAudio();
+                } else {
+                  void startQuranPage(currentPage, 'urdu');
+                }
+              }}
+            />
+          </View>
+        </View>
+
+        <View style={styles.topAutoRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.autoTitle}>{s.autoPlay}</Text>
+            <Text style={styles.autoNote}>{s.autoPlayNote}</Text>
+          </View>
+          <Switch value={audio.autoPlay} onValueChange={setQuranAutoPlay} />
+        </View>
+
+        {audio.hasAudio ? (
+          <View style={styles.seekRow}>
+            <PillButton label="−10s" small variant="ghost" onPress={() => seekQuranBy(-10)} />
+            <PillButton label="⏮" small variant="ghost" onPress={() => prevQuranAyah()} />
+            <PillButton label="⏭" small variant="ghost" onPress={() => nextQuranAyah()} />
+            <PillButton label="+10s" small variant="ghost" onPress={() => seekQuranBy(10)} />
+            <PillButton
+              label={s.stopAudio}
+              small
+              variant="ghost"
+              onPress={() => stopQuranAudio()}
+            />
+          </View>
+        ) : null}
+        {audio.busy ? <Text style={styles.audioLoading}>{s.audioLoading}</Text> : null}
+        {audio.error ? <Text style={T.error}>{audio.error}</Text> : null}
       </View>
 
       <View style={styles.book} {...panResponder.panHandlers}>
@@ -1333,6 +1419,26 @@ const styles = StyleSheet.create({
     color: C.muted,
     lineHeight: 21,
     marginTop: 3,
+  },
+  /* ---- Top audio card (reader): white card above the book, so
+     the play buttons are visible the moment the reader opens.
+     The inner auto-play row is a plain row (not the card-style
+     autoRow) so there is no card-inside-a-card double border. ---- */
+  topAudioCard: {
+    backgroundColor: C.white,
+    borderRadius: S.radius,
+    borderWidth: 1,
+    borderColor: C.line,
+    padding: 14,
+    marginHorizontal: S.pad,
+    marginTop: 12,
+  },
+  voiceRow: { flexDirection: 'row', gap: 8 },
+  topAutoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 12,
   },
   autoRow: {
     flexDirection: 'row',

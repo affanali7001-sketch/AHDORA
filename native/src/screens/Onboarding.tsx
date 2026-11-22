@@ -27,7 +27,7 @@ import { C, F, L, T } from '../lib/theme';
 import { Card, Chip, Field, Input, PillButton, ProgressBar } from '../components/ui';
 import TimePickerField from '../components/TimePickerField';
 import TutorialVideo from '../components/TutorialVideo';
-import { SIGNUP_VIDEO_URL } from '../lib/videos';
+import { HOW_TO_USE_VIDEO_URL, SIGNUP_VIDEO_URL } from '../lib/videos';
 import {
   emptyProfileForm,
   formatTime12h,
@@ -76,6 +76,17 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
   const [verifyPopup, setVerifyPopup] = useState(
     freshOnboarding === true && user?.emailVerified === false,
   );
+  // How-to-use video popup — shown AFTER the details-video popup is
+  // dismissed, fresh signups only. The user asked (2026-11-23): when
+  // a new user signs up and comes inside, ask "Can you see the
+  // video how to use this app?".
+  const [howToPopup, setHowToPopup] = useState<'prompt' | 'video' | null>(null);
+  /** Dismiss the details-video popup and, for a fresh signup only,
+   * open the how-to-use video popup next. */
+  function closeVideoPopup(): void {
+    setVideoPopup(null);
+    if (freshOnboarding) setHowToPopup('prompt');
+  }
   const [step, setStep] = useState(0);
   // School (Class 1–12, no semester) vs Diploma/Degree (Semester
   // 1–10). Derived from the saved profile when it loads: a saved
@@ -542,12 +553,13 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
           the details-video popup. Dismissing it reveals the video
           popup underneath. */}
       <Modal
-        visible={!loading && (verifyPopup || videoPopup !== null)}
+        visible={!loading && (verifyPopup || videoPopup !== null || howToPopup !== null)}
         transparent
         animationType="fade"
         onRequestClose={() => {
           setVerifyPopup(false);
           setVideoPopup(null);
+          setHowToPopup(null);
         }}
       >
         <View style={styles.modalWrap}>
@@ -575,24 +587,54 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
                   <PillButton
                     label={s.obVideoLater}
                     variant="ghost"
-                    onPress={() => setVideoPopup(null)}
+                    onPress={() => closeVideoPopup()}
                     block
                   />
                 </View>
               </>
-            ) : (
+            ) : videoPopup === 'video' ? (
               <>
                 <TutorialVideo url={SIGNUP_VIDEO_URL} title={s.obVideoPopT} />
                 <View style={{ marginTop: 12 }}>
                   <PillButton
                     label={s.obVideoClose}
                     variant="ghost"
-                    onPress={() => setVideoPopup(null)}
+                    onPress={() => closeVideoPopup()}
                     block
                   />
                 </View>
               </>
-            )}
+            ) : howToPopup === 'prompt' ? (
+              <>
+                <Text style={styles.modalTitle}>{s.obHowToT}</Text>
+                <Text style={styles.modalBody}>{s.obHowToB}</Text>
+                <PillButton
+                  label={s.obVideoWatch}
+                  onPress={() => setHowToPopup('video')}
+                  block
+                />
+                <View style={{ marginTop: 10 }}>
+                  <PillButton
+                    label={s.obVideoLater}
+                    variant="ghost"
+                    onPress={() => setHowToPopup(null)}
+                    block
+                  />
+                </View>
+              </>
+            ) : howToPopup === 'video' ? (
+              <>
+                <TutorialVideo url={HOW_TO_USE_VIDEO_URL} title={s.obHowToT} />
+                <View style={{ marginTop: 12 }}>
+                  <PillButton
+                    label={s.obVideoClose}
+                    variant="ghost"
+                    onPress={() => setHowToPopup(null)}
+                    block
+                  />
+                </View>
+              </>
+            ) : null}
           </View>
         </View>
       </Modal>

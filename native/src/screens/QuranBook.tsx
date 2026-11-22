@@ -763,6 +763,20 @@ export default function QuranBookScreen({
         {s.urduAudioCredit} · {URDU_AUDIO.bitrate}
       </Text>
 
+      {/* Next page right below the play controls (user request
+          2026-11-22) — the same Next also sits below the mushaf
+          page; this one is for turning the page without scrolling. */}
+      {page < TOTAL_PAGES ? (
+        <View style={{ marginTop: 12 }}>
+          <PillButton
+            label={shared.nextPage}
+            variant="peach"
+            block
+            onPress={() => openReader(page + 1)}
+          />
+        </View>
+      ) : null}
+
       {pageLoading ? (
         <ActivityIndicator color={C.teal500} size="large" style={styles.loader} />
       ) : pageError ? (

@@ -122,6 +122,47 @@ export function todayKey(): string {
   return `${y}-${m}-${d}`;
 }
 
+/** Local YYYY-MM-DD for tomorrow (device timezone). */
+export function tomorrowKey(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Minutes from now until an HH:mm time TOMORROW (null when unparsable).
+ * Used for the next-prayer card after Isha: the server returns
+ * nextPrayer null once every prayer today has passed, but the next
+ * real prayer is tomorrow's Fajr — showing "No prayer times yet"
+ * then is wrong, because the times did load.
+ */
+export function minutesUntilTomorrow(timeHHmm: string, now = new Date()): number | null {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(timeHHmm.trim());
+  if (!match) return null;
+  const target = new Date(now);
+  target.setDate(target.getDate() + 1);
+  target.setHours(Number(match[1]), Number(match[2]), 0, 0);
+  return Math.round((target.getTime() - now.getTime()) / 60000);
+}
+
+/**
+ * Tomorrow's Fajr time (HH:mm), or null when it cannot be loaded.
+ * Prefers the per-prayer time (manual override when the user set
+ * one), falls back to the calculated timings table.
+ */
+export async function fetchTomorrowFajr(): Promise<string | null> {
+  try {
+    const t = await fetchPrayerTimes(tomorrowKey());
+    const fajr = t.perPrayer?.Fajr?.time ?? t.timings?.Fajr ?? '';
+    return /^([01]\d|2[0-3]):([0-5]\d)$/.test(fajr.trim()) ? fajr.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 export function monthKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }

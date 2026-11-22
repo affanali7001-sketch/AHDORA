@@ -46,6 +46,7 @@ import {
   seekQuranTo,
   setQuranAutoPlay,
   setQuranSleepTimer,
+  startQuranPage,
   stopQuranAudio,
   subscribeQuranAudio,
   toggleQuranAudio,
@@ -408,6 +409,21 @@ export default function NowPlayingScreen({ lang, goTo }: ScreenProps) {
         <PillButton label="+10s" variant="ghost" small onPress={() => seekQuranBy(10)} />
       </View>
 
+      {/* Next page — music-app style: the play button is above, and
+          right below it a clear way to the next page (the user asked
+          for it here, 2026-11-22). Starts the next page playing in
+          the same mode; hidden on the last page. */}
+      {audio.page < 604 ? (
+        <View style={styles.nextPageBtn}>
+          <PillButton
+            label={shared.nextPage}
+            variant="peach"
+            block
+            onPress={() => void startQuranPage(audio.page + 1, audio.mode ?? 'tilawat')}
+          />
+        </View>
+      ) : null}
+
       <View style={styles.sleepCard}>
         <View style={styles.sleepHead}>
           <Text style={styles.sleepTitle}>{shared.sleepTitle}</Text>
@@ -612,6 +628,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'center',
   },
+  nextPageBtn: { marginTop: 14 },
   /* ---- Sleep timer ---- */
   sleepCard: {
     backgroundColor: C.white,

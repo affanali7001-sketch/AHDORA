@@ -13,7 +13,7 @@
  *     resolved). Statuses change only on the support side.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
 import { stringsFor } from '../lib/strings';
 import { C, T } from '../lib/theme';
@@ -24,6 +24,11 @@ import {
   type FeedbackItem,
   type FeedbackType,
 } from '../lib/apiSocial';
+
+/** The business support mailbox (Cloudflare Email Routing →
+ * affanali7001@gmail.com). Shown in Help Center so users can
+ * email directly as well as sending in-app feedback. */
+const SUPPORT_EMAIL = 'support@ahdora.me';
 
 export default function SupportScreen({ lang }: ScreenProps) {
   const s = stringsFor(lang);
@@ -94,6 +99,28 @@ export default function SupportScreen({ lang }: ScreenProps) {
         </Text>
       </TealHead>
       <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
+        <Card>
+          <Text style={T.cardTitle}>{s.supEmailT}</Text>
+          <Text style={[T.cardBody, { marginTop: 6 }]}>{s.supEmailBody}</Text>
+          <Pressable
+            onPress={() => void Linking.openURL(`mailto:${SUPPORT_EMAIL}`)}
+            accessibilityRole="link"
+            accessibilityLabel={SUPPORT_EMAIL}
+            style={{ marginTop: 8 }}
+          >
+            <Text
+              style={{
+                fontFamily: 'PlusJakartaSans',
+                fontSize: 15,
+                fontWeight: '800',
+                color: C.teal700,
+              }}
+            >
+              {SUPPORT_EMAIL}
+            </Text>
+          </Pressable>
+        </Card>
+
         <Card>
           <Text style={T.cardTitle}>{s.supSendTitle}</Text>
           <View style={{ marginTop: 12 }}>

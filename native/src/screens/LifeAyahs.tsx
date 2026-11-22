@@ -14,21 +14,26 @@
  * Cloud CDN fallback), tapping "Tarjuma suno" plays the Urdu
  * tarjuma (Shamshad Ali Khan). The audio shows in the MiniPlayer,
  * keeps playing in the background, obeys the sleep timer, and gets
- * the manager's seek fix. When a queue ends it just stops — no
- * auto-advance to the next page or tarjuma.
+ * the manager's seek fix. Continue chain (user request 2026-11-22):
+ * while auto-play is on, a finished tilawat starts its tarjuma on
+ * its own, and a finished tarjuma starts the NEXT ayah's tilawat —
+ * through all four ayahs, then it stops. Turn auto-play off to
+ * play just one voice.
  */
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
 import { stringsFor } from '../lib/strings';
 import { C, F, L, T } from '../lib/theme';
-import { Card, PillButton } from '../components/ui';
+import { Card, PillButton, Switch } from '../components/ui';
 import { everyAyahUrl } from '../lib/apiWorship';
 import {
   getQuranAudioState,
+  setQuranAutoPlay,
   startLifeAyah,
   stopQuranAudio,
   subscribeQuranAudio,
+  type LifeAyahRef,
   type QuranAudioState,
 } from '../lib/quranAudio';
 
@@ -114,6 +119,20 @@ const GLOBAL_START: Record<number, number> = {
   23: 2674,
 };
 
+/**
+ * The continue-chain playlist: the same 4 ayahs, in screen order,
+ * as manager refs. Passed to startLifeAyah so the manager can walk
+ * tilawat → tarjuma → next ayah on its own (see quranAudio.ts).
+ */
+const LIFE_PLAYLIST: LifeAyahRef[] = CURATED_AYAHS.map((ayah) => ({
+  surah: ayah.surahNumber,
+  ayahStart: ayah.ayahStart,
+  ayahEnd: ayah.ayahEnd,
+  globalAyahStart: GLOBAL_START[ayah.surahNumber] ?? 0,
+  title: `Life Ayah · ${ayah.surah} ${ayah.reference}`,
+  titleTarjuma: `Life Ayah (Tarjuma) · ${ayah.surah} ${ayah.reference}`,
+}));
+
 export default function LifeAyahsScreen({ lang }: ScreenProps) {
   const s = stringsFor(lang);
   /** Global audio state (MiniPlayer shares the same manager). */
@@ -152,6 +171,7 @@ export default function LifeAyahsScreen({ lang }: ScreenProps) {
     }
     setPlayingRef(ayah.reference);
     setPlayingMode('tilawat');
+    const index = CURATED_AYAHS.findIndex((a) => a.reference === ayah.reference);
     await startLifeAyah(
       ayah.surahNumber,
       ayah.ayahStart,
@@ -159,6 +179,8 @@ export default function LifeAyahsScreen({ lang }: ScreenProps) {
       GLOBAL_START[ayah.surahNumber] ?? 0,
       'tilawat',
       `Life Ayah · ${ayah.surah} ${ayah.reference}`,
+      LIFE_PLAYLIST,
+      index < 0 ? 0 : index,
     );
   }
 
@@ -181,6 +203,7 @@ export default function LifeAyahsScreen({ lang }: ScreenProps) {
     }
     setPlayingRef(ayah.reference);
     setPlayingMode('tarjuma');
+    const index = CURATED_AYAHS.findIndex((a) => a.reference === ayah.reference);
     await startLifeAyah(
       ayah.surahNumber,
       ayah.ayahStart,
@@ -188,6 +211,8 @@ export default function LifeAyahsScreen({ lang }: ScreenProps) {
       GLOBAL_START[ayah.surahNumber] ?? 0,
       'urdu',
       `Life Ayah (Tarjuma) · ${ayah.surah} ${ayah.reference}`,
+      LIFE_PLAYLIST,
+      index < 0 ? 0 : index,
     );
   }
 
@@ -195,6 +220,18 @@ export default function LifeAyahsScreen({ lang }: ScreenProps) {
     <ScrollView style={styles.scroll} contentContainerStyle={L.scroll}>
       <Text style={T.title}>{s.lifeTitle}</Text>
       <Text style={T.sub}>{s.lifeSub}</Text>
+
+      {/* Auto-play (continue chain): on — a finished tilawat starts
+          its tarjuma, a finished tarjuma starts the next ayah. Off
+          — each voice plays alone. Same global switch as Quran Book. */}
+      <View style={styles.autoRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.autoTitle}>{s.autoPlay}</Text>
+          <Text style={styles.autoNote}>{s.autoPlayNote}</Text>
+        </View>
+        <Switch value={audio.autoPlay} onValueChange={setQuranAutoPlay} />
+      </View>
+
       {playingRef !== null && audio.error ? (
         <Text style={T.error}>{audio.error}</Text>
       ) : null}
@@ -329,6 +366,20 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 10,
   },
+  autoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: C.white,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: C.line,
+    padding: 14,
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  autoTitle: { fontFamily: F.sans, fontSize: 15, fontWeight: '700', color: C.ink },
+  autoNote: { fontFamily: F.sans, fontSize: 12.5, color: C.muted, marginTop: 2 },
   loadingText: {
     fontFamily: F.sans,
     fontSize: 12.5,

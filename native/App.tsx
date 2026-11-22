@@ -37,6 +37,7 @@ import {
 import { Amiri_400Regular, Amiri_700Bold } from '@expo-google-fonts/amiri';
 import { logout, restoreSession, setOnUnauthorized, type AuthUser } from './src/lib/api';
 import { loadProfileWithCompletion } from './src/lib/apiCore';
+import { refreshPrayerNotifications } from './src/lib/prayerNotifications';
 import { PILL_NAV, type ScreenId, type ScreenProps } from './src/lib/nav';
 import { stringsFor, type AppLanguage } from './src/lib/strings';
 import { C, F, S } from './src/lib/theme';
@@ -155,6 +156,10 @@ export default function App() {
         if (cancelled) return;
         if (u) {
           void handleLoginSuccess(u);
+          // Re-schedule today + tomorrow's prayer alerts on every
+          // app open (fire-and-forget; it no-ops when alerts are off
+          // or permission is not granted, and never blocks login).
+          void refreshPrayerNotifications();
         }
         setRestoringSession(false);
       })
