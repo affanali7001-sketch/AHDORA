@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#004353",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "com.ahdora.app",
+      "predictiveBackGestureEnabled": false
+    },
+    "icon": "./assets/icon.png",
+    "ios": {
+      "bundleIdentifier": "com.ahdora.app",
+      "supportsTablet": true
+    },
+    "name": "AHDORA",
+    "orientation": "portrait",
+    "slug": "ahdora",
+    "userInterfaceStyle": "light",
+    "version": "1.0.0",
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-asset",
+      "./plugins/withBundleInDebug",
+      "./plugins/withAhdoraBlock",
+      "expo-font",
+      "expo-splash-screen",
+      "expo-video",
+      [
+        "expo-notifications",
+        {
+          "color": "#0B4A41"
+        }
+      ],
+      "expo-secure-store",
+      "@react-native-community/datetimepicker"
+    ],
+    "experiments": {
+      "inlineModules": {
+        "watchedDirectories": [
+          "app"
+        ]
+      }
+    }
+  }
+}
