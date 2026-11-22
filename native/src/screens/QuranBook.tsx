@@ -28,25 +28,29 @@ import {
   View,
 } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
-import { takeQuranSurahTarget } from '../lib/navTarget';
+import { takeQuranPageTarget, takeQuranSurahTarget } from '../lib/navTarget';
 import { stringsFor, type AppLanguage } from '../lib/strings';
 import { C, F, L, S, T } from '../lib/theme';
 import { Chip, Field, Input, PillButton, Switch, TealHead } from '../components/ui';
 import {
   getQuranAudioState,
+  loadQuranReciter,
   nextQuranAyah,
   prevQuranAyah,
+  QURAN_RECITERS,
+  reciterFor,
   seekQuranBy,
   setQuranAutoPlay,
+  setQuranReciter,
   startQuranPage,
   stopQuranAudio,
   subscribeQuranAudio,
   toggleQuranAudio,
   type QuranAudioState,
 } from '../lib/quranAudio';
+import { fetchTafsir, type TafsirResult } from '../lib/tafsir';
 import {
   ARABIC_SOURCE,
-  TILAWAT_RECITER,
   URDU_AUDIO,
   URDU_TEXT_NAME,
   fetchMushafPage,
@@ -113,6 +117,14 @@ const STRINGS: Record<
     dailyLogUnavailable: string;
     autoPlay: string;
     autoPlayNote: string;
+    reciterTitle: string;
+    reciterNote: string;
+    tafsirTitle: string;
+    tafsirBtn: string;
+    tafsirLoading: string;
+    tafsirFailed: string;
+    tafsirSource: (edition: string, source: string) => string;
+    tafsirClose: string;
   }
 > = {
   en: {
@@ -155,6 +167,15 @@ const STRINGS: Record<
     dailyLogUnavailable: 'Log in to see your daily log.',
     autoPlay: 'Auto-play',
     autoPlayNote: 'Tilawat → Urdu tarjuma → next page, automatically. The page is marked as done.',
+    reciterTitle: 'Reciter',
+    reciterNote:
+      'Applies from the next play. The Urdu tarjuma voice stays Shamshad Ali Khan.',
+    tafsirTitle: 'Tafsir',
+    tafsirBtn: 'Read tafsir',
+    tafsirLoading: 'Loading tafsir…',
+    tafsirFailed: 'Tafsir could not be loaded. Check your connection and try again.',
+    tafsirSource: (edition, source) => `Source: ${edition} · ${source}`,
+    tafsirClose: 'Close',
   },
   hi: {
     todayRead: 'Aaj kitna padha',
@@ -195,6 +216,15 @@ const STRINGS: Record<
     dailyLogUnavailable: 'Roz ka hisaab dekhne ke liye login karo.',
     autoPlay: 'Auto-play',
     autoPlayNote: 'Tilawat → Urdu tarjuma → agla page, apne aap. Page padha hua mark ho jayega.',
+    reciterTitle: 'Qari',
+    reciterNote:
+      'Agli baar play karne se lagega. Urdu tarjume ki awaaz Shamshad Ali Khan hi rahegi.',
+    tafsirTitle: 'Tafsir',
+    tafsirBtn: 'Tafsir padho',
+    tafsirLoading: 'Tafsir load ho raha hai…',
+    tafsirFailed: 'Tafsir load nahi ho paya. Internet check karke dobara try karo.',
+    tafsirSource: (edition, source) => `Source: ${edition} · ${source}`,
+    tafsirClose: 'Band karo',
   },
 };
 
@@ -284,6 +314,18 @@ export default function QuranBookScreen({
   const [audio, setAudio] = useState<QuranAudioState>(() => getQuranAudioState());
   useEffect(() => subscribeQuranAudio(setAudio), []);
 
+  // Restore the saved tilawat reciter once (defaults to Alafasy).
+  useEffect(() => {
+    void loadQuranReciter();
+  }, []);
+
+  // Tafsir panel: one ayah at a time, fetched on demand from
+  // Quran.com Ibn Kathir (see src/lib/tafsir.ts) and cached offline.
+  const [tafsirAyah, setTafsirAyah] = useState<MushafAyah | null>(null);
+  const [tafsir, setTafsir] = useState<TafsirResult | null>(null);
+  const [tafsirLoading, setTafsirLoading] = useState(false);
+  const [tafsirError, setTafsirError] = useState<string | null>(null);
+
   const lastPageRef = useRef(1);
   const sessionOpenedRef = useRef(false);
   const bootedRef = useRef(false);
@@ -358,6 +400,10 @@ export default function QuranBookScreen({
   const loadPage = useCallback(async (n: number) => {
     setPageLoading(true);
     setPageError(null);
+    setTafsirAyah(null);
+    setTafsir(null);
+    setTafsirLoading(false);
+    setTafsirError(null);
     setUrduByGlobal(new Map());
     setEnglishByGlobal(new Map());
     setTranslitByGlobal(new Map());
@@ -412,10 +458,16 @@ export default function QuranBookScreen({
   );
 
   /* 'reader' route (App.tsx): open at the last-read surah's first
-   * page when history exists, else page 1. */
+   * page when history exists, else page 1. A Khatmah Continue target
+   * (set by KhatmahScreen) wins over history: open at that page. */
   useEffect(() => {
     if (initialView !== 'reader' || bootedRef.current) return;
     bootedRef.current = true;
+    const khatmahPage = takeQuranPageTarget();
+    if (khatmahPage !== null && khatmahPage >= 1 && khatmahPage <= 604) {
+      openReader(khatmahPage);
+      return;
+    }
     void (async () => {
       const h = await loadHistory();
       const last = latestEntry(h);
@@ -488,6 +540,33 @@ export default function QuranBookScreen({
         openReader(1);
       }
     })();
+  }
+
+  /** Open the Tafsir panel for one ayah (fetched on demand, cached offline). */
+  function openTafsir(a: MushafAyah): void {
+    setTafsirAyah(a);
+    setTafsir(null);
+    setTafsirError(null);
+    setTafsirLoading(true);
+    void (async () => {
+      try {
+        const result = await fetchTafsir(a.surah.number, a.numberInSurah);
+        if (!mountedRef.current) return;
+        setTafsir(result);
+      } catch (e) {
+        if (!mountedRef.current) return;
+        setTafsirError(e instanceof Error ? e.message : s.tafsirFailed);
+      } finally {
+        if (mountedRef.current) setTafsirLoading(false);
+      }
+    })();
+  }
+
+  function closeTafsir(): void {
+    setTafsirAyah(null);
+    setTafsir(null);
+    setTafsirLoading(false);
+    setTafsirError(null);
   }
 
   const filteredSurahs = surahs.filter((su) => {
@@ -757,11 +836,26 @@ export default function QuranBookScreen({
         </View>
       ) : null}
       <Text style={T.note}>
-        {s.tilawatCredit} · {TILAWAT_RECITER.bitrate}
+        Tilawat: {reciterFor(audio.reciterId).name} (EveryAyah) ·{' '}
+        {reciterFor(audio.reciterId).bitrate}
       </Text>
       <Text style={T.note}>
         {s.urduAudioCredit} · {URDU_AUDIO.bitrate}
       </Text>
+
+      {/* Reciter picker — tilawat only; the Urdu tarjuma voice never changes. */}
+      <Text style={styles.sectionTitle}>{s.reciterTitle}</Text>
+      <View style={styles.reciterRow}>
+        {QURAN_RECITERS.map((r) => (
+          <Chip
+            key={r.id}
+            label={r.name}
+            selected={audio.reciterId === r.id}
+            onPress={() => void setQuranReciter(r.id)}
+          />
+        ))}
+      </View>
+      <Text style={T.note}>{s.reciterNote}</Text>
 
       {/* Next page right below the play controls (user request
           2026-11-22) — the same Next also sits below the mushaf
@@ -917,8 +1011,61 @@ export default function QuranBookScreen({
               {englishByGlobal.get(a.number) ? (
                 <Text style={styles.english}>{englishByGlobal.get(a.number)}</Text>
               ) : null}
+              <View style={styles.tafsirBtnRow}>
+                <PillButton
+                  label={s.tafsirBtn}
+                  small
+                  variant="ghost"
+                  onPress={() => openTafsir(a)}
+                />
+              </View>
             </View>
           ))}
+
+          {/* Tafsir panel for the selected ayah — real text only,
+              always with its source/edition name (see src/lib/tafsir.ts). */}
+          {tafsirAyah ? (
+            <View style={styles.tafsirCard}>
+              <Text style={styles.tafsirTitle}>
+                {s.tafsirTitle} — Surah {tafsirAyah.surah.englishName} · Ayah{' '}
+                {tafsirAyah.numberInSurah}
+              </Text>
+              {tafsir ? (
+                <Text style={styles.tafsirSource}>
+                  {s.tafsirSource(tafsir.edition.name, tafsir.edition.source)}
+                </Text>
+              ) : null}
+              {tafsirLoading ? (
+                <ActivityIndicator
+                  color={C.teal500}
+                  size="small"
+                  style={styles.tafsirLoader}
+                />
+              ) : tafsirError ? (
+                <>
+                  <Text style={T.error}>{tafsirError}</Text>
+                  <View style={styles.tafsirBtnRow}>
+                    <PillButton
+                      label={shared.retry}
+                      small
+                      variant="primary"
+                      onPress={() => openTafsir(tafsirAyah)}
+                    />
+                  </View>
+                </>
+              ) : tafsir ? (
+                <Text style={styles.tafsirText}>{tafsir.text}</Text>
+              ) : null}
+              <View style={styles.tafsirBtnRow}>
+                <PillButton
+                  label={s.tafsirClose}
+                  small
+                  variant="ghost"
+                  onPress={() => closeTafsir()}
+                />
+              </View>
+            </View>
+          ) : null}
 
           <PillButton
             label={shared.markRead}
@@ -1293,6 +1440,38 @@ const styles = StyleSheet.create({
   },
   navRow: { flexDirection: 'row', gap: 10, marginTop: 16 },
   navBtn: { flex: 1 },
+  /* ---- Reciter picker + Tafsir ---- */
+  reciterRow: { flexDirection: 'row', flexWrap: 'wrap' as const, gap: 8 },
+  tafsirBtnRow: { flexDirection: 'row', marginTop: 10 },
+  tafsirCard: {
+    backgroundColor: C.white,
+    borderRadius: S.radius,
+    borderWidth: 1,
+    borderColor: C.line,
+    padding: 16,
+    marginTop: 16,
+  },
+  tafsirTitle: {
+    fontFamily: F.sans,
+    fontSize: 16,
+    fontWeight: '800',
+    color: C.ink,
+  },
+  tafsirSource: {
+    fontFamily: F.sans,
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: C.teal700,
+    marginTop: 4,
+  },
+  tafsirText: {
+    fontFamily: F.sans,
+    fontSize: 14.5,
+    lineHeight: 23,
+    color: C.ink,
+    marginTop: 12,
+  },
+  tafsirLoader: { marginVertical: 16 },
   jumpRow: { flexDirection: 'row', gap: 10, marginTop: 10, alignItems: 'center' },
   jumpInput: { flex: 1 },
   autoRow: {

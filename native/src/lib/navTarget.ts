@@ -12,6 +12,7 @@ export type ChallengeUserTarget = { id: string; name: string };
 
 let challengeUser: ChallengeUserTarget | null = null;
 let quranSurah: number | null = null;
+let quranPage: number | null = null;
 
 export function setChallengeUserTarget(user: ChallengeUserTarget): void {
   challengeUser = user;
@@ -30,5 +31,15 @@ export function setQuranSurahTarget(surahNumber: number): void {
 export function takeQuranSurahTarget(): number | null {
   const target = quranSurah;
   quranSurah = null;
+  return target;
+}
+
+export function setQuranPageTarget(page: number): void {
+  quranPage = page;
+}
+
+export function takeQuranPageTarget(): number | null {
+  const target = quranPage;
+  quranPage = null;
   return target;
 }

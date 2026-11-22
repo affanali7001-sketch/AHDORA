@@ -8,9 +8,12 @@
  *
  * Playback model (mirrors QuranBook's verified logic exactly):
  * - A page's tilawat queue is one AudioItem per ayah
- *   (EveryAyah Alafasy, AlQuran Cloud CDN as fallback).
+ *   (EveryAyah, in the reciter picked in QuranBook — Alafasy by
+ *   default; the AlQuran Cloud CDN fallback exists for Alafasy only,
+ *   other reciters retry the same EveryAyah URL once instead).
  * - A page's Urdu tarjuma queue is one item per ayah
- *   (Shamshad Ali Khan, Islamic Network; no fallback host exists).
+ *   (Shamshad Ali Khan, Islamic Network; no fallback host exists,
+ *   and the reciter picker never changes it).
  * - On status.error: try the fallback URI first (tilawat only), else
  *   retry the same URI once, else fail with a short error and stop.
  * - On status.isLoaded: clear the loading state. On didJustFinish:
@@ -46,9 +49,9 @@
  * try/catch — they need login and must never break playback.
  * No exported function ever throws.
  */
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
 import {
-  everyAyahUrl,
   fetchMushafPage,
   recordListened,
   recordRead,
@@ -73,6 +76,8 @@ export type QuranAudioState = {
   hasAudio: boolean;
   /** Human label for the active sleep timer, or null. */
   sleepTimer: string | null;
+  /** EveryAyah folder id of the tilawat reciter in use. */
+  reciterId: string;
 };
 
 /** Sleep timer option: stop after N minutes, or when the current Para (Juz) ends. */
@@ -83,6 +88,69 @@ export type QuranSleepTimerOption =
 
 /** Minute choices offered by the UI for the sleep timer. */
 export const QURAN_SLEEP_TIMER_MINUTES = [15, 30, 60] as const;
+
+/* ------------------------- tilawat reciters ------------------------- */
+/**
+ * Tilawat reciters, all on EveryAyah per-ayah audio — the same
+ * authorized pattern as the existing Alafasy audio:
+ *   https://everyayah.com/data/<folder>/<surah 3-digit><ayah 3-digit>.mp3
+ * Every folder below was verified live 2026-11-23 (HEAD + a ranged
+ * GET of 001001.mp3: HTTP 200/206, audio/mpeg, real MP3 bytes).
+ * Folders that 404'd and were NOT included: Minshawi_Murattal_128kbps
+ * (correct spelling is Minshawy), Abdurrahman_As-Sudais_192kbps
+ * (correct spelling is Abdurrahmaan), MaherAlMuaiqly_64kbps (needs
+ * the underscore: Maher_AlMuaiqly_64kbps), Saad_Al-Ghamdi_64kbps
+ * (Ghamadi_40kbps is the working folder), AbdulBasit_Murattal_192kbps
+ * (needs the underscore: Abdul_Basit_Murattal_192kbps).
+ * The Urdu tarjuma voice (Shamshad Ali Khan) is NOT in this list —
+ * the picker never changes it.
+ */
+export type QuranReciter = {
+  /** EveryAyah folder id — also the stored value. */
+  id: string;
+  name: string;
+  bitrate: string;
+};
+
+export const QURAN_RECITERS: QuranReciter[] = [
+  { id: 'Alafasy_128kbps', name: 'Mishary Rashid Alafasy', bitrate: '128 kbps' },
+  { id: 'Husary_128kbps', name: 'Mahmoud Khalil Al-Husary', bitrate: '128 kbps' },
+  {
+    id: 'Abdul_Basit_Murattal_192kbps',
+    name: 'Abdul Basit Abdus-Samad',
+    bitrate: '192 kbps',
+  },
+  {
+    id: 'Minshawy_Murattal_128kbps',
+    name: 'Mohamed Siddiq El-Minshawi',
+    bitrate: '128 kbps',
+  },
+  {
+    id: 'Abdurrahmaan_As-Sudais_192kbps',
+    name: 'Abdul-Rahman As-Sudais',
+    bitrate: '192 kbps',
+  },
+  { id: 'Maher_AlMuaiqly_64kbps', name: 'Maher Al-Muaiqly', bitrate: '64 kbps' },
+  { id: 'Ghamadi_40kbps', name: 'Saad Al-Ghamdi', bitrate: '40 kbps' },
+];
+
+export const DEFAULT_QURAN_RECITER_ID = 'Alafasy_128kbps';
+const RECITER_STORAGE_KEY = 'ahdora:quran:reciter';
+
+/** EveryAyah audio URL for one ayah, in the given reciter's folder. */
+export function reciterAyahUrl(
+  reciter: QuranReciter,
+  surahNumber: number,
+  ayahNumber: number,
+): string {
+  const surah = String(surahNumber).padStart(3, '0');
+  const ayah = String(ayahNumber).padStart(3, '0');
+  return `https://everyayah.com/data/${reciter.id}/${surah}${ayah}.mp3`;
+}
+
+export function reciterFor(id: string): QuranReciter {
+  return QURAN_RECITERS.find((r) => r.id === id) ?? QURAN_RECITERS[0]!;
+}
 
 const AUDIO_FAILED = 'Audio nahi chal paya. Dobara try karo.';
 const PAGE_FAILED = 'Page load nahi ho paya. Dobara try karo.';
@@ -109,6 +177,8 @@ let page = 1;
 let mushaf: MushafPage | null = null;
 let title = '';
 let autoPlay = true;
+/** Tilawat reciter in use (persisted; Alafasy until the user picks one). */
+let reciterId = DEFAULT_QURAN_RECITER_ID;
 let isPlaying = false;
 let busy = false;
 let error: string | null = null;
@@ -172,6 +242,7 @@ function snapshot(): QuranAudioState {
     title,
     hasAudio,
     sleepTimer: sleepTimerLabel(),
+    reciterId,
   };
 }
 
@@ -207,6 +278,47 @@ export function getQuranAudioState(): QuranAudioState {
 
 export function setQuranAutoPlay(on: boolean): void {
   autoPlay = on;
+  emit(true);
+}
+
+/** Current tilawat reciter id (synchronous; loadQuranReciter first restores the saved one). */
+export function getQuranReciterId(): string {
+  return reciterId;
+}
+
+/**
+ * Restore the saved tilawat reciter from AsyncStorage. Call once
+ * from the Quran Book screen on mount; an unknown saved value falls
+ * back to Alafasy. Never throws.
+ */
+export async function loadQuranReciter(): Promise<string> {
+  try {
+    const saved = await AsyncStorage.getItem(RECITER_STORAGE_KEY);
+    if (saved && QURAN_RECITERS.some((r) => r.id === saved)) {
+      reciterId = saved;
+    }
+  } catch {
+    /* Keep the default — playback must never break on storage. */
+  }
+  emit(true);
+  return reciterId;
+}
+
+/**
+ * Pick the tilawat reciter. Persisted in AsyncStorage and used for
+ * every tilawat queue built after this call — including the
+ * tilawat → tarjuma → next-page chain. A queue already playing keeps
+ * its reciter until the next play, so switching never cuts audio
+ * mid-ayah. Unknown ids are ignored. Never throws.
+ */
+export async function setQuranReciter(id: string): Promise<void> {
+  if (!QURAN_RECITERS.some((r) => r.id === id)) return;
+  reciterId = id;
+  try {
+    await AsyncStorage.setItem(RECITER_STORAGE_KEY, id);
+  } catch {
+    /* In-memory choice still applies for this session. */
+  }
   emit(true);
 }
 
@@ -255,13 +367,22 @@ function juzEndPageFor(m: MushafPage | null): number | null {
 }
 
 function buildQueue(m: MushafPage, md: 'tilawat' | 'urdu'): AudioItem[] {
-  return md === 'tilawat'
-    ? m.ayahs.map((a) => ({
-        uri: everyAyahUrl(a.surah.number, a.numberInSurah),
-        fallbackUri: tilawatFallbackUrl(a.number),
-        globalAyah: a.number,
-      }))
-    : m.ayahs.map((a) => ({ uri: urduAudioUrl(a.number), globalAyah: a.number }));
+  if (md === 'urdu') {
+    return m.ayahs.map((a) => ({ uri: urduAudioUrl(a.number), globalAyah: a.number }));
+  }
+  // Tilawat in the picked reciter. The AlQuran Cloud CDN fallback
+  // exists for Alafasy only — for other reciters there is no second
+  // host, so fallbackUri stays undefined and playAt retries the
+  // same EveryAyah URL once instead of silently playing Alafasy.
+  const reciter = reciterFor(reciterId);
+  return m.ayahs.map((a) => ({
+    uri: reciterAyahUrl(reciter, a.surah.number, a.numberInSurah),
+    fallbackUri:
+      reciter.id === DEFAULT_QURAN_RECITER_ID
+        ? tilawatFallbackUrl(a.number)
+        : undefined,
+    globalAyah: a.number,
+  }));
 }
 
 function pageTitle(md: 'tilawat' | 'urdu', pg: number, m: MushafPage | null): string {
@@ -569,9 +690,10 @@ export async function startQuranPage(pg: number, md: 'tilawat' | 'urdu'): Promis
 }
 
 /** One queue item per ayah in a Life Ayah range. Tilawat uses
- * EveryAyah + the AlQuran Cloud fallback (same as the page queue);
- * tarjuma uses the Urdu audio only (no fallback host exists — the
- * playAt retry rule retries the same URI once). */
+ * EveryAyah in the picked reciter (AlQuran Cloud fallback for
+ * Alafasy only — see buildQueue); tarjuma uses the Urdu audio
+ * only (no fallback host exists — the playAt retry rule retries
+ * the same URI once). */
 function buildLifeQueue(
   surahNumber: number,
   ayahStart: number,
@@ -583,9 +705,13 @@ function buildLifeQueue(
   for (let a = ayahStart; a <= ayahEnd; a += 1) {
     const globalAyah = globalAyahStart + (a - ayahStart);
     if (md === 'tilawat') {
+      const reciter = reciterFor(reciterId);
       items.push({
-        uri: everyAyahUrl(surahNumber, a),
-        fallbackUri: tilawatFallbackUrl(globalAyah),
+        uri: reciterAyahUrl(reciter, surahNumber, a),
+        fallbackUri:
+          reciter.id === DEFAULT_QURAN_RECITER_ID
+            ? tilawatFallbackUrl(globalAyah)
+            : undefined,
         globalAyah,
       });
     } else {

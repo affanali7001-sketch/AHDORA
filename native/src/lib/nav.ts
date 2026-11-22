@@ -30,6 +30,8 @@ export type ScreenId =
   | 'lifeAyahs'
   | 'duas'
   | 'tasbeeh'
+  | 'hifz'
+  | 'khatmah'
   | 'mosque'
   | 'study'
   | 'focus'

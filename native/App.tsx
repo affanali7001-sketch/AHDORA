@@ -57,6 +57,8 @@ import ParaBookScreen from './src/screens/ParaBook';
 import LifeAyahsScreen from './src/screens/LifeAyahs';
 import DuasScreen from './src/screens/Duas';
 import TasbeehScreen from './src/screens/Tasbeeh';
+import HifzScreen from './src/screens/Hifz';
+import KhatmahScreen from './src/screens/Khatmah';
 import IslamicCalendarScreen from './src/screens/IslamicCalendar';
 import SearchScreen from './src/screens/Search';
 import MosqueScreen from './src/screens/Mosque';
@@ -358,6 +360,10 @@ function renderScreen(screen: ScreenId, props: ScreenProps) {
       return <DuasScreen {...props} />;
     case 'tasbeeh':
       return <TasbeehScreen {...props} />;
+    case 'hifz':
+      return <HifzScreen {...props} />;
+    case 'khatmah':
+      return <KhatmahScreen {...props} />;
     case 'islamic-calendar':
       return <IslamicCalendarScreen {...props} />;
     case 'search':
