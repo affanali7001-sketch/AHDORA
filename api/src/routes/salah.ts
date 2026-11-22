@@ -166,16 +166,26 @@ salahRouter.get('/calendar/:month', async (req, res, next) => {
     }).select('date prayers').lean();
 
     // Auto-mark missed for every past day that already has a record.
+    // The days are independent (each recompute touches only its own
+    // date's record), so they run in parallel instead of one
+    // sequential round trip per day — Heroku→Atlas is ~0.3s each.
     const today = dateKeyInTimezone(timezone);
-    for (const day of records) {
-      if (day.date < today) {
-        await recomputeDay(req.authUser!.id, day.date, { timezone, profile, accountCreatedAt });
-      }
-    }
-    const freshRecords = await SalahDay.find({
-      userId: req.authUser!.id,
-      date: { $regex: `^${req.params.month}-` },
-    }).select('date prayers').lean();
+    const recomputed = await Promise.all(
+      records.map((day) =>
+        day.date < today
+          ? recomputeDay(req.authUser!.id, day.date, { timezone, profile, accountCreatedAt })
+          : Promise.resolve(null),
+      ),
+    );
+    // Re-read only when something actually flipped to missed — the
+    // common case (nothing left to flip) reuses the records already
+    // in hand and saves another round trip.
+    const freshRecords = recomputed.some((r) => r !== null)
+      ? await SalahDay.find({
+          userId: req.authUser!.id,
+          date: { $regex: `^${req.params.month}-` },
+        }).select('date prayers').lean()
+      : records;
 
     // P8: days before signup in the signup month have no record yet, but
     // the tracker treats them as pending — include them as all-pending

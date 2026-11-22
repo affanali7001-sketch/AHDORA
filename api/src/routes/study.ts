@@ -192,26 +192,32 @@ function compareTasks(a: TaskDoc, b: TaskDoc): number {
  * finishes OR a task is completed. Consecutive days ending today — or
  * yesterday, if today has no activity yet.
  */
-async function computeStreak(userId: string): Promise<number> {
-  const timezone = await userTimezone(userId);
-  const sessions = await PomodoroSession.find({
-    userId,
-    status: 'completed',
-    mode: 'focus',
-    completedAt: { $ne: null },
-  }).select('completedAt').lean();
-  const tasks = await StudyTask.find({
-    userId,
-    status: 'Completed',
-    completedAt: { $ne: null },
-  }).select('completedAt').lean();
+async function computeStreak(userId: string, timezone?: string): Promise<number> {
+  // The caller often already knows the timezone (e.g. /stats looked
+  // it up) — pass it in to skip a redundant Profile round trip.
+  // Heroku→Atlas is ~0.3s per sequential round trip, so the two
+  // finds run in parallel instead of one after the other.
+  const tz = timezone ?? (await userTimezone(userId));
+  const [sessions, tasks] = await Promise.all([
+    PomodoroSession.find({
+      userId,
+      status: 'completed',
+      mode: 'focus',
+      completedAt: { $ne: null },
+    }).select('completedAt').lean(),
+    StudyTask.find({
+      userId,
+      status: 'Completed',
+      completedAt: { $ne: null },
+    }).select('completedAt').lean(),
+  ]);
 
   const activeDays = new Set<string>();
-  for (const s of sessions) activeDays.add(dateKeyOf(s.completedAt, timezone) ?? '');
-  for (const t of tasks) activeDays.add(dateKeyOf(t.completedAt, timezone) ?? '');
+  for (const s of sessions) activeDays.add(dateKeyOf(s.completedAt, tz) ?? '');
+  for (const t of tasks) activeDays.add(dateKeyOf(t.completedAt, tz) ?? '');
   activeDays.delete('');
 
-  return computeStreakFromDayKeys(activeDays, dateKeyInTimezone(timezone));
+  return computeStreakFromDayKeys(activeDays, dateKeyInTimezone(tz));
 }
 
 /**
@@ -640,7 +646,10 @@ studyRouter.get('/stats', async (req, res, next) => {
     const today = startOfDayUtc(todayKey, timezone);
     const weekStart = new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000);
 
-    const [todaySessions, weekSessions, tasksCompletedToday, allTasks, subjects] = await Promise.all([
+    // The streak only needs the user id + timezone, both already
+    // known here — run it inside the same Promise.all instead of
+    // as another sequential round trip after it.
+    const [todaySessions, weekSessions, tasksCompletedToday, allTasks, subjects, streak] = await Promise.all([
       PomodoroSession.find({
         userId: req.authUser!.id,
         status: 'completed',
@@ -660,11 +669,11 @@ studyRouter.get('/stats', async (req, res, next) => {
       }),
       StudyTask.find({ userId: req.authUser!.id }).select('subjectId status').lean(),
       StudySubject.find({ userId: req.authUser!.id }).sort({ createdAt: 1 }).lean(),
+      computeStreak(req.authUser!.id, timezone),
     ]);
 
     const todayFocusMinutes = todaySessions.reduce((sum, s) => sum + (s.focusMinutesEarned ?? 0), 0);
     const weekFocusMinutes = weekSessions.reduce((sum, s) => sum + (s.focusMinutesEarned ?? 0), 0);
-    const streak = await computeStreak(req.authUser!.id);
 
     const weekFocusBySubject = new Map<string, number>();
     for (const s of weekSessions) {
@@ -772,12 +781,16 @@ studyRouter.get('/pomodoro/history', async (req, res, next) => {
       userId: req.authUser!.id,
       status: { $in: ['completed', 'abandoned'] as const },
     };
-    const total = await PomodoroSession.countDocuments(filter);
-    const sessions = await PomodoroSession.find(filter)
-      .sort({ completedAt: -1, createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit)
-      .lean();
+    // Count + page are independent — run them in parallel instead
+    // of two sequential round trips (Heroku→Atlas is ~0.3s each).
+    const [total, sessions] = await Promise.all([
+      PomodoroSession.countDocuments(filter),
+      PomodoroSession.find(filter)
+        .sort({ completedAt: -1, createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+    ]);
     res.json({
       sessions: sessions.map((s) => serializePomodoro(s as PomodoroDoc)),
       page,
