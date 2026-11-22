@@ -28,7 +28,8 @@
       "./plugins/withBundleInDebug",
       "./plugins/withAhdoraBlock",
       "expo-font",
-      "expo-splash-screen"
+      "expo-splash-screen",
+      "expo-video"
     ],
     "experiments": {
       "inlineModules": {

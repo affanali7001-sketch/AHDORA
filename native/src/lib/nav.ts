@@ -24,6 +24,7 @@ export type ScreenId =
   | 'hijri'
   | 'quran'
   | 'reader'
+  | 'para'
   | 'lifeAyahs'
   | 'duas'
   | 'tasbeeh'

@@ -9,6 +9,8 @@ import type { ScreenProps } from '../lib/nav';
 import { MEANING, stringsFor } from '../lib/strings';
 import { C, F, L, T } from '../lib/theme';
 import { PillButton } from '../components/ui';
+import TutorialVideo from '../components/TutorialVideo';
+import { SIGNUP_VIDEO_URL } from '../lib/videos';
 
 export default function WelcomeScreen({ lang, goTo }: ScreenProps) {
   const s = stringsFor(lang);
@@ -35,6 +37,12 @@ export default function WelcomeScreen({ lang, goTo }: ScreenProps) {
         <PillButton label={s.welBtn} onPress={() => goTo('login')} block />
       </View>
       <Text style={[T.note, styles.note]}>{s.welNote}</Text>
+
+      <TutorialVideo
+        url={SIGNUP_VIDEO_URL}
+        title={s.welSignupVideoT}
+        note={s.welSignupVideoS}
+      />
     </ScrollView>
   );
 }

@@ -41,8 +41,8 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 /* Shared types                                                        */
 /* ------------------------------------------------------------------ */
 
-/** The ONLY shape in which another user is ever exposed: id + name + initial. */
-export type PublicUser = { id: string; name: string; initial: string };
+/** The ONLY shape in which another user is ever exposed: id + name + initial (+ total points where the server provides it). */
+export type PublicUser = { id: string; name: string; initial: string; points?: number };
 
 export type FriendRequestItem = {
   id: string;

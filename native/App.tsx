@@ -39,7 +39,8 @@ import { logout, type AuthUser } from './src/lib/api';
 import { loadProfileWithCompletion } from './src/lib/apiCore';
 import { PILL_NAV, type ScreenId, type ScreenProps } from './src/lib/nav';
 import { stringsFor, type AppLanguage } from './src/lib/strings';
-import { C, F } from './src/lib/theme';
+import { C, F, S } from './src/lib/theme';
+import MiniPlayer from './src/components/MiniPlayer';
 import WelcomeScreen from './src/screens/Welcome';
 import LanguageScreen from './src/screens/Language';
 import LoginScreen from './src/screens/Login';
@@ -50,6 +51,7 @@ import DashboardScreen from './src/screens/Dashboard';
 import PrayerScreen from './src/screens/Prayer';
 import SalahCalendarScreen from './src/screens/SalahCalendar';
 import QuranBookScreen, { QuranReaderScreen } from './src/screens/QuranBook';
+import ParaBookScreen from './src/screens/ParaBook';
 import LifeAyahsScreen from './src/screens/LifeAyahs';
 import DuasScreen from './src/screens/Duas';
 import TasbeehScreen from './src/screens/Tasbeeh';
@@ -235,6 +237,7 @@ export default function App() {
             </Pressable>
           ) : null}
           <View style={styles.screenWrap}>{renderScreen(screen, props)}</View>
+          {user !== null ? <MiniPlayer onOpenReader={() => goTo('reader')} /> : null}
           {showPillNav ? (
             <View style={styles.pillNav}>
               {PILL_NAV.map((id) => {
@@ -295,6 +298,8 @@ function renderScreen(screen: ScreenId, props: ScreenProps) {
       return <QuranBookScreen {...props} />;
     case 'reader':
       return <QuranReaderScreen {...props} />;
+    case 'para':
+      return <ParaBookScreen {...props} />;
     case 'lifeAyahs':
       return <LifeAyahsScreen {...props} />;
     case 'duas':
@@ -369,9 +374,11 @@ const styles = StyleSheet.create({
   },
   pillTextActive: { color: C.teal900 },
   backBar: {
+    // Same top clearance as the screens (S.screenTop) so the button
+    // sits BELOW the status bar (time/battery), never under it.
     paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 2,
+    paddingTop: S.screenTop,
+    paddingBottom: 6,
   },
   backText: {
     fontFamily: F.sans,

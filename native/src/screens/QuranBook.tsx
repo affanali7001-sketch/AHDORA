@@ -27,28 +27,38 @@ import {
   Text,
   View,
 } from 'react-native';
-import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
 import type { ScreenProps } from '../lib/nav';
 import { stringsFor, type AppLanguage } from '../lib/strings';
-import { C, F, L, T } from '../lib/theme';
-import { Chip, Field, Input, PillButton, TealHead } from '../components/ui';
+import { C, F, L, S, T } from '../lib/theme';
+import { Chip, Field, Input, PillButton, Switch, TealHead } from '../components/ui';
+import {
+  getQuranAudioState,
+  nextQuranAyah,
+  prevQuranAyah,
+  seekQuranBy,
+  setQuranAutoPlay,
+  startQuranPage,
+  stopQuranAudio,
+  subscribeQuranAudio,
+  toggleQuranAudio,
+  type QuranAudioState,
+} from '../lib/quranAudio';
 import {
   ARABIC_SOURCE,
   TILAWAT_RECITER,
   URDU_AUDIO,
   URDU_TEXT_NAME,
-  everyAyahUrl,
   fetchMushafPage,
+  fetchQuranDailyLog,
   fetchQuranHistory,
   fetchSurahFirstPage,
   fetchSurahList,
   fetchUrduPage,
   recordRead,
-  tilawatFallbackUrl,
-  urduAudioUrl,
   type MushafAyah,
   type MushafPage,
   type MushafSurahRef,
+  type QuranDayLogEntry,
   type QuranHistory,
   type UrduAyah,
 } from '../lib/apiWorship';
@@ -90,6 +100,18 @@ const STRINGS: Record<
     aayatWord: string;
     paraWord: string;
     stopAudio: string;
+    pageJumpPh: string;
+    pageJumpGo: string;
+    pageJumpInvalid: string;
+    dailyLogTitle: string;
+    readWord: string;
+    listenedWord: string;
+    notRead: string;
+    notListened: string;
+    todayWord: string;
+    dailyLogUnavailable: string;
+    autoPlay: string;
+    autoPlayNote: string;
   }
 > = {
   en: {
@@ -120,6 +142,18 @@ const STRINGS: Record<
     aayatWord: 'ayahs',
     paraWord: 'Para',
     stopAudio: 'Stop audio',
+    pageJumpPh: 'Page no. (1–604)',
+    pageJumpGo: 'Go',
+    pageJumpInvalid: 'Enter a page number from 1 to 604.',
+    dailyLogTitle: 'Daily log',
+    readWord: 'Read',
+    listenedWord: 'Listened',
+    notRead: 'Not read',
+    notListened: 'Not listened',
+    todayWord: 'Today',
+    dailyLogUnavailable: 'Log in to see your daily log.',
+    autoPlay: 'Auto-play',
+    autoPlayNote: 'Tilawat → Urdu tarjuma → next page, automatically. The page is marked as done.',
   },
   hi: {
     todayRead: 'Aaj kitna padha',
@@ -148,11 +182,20 @@ const STRINGS: Record<
     aayatWord: 'aayat',
     paraWord: 'Para',
     stopAudio: 'Audio roko',
+    pageJumpPh: 'Page no. (1–604)',
+    pageJumpGo: 'Jao',
+    pageJumpInvalid: '1 se 604 ke beech page number likho.',
+    dailyLogTitle: 'Roz ka hisaab',
+    readWord: 'Padha',
+    listenedWord: 'Suna',
+    notRead: 'Nahi padha',
+    notListened: 'Nahi suna',
+    todayWord: 'Aaj',
+    dailyLogUnavailable: 'Roz ka hisaab dekhne ke liye login karo.',
+    autoPlay: 'Auto-play',
+    autoPlayNote: 'Tilawat → Urdu tarjuma → agla page, apne aap. Page padha hua mark ho jayega.',
   },
 };
-
-type AudioItem = { uri: string; fallbackUri?: string; globalAyah: number };
-type AudioMode = 'tilawat' | 'urdu' | null;
 
 function fmtTime(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -165,6 +208,22 @@ function toArabicIndic(n: number): string {
     .split('')
     .map((d) => ARABIC_INDIC[Number(d)] ?? d)
     .join('');
+}
+
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** 'YYYY-MM-DD' -> '22 Nov'. Returns the raw key if it does not parse. */
+function fmtDayKey(dayKey: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey);
+  if (!m) return dayKey;
+  const month = MONTH_SHORT[Number(m[2]) - 1] ?? '';
+  return `${Number(m[3])} ${month}`;
+}
+/** Today's day key in the device's local timezone. */
+function todayKeyLocal(): string {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 /** One mushaf page in a translation/transliteration edition. */
@@ -196,6 +255,8 @@ export default function QuranBookScreen({
   const shared = stringsFor(lang);
   const [view, setView] = useState<'landing' | 'reader'>(initialView);
   const [page, setPage] = useState(1);
+  const [pageJump, setPageJump] = useState('');
+  const [pageJumpMsg, setPageJumpMsg] = useState<string | null>(null);
   const [mushaf, setMushaf] = useState<MushafPage | null>(null);
   const [pageLoading, setPageLoading] = useState(initialView === 'reader');
   const [pageError, setPageError] = useState<string | null>(null);
@@ -204,6 +265,8 @@ export default function QuranBookScreen({
   const [historyNote, setHistoryNote] = useState<string | null>(null);
   const [markMsg, setMarkMsg] = useState<string | null>(null);
   const [markBusy, setMarkBusy] = useState(false);
+  const [dailyLog, setDailyLog] = useState<QuranDayLogEntry[] | null>(null);
+  const [dailyLogNote, setDailyLogNote] = useState<string | null>(null);
 
   const [surahs, setSurahs] = useState<MushafSurahRef[]>([]);
   const [surahQuery, setSurahQuery] = useState('');
@@ -215,31 +278,22 @@ export default function QuranBookScreen({
   const [translitByGlobal, setTranslitByGlobal] = useState<Map<number, string>>(new Map());
   const [tarjumaFailed, setTarjumaFailed] = useState(false);
 
-  const [audioMode, setAudioMode] = useState<AudioMode>(null);
-  const [audioBusy, setAudioBusy] = useState(false);
-  const [audioError, setAudioError] = useState<string | null>(null);
-  const [playingAyah, setPlayingAyah] = useState<number | null>(null);
-  const [tilawatTime, setTilawatTime] = useState(0);
-  const [tilawatDur, setTilawatDur] = useState(0);
-  const [urduTime, setUrduTime] = useState(0);
-  const [urduDur, setUrduDur] = useState(0);
+  // Audio lives in the GLOBAL player (src/lib/quranAudio) so it keeps
+  // playing on other screens; this screen only mirrors its state.
+  const [audio, setAudio] = useState<QuranAudioState>(() => getQuranAudioState());
+  useEffect(() => subscribeQuranAudio(setAudio), []);
 
   const lastPageRef = useRef(1);
   const sessionOpenedRef = useRef(false);
   const bootedRef = useRef(false);
   const [sessionSeconds, setSessionSeconds] = useState(0);
 
-  const soundRef = useRef<AudioPlayer | null>(null);
-  const queueRef = useRef<AudioItem[]>([]);
-  const queueIndexRef = useRef(0);
-  const modeRef = useRef<AudioMode>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      void stopAudio();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -250,32 +304,6 @@ export default function QuranBookScreen({
     const id = setInterval(() => setSessionSeconds((v) => v + 1), 1000);
     return () => clearInterval(id);
   }, [view]);
-
-  /* Player progress polling (additive only — the player logic below
-   * is unchanged): expo-audio exposes currentTime / duration. */
-  useEffect(() => {
-    if (!audioMode) return;
-    const id = setInterval(() => {
-      const p = soundRef.current;
-      if (!p) return;
-      try {
-        const t = p.currentTime;
-        const d = p.duration;
-        if (typeof t === 'number' && Number.isFinite(t)) {
-          if (modeRef.current === 'tilawat') {
-            setTilawatTime(t);
-            if (typeof d === 'number' && Number.isFinite(d) && d > 0) setTilawatDur(d);
-          } else if (modeRef.current === 'urdu') {
-            setUrduTime(t);
-            if (typeof d === 'number' && Number.isFinite(d) && d > 0) setUrduDur(d);
-          }
-        }
-      } catch {
-        // Player gone mid-poll — stopAudio clears the interval.
-      }
-    }, 500);
-    return () => clearInterval(id);
-  }, [audioMode]);
 
   const loadHistory = useCallback(async () => {
     try {
@@ -295,6 +323,16 @@ export default function QuranBookScreen({
 
   useEffect(() => {
     void loadHistory();
+    fetchQuranDailyLog(7)
+      .then((res) => {
+        if (mountedRef.current) {
+          setDailyLog(res.days);
+          setDailyLogNote(null);
+        }
+      })
+      .catch(() => {
+        if (mountedRef.current) setDailyLogNote(s.dailyLogUnavailable);
+      });
   }, [loadHistory]);
 
   useEffect(() => {
@@ -357,7 +395,7 @@ export default function QuranBookScreen({
 
   const openReader = useCallback(
     (n: number) => {
-      void stopAudio();
+      // Audio is global — opening another page does NOT stop it.
       setView('reader');
       void loadPage(n);
     },
@@ -387,113 +425,6 @@ export default function QuranBookScreen({
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  async function stopAudio(): Promise<void> {
-    modeRef.current = null;
-    queueRef.current = [];
-    queueIndexRef.current = 0;
-    setPlayingAyah(null);
-    setAudioMode(null);
-    setAudioBusy(false);
-    setTilawatTime(0);
-    setTilawatDur(0);
-    setUrduTime(0);
-    setUrduDur(0);
-    const sound = soundRef.current;
-    soundRef.current = null;
-    if (sound) {
-      sound.remove();
-    }
-  }
-
-  async function playAt(index: number): Promise<void> {
-    const queue = queueRef.current;
-    if (index >= queue.length) {
-      await stopAudio();
-      return;
-    }
-    const item = queue[index];
-    if (!item) return;
-    queueIndexRef.current = index;
-    setPlayingAyah(item.globalAyah);
-    const old = soundRef.current;
-    soundRef.current = null;
-    if (old) {
-      old.remove();
-    }
-    const tryLoad = (uri: string): AudioPlayer => {
-      const player = createAudioPlayer({ uri }, { updateInterval: 500 });
-      // One retry per ayah: no second host exists for Urdu (ur.khan),
-      // so a transient failure retries the same URI once.
-      let retried = false;
-      player.addListener('playbackStatusUpdate', (status) => {
-        // Error FIRST: a failed load must never be swallowed by a finish event.
-        if (status.error) {
-          if (item.fallbackUri && uri === item.uri) {
-            player.replace({ uri: item.fallbackUri });
-            player.play();
-          } else if (!retried) {
-            retried = true;
-            player.replace({ uri });
-            player.play();
-          } else {
-            setAudioError(s.audioFailed);
-            void stopAudio();
-          }
-          return;
-        }
-        // Clear the loading state as soon as the player is actually loaded,
-        // so a slow-network stall shows "loading" instead of silence.
-        if (status.isLoaded) setAudioBusy(false);
-        if (status.didJustFinish) {
-          void playAt(queueIndexRef.current + 1);
-        }
-      });
-      player.play();
-      return player;
-    };
-    try {
-      soundRef.current = tryLoad(item.uri);
-    } catch {
-      if (item.fallbackUri) {
-        try {
-          soundRef.current = tryLoad(item.fallbackUri);
-        } catch {
-          setAudioError(s.audioFailed);
-          await stopAudio();
-          return;
-        }
-      } else {
-        setAudioError(s.audioFailed);
-        await stopAudio();
-        return;
-      }
-    }
-  }
-
-  async function startAudio(mode: Exclude<AudioMode, null>): Promise<void> {
-    if (!mushaf) return;
-    setAudioError(null);
-    setAudioBusy(true);
-    await stopAudio();
-    const queue: AudioItem[] =
-      mode === 'tilawat'
-        ? mushaf.ayahs.map((a) => ({
-            uri: everyAyahUrl(a.surah.number, a.numberInSurah),
-            fallbackUri: tilawatFallbackUrl(a.number),
-            globalAyah: a.number,
-          }))
-        : mushaf.ayahs.map((a) => ({
-            uri: urduAudioUrl(a.number),
-            globalAyah: a.number,
-          }));
-    queueRef.current = queue;
-    modeRef.current = mode;
-    setAudioMode(mode);
-    // Keep audioBusy true until the player's first loaded status
-    // clears it — otherwise a slow-network stall looks like silence.
-    await playAt(0);
-  }
 
   async function markPageRead(): Promise<void> {
     if (!mushaf || markBusy) return;
@@ -617,6 +548,33 @@ export default function QuranBookScreen({
         </TealHead>
         {markMsg ? <Text style={styles.infoMsg}>{markMsg}</Text> : null}
 
+        <Text style={styles.sectionTitle}>{s.dailyLogTitle}</Text>
+        {dailyLog ? (
+          <View style={styles.logCard}>
+            {dailyLog.map((d) => {
+              const isToday = d.dayKey === todayKeyLocal();
+              const read = d.ayahsRead > 0;
+              return (
+                <View key={d.dayKey} style={styles.logRow}>
+                  <Text style={[styles.logDate, isToday && styles.logDateToday]}>
+                    {isToday ? s.todayWord : fmtDayKey(d.dayKey)}
+                  </Text>
+                  <Text style={[styles.logCell, read ? styles.logDone : styles.logMissed]}>
+                    {read ? `✓ ${s.readWord} · ${d.ayahsRead}` : `✗ ${s.notRead}`}
+                  </Text>
+                  <Text
+                    style={[styles.logCell, d.listened ? styles.logDone : styles.logMissed]}
+                  >
+                    {d.listened ? `✓ ${s.listenedWord}` : `✗ ${s.notListened}`}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        ) : (
+          <Text style={T.note}>{dailyLogNote ?? s.loading}</Text>
+        )}
+
         <Text style={styles.sectionTitle}>{shared.indexTitle}</Text>
         <Field label={shared.quranSearchLbl}>
           <Input
@@ -698,7 +656,7 @@ export default function QuranBookScreen({
         variant="ghost"
         small
         onPress={() => {
-          void stopAudio();
+          // Audio is global — leaving the reader does NOT stop it.
           if (initialView === 'reader') {
             goTo('quran');
           } else {
@@ -764,7 +722,7 @@ export default function QuranBookScreen({
                       {flowAyahs.map((a) => (
                         <Text
                           key={a.number}
-                          style={playingAyah === a.number ? styles.ayahPlaying : undefined}
+                          style={audio.playingAyah === a.number ? styles.ayahPlaying : undefined}
                         >
                           {a.text.trim()}{' '}
                           <Text style={styles.marker}>
@@ -792,31 +750,72 @@ export default function QuranBookScreen({
             dark
             title={shared.playerTitle}
             note={s.playerNote}
-            time={tilawatTime}
-            duration={tilawatDur}
-            timeLabel={tilawatDur > 0 ? `${fmtTime(tilawatDur)} · Page ${page}` : `Page ${page}`}
-            playing={audioMode === 'tilawat'}
-            busy={audioBusy && audioMode === 'tilawat'}
-            onToggle={() =>
-              audioMode === 'tilawat' ? void stopAudio() : void startAudio('tilawat')
+            time={audio.mode === 'tilawat' && audio.page === page ? audio.time : 0}
+            duration={audio.mode === 'tilawat' && audio.page === page ? audio.duration : 0}
+            timeLabel={
+              audio.mode === 'tilawat' && audio.page === page && audio.duration > 0
+                ? `${fmtTime(audio.duration)} · Page ${page}`
+                : `Page ${page}`
             }
+            playing={audio.mode === 'tilawat' && audio.page === page && audio.playing}
+            busy={audio.busy && audio.mode === 'tilawat' && audio.page === page}
+            onToggle={() => {
+              if (audio.mode === 'tilawat' && audio.page === page) {
+                toggleQuranAudio();
+              } else {
+                void startQuranPage(page, 'tilawat');
+              }
+            }}
           />
           <PlayerCard
             title={shared.urduTitle}
             note={s.urduNote}
-            time={urduTime}
-            duration={urduDur}
-            timeLabel={urduDur > 0 ? `${fmtTime(urduDur)} · Page ${page}` : `Page ${page}`}
-            playing={audioMode === 'urdu'}
-            busy={audioBusy && audioMode === 'urdu'}
-            onToggle={() =>
-              audioMode === 'urdu' ? void stopAudio() : void startAudio('urdu')
+            time={audio.mode === 'urdu' && audio.page === page ? audio.time : 0}
+            duration={audio.mode === 'urdu' && audio.page === page ? audio.duration : 0}
+            timeLabel={
+              audio.mode === 'urdu' && audio.page === page && audio.duration > 0
+                ? `${fmtTime(audio.duration)} · Page ${page}`
+                : `Page ${page}`
             }
+            playing={audio.mode === 'urdu' && audio.page === page && audio.playing}
+            busy={audio.busy && audio.mode === 'urdu' && audio.page === page}
+            onToggle={() => {
+              if (audio.mode === 'urdu' && audio.page === page) {
+                toggleQuranAudio();
+              } else {
+                void startQuranPage(page, 'urdu');
+              }
+            }}
           />
-          {audioBusy && audioMode ? (
+          {audio.busy && audio.mode ? (
             <Text style={styles.audioLoading}>{s.audioLoading}</Text>
           ) : null}
-          {audioError ? <Text style={T.error}>{audioError}</Text> : null}
+          {audio.error ? <Text style={T.error}>{audio.error}</Text> : null}
+
+          {/* Auto-play: tilawat → tarjuma → next page, and mark done. */}
+          <View style={styles.autoRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.autoTitle}>{s.autoPlay}</Text>
+              <Text style={styles.autoNote}>{s.autoPlayNote}</Text>
+            </View>
+            <Switch value={audio.autoPlay} onValueChange={setQuranAutoPlay} />
+          </View>
+
+          {/* Seek + prev/next ayah + stop — works even off this page. */}
+          {audio.hasAudio ? (
+            <View style={styles.seekRow}>
+              <PillButton label="−10s" small variant="ghost" onPress={() => seekQuranBy(-10)} />
+              <PillButton label="⏮" small variant="ghost" onPress={() => prevQuranAyah()} />
+              <PillButton label="⏭" small variant="ghost" onPress={() => nextQuranAyah()} />
+              <PillButton label="+10s" small variant="ghost" onPress={() => seekQuranBy(10)} />
+              <PillButton
+                label={s.stopAudio}
+                small
+                variant="ghost"
+                onPress={() => stopQuranAudio()}
+              />
+            </View>
+          ) : null}
           <Text style={T.note}>
             {s.tilawatCredit} · {TILAWAT_RECITER.bitrate}
           </Text>
@@ -831,7 +830,7 @@ export default function QuranBookScreen({
               key={a.number}
               style={[
                 styles.ayahRow,
-                playingAyah === a.number && styles.ayahRowPlaying,
+                audio.playingAyah === a.number && styles.ayahRowPlaying,
               ]}
             >
               <Text style={styles.ayahArabic}>{a.text.trim()}</Text>
@@ -872,6 +871,36 @@ export default function QuranBookScreen({
               style={styles.navBtn}
             />
           </View>
+
+          <View style={styles.jumpRow}>
+            <Input
+              value={pageJump}
+              onChangeText={(t) => {
+                setPageJump(t.replace(/[^0-9]/g, ''));
+                setPageJumpMsg(null);
+              }}
+              placeholder={s.pageJumpPh}
+              keyboardType="number-pad"
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.jumpInput}
+            />
+            <PillButton
+              label={s.pageJumpGo}
+              variant="primary"
+              onPress={() => {
+                const n = Number.parseInt(pageJump, 10);
+                if (!Number.isFinite(n) || n < 1 || n > TOTAL_PAGES) {
+                  setPageJumpMsg(s.pageJumpInvalid);
+                  return;
+                }
+                setPageJumpMsg(null);
+                setPageJump('');
+                openReader(n);
+              }}
+            />
+          </View>
+          {pageJumpMsg ? <Text style={T.error}>{pageJumpMsg}</Text> : null}
 
           <Text style={styles.pageFooter}>
             Page {page} of {TOTAL_PAGES} · Surah {firstSeg?.surah.englishName ?? ''}
@@ -1237,6 +1266,49 @@ const styles = StyleSheet.create({
   },
   navRow: { flexDirection: 'row', gap: 10, marginTop: 16 },
   navBtn: { flex: 1 },
+  jumpRow: { flexDirection: 'row', gap: 10, marginTop: 10, alignItems: 'center' },
+  jumpInput: { flex: 1 },
+  autoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: C.white,
+    borderRadius: S.radius,
+    borderWidth: 1,
+    borderColor: C.line,
+    padding: 14,
+    marginTop: 12,
+  },
+  autoTitle: { fontFamily: F.sans, fontSize: 14.5, fontWeight: '700' as const, color: C.ink },
+  autoNote: { fontFamily: F.sans, fontSize: 12.5, color: C.muted, marginTop: 2 },
+  seekRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+    flexWrap: 'wrap' as const,
+    justifyContent: 'center',
+  },
+  logCard: {
+    backgroundColor: C.white,
+    borderRadius: S.radius,
+    borderWidth: 1,
+    borderColor: C.line,
+    paddingVertical: 4,
+    paddingHorizontal: 14,
+  },
+  logRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: C.line,
+  },
+  logDate: { fontFamily: F.sans, fontSize: 13, color: C.muted, width: 64 },
+  logDateToday: { color: C.teal700, fontWeight: '700' as const },
+  logCell: { flex: 1, fontFamily: F.sans, fontSize: 13, textAlign: 'center' as const },
+  logDone: { color: C.teal500 },
+  logMissed: { color: C.red },
   pageFooter: {
     fontFamily: F.sans,
     fontSize: 12.5,

@@ -23,6 +23,8 @@ import type { ScreenProps } from '../lib/nav';
 import { stringsFor } from '../lib/strings';
 import { C, L, T } from '../lib/theme';
 import { Card, Input, PillButton, Switch } from '../components/ui';
+import TutorialVideo from '../components/TutorialVideo';
+import { HOW_TO_USE_VIDEO_URL } from '../lib/videos';
 import {
   getProfile,
   rewardsSummary,
@@ -299,6 +301,12 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
               {deleteNote ? <Text style={styles.okNote}>{deleteNote}</Text> : null}
             </Card>
           ) : null}
+
+          <TutorialVideo
+            url={HOW_TO_USE_VIDEO_URL}
+            title={s.pfHowToT}
+            note={s.pfHowToS}
+          />
         </View>
       )}
     </ScrollView>

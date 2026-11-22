@@ -117,6 +117,7 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
     { id: 'dashboard', label: s.navDashboard, icon: '🏠' },
     { id: 'prayer', label: s.tilePrayer, icon: '🕌' },
     { id: 'quran', label: s.quranBookTitle, icon: '📖', peach: true },
+    { id: 'para', label: s.paraBookTitle, icon: '📖' },
     { id: 'lifeAyahs', label: s.tileLifeAyahs, icon: '✨' },
     { id: 'duas', label: s.tileDuas, icon: '🤲' },
     { id: 'tasbeeh', label: s.tileTasbeeh, icon: '📿', peach: true },

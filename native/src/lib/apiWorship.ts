@@ -353,3 +353,26 @@ export async function setDailyTarget(dailyTarget: number): Promise<{ dailyTarget
     body: JSON.stringify({ dailyTarget }),
   });
 }
+
+export type QuranDayLogEntry = {
+  dayKey: string;
+  ayahsRead: number;
+  listened: boolean;
+  listenedMinutes: number;
+};
+
+/** Per-day read/listened log (last N days, missing days filled as not read / not listened). */
+export async function fetchQuranDailyLog(days = 7): Promise<{ days: QuranDayLogEntry[] }> {
+  return requestLive<{ days: QuranDayLogEntry[] }>(`/api/quran/daily-log?days=${days}`);
+}
+
+/** Record that the user listened to Quran today (marks the day as listened). */
+export async function recordListened(
+  minutes = 0,
+): Promise<{ ok: boolean; listened: boolean; dayKey: string }> {
+  return requestLive<{ ok: boolean; listened: boolean; dayKey: string }>('/api/quran/listened', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ minutes }),
+  });
+}

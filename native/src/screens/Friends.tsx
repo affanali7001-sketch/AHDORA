@@ -157,15 +157,26 @@ export default function FriendsScreen({ lang, goTo }: ScreenProps) {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.name}>{person.name}</Text>
+          <Text style={styles.sub}>
+            ⭐ {typeof person.points === 'number' ? person.points : 0} {s.frPoints}
+          </Text>
           <Text style={styles.sub}>{s.frPrivacy}</Text>
         </View>
-        <PillButton
-          label={sent ? s.frSent : s.frReq}
-          small
-          variant={sent ? 'ghost' : 'primary'}
-          onPress={() => void sendRequest(person)}
-          disabled={sent || busyId === person.id}
-        />
+        <View style={styles.discoverBtns}>
+          <PillButton
+            label={sent ? s.frSent : s.frReq}
+            small
+            variant={sent ? 'ghost' : 'primary'}
+            onPress={() => void sendRequest(person)}
+            disabled={sent || busyId === person.id}
+          />
+          <PillButton
+            label={s.frChallenge}
+            small
+            variant="ghost"
+            onPress={() => goTo('challenges')}
+          />
+        </View>
       </View>
     );
   };
@@ -329,4 +340,5 @@ const styles = StyleSheet.create({
   name: { fontFamily: 'PlusJakartaSans', fontSize: 14.5, fontWeight: '700', color: C.ink },
   sub: { fontFamily: 'PlusJakartaSans', fontSize: 12.5, color: C.muted, marginTop: 2 },
   reqBtns: { flexDirection: 'row', gap: 6 },
+  discoverBtns: { flexDirection: 'column', gap: 6, alignItems: 'flex-end' },
 });
