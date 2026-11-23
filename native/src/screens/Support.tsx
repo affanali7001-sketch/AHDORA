@@ -94,7 +94,7 @@ export default function SupportScreen({ lang }: ScreenProps) {
         <Text style={{ fontFamily: 'PlusJakartaSans', fontSize: 20, fontWeight: '800', color: C.white }}>
           {s.supTitle}
         </Text>
-        <Text style={{ fontFamily: 'PlusJakartaSans', fontSize: 13, color: '#BFD8CF', marginTop: 4 }}>
+        <Text style={{ fontFamily: 'PlusJakartaSans', fontSize: 13, color: C.navInactive, marginTop: 4 }}>
           {s.supSub}
         </Text>
       </TealHead>

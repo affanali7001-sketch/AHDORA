@@ -25,9 +25,8 @@
  *      off → ayah → surah), cast (opens the reciter picker —
  *      there is no real cast target, so it opens the reciter
  *      choice instead of faking one), list (opens the surah list).
- * AHDORA's theme stays: deep teal card (darker teal in dark mode),
- * Ice White text, Soft Peach play button and fills — no gold, no
- * Mihrab navy.
+ * Mihrab palette: dark navy card, cream-white text, light-blue play
+ * button and fills.
  *
  * Everything here is real state from the global manager
  * (src/lib/quranAudio.ts): tilawat stays EveryAyah in the picked
@@ -51,7 +50,6 @@ import {
   View,
 } from 'react-native';
 import { stringsFor, type AppLanguage } from '../lib/strings';
-import { useAppTheme } from '../lib/appTheme';
 import { C, F, S } from '../lib/theme';
 import { Chip, PillButton, Switch } from './ui';
 import {
@@ -210,7 +208,6 @@ export default function TilawahPlayer({
   onOpenList: () => void;
 }) {
   const s = stringsFor(lang);
-  const th = useAppTheme();
   const [audio, setAudio] = useState<QuranAudioState>(() => getQuranAudioState());
   useEffect(() => subscribeQuranAudio(setAudio), []);
   const [panel, setPanel] = useState<'none' | 'reciter' | 'sleep'>('none');
@@ -344,7 +341,9 @@ export default function TilawahPlayer({
         ? s.tilawahRepeatSurah
         : s.tilawahRepeatOff;
 
-  const cardBg = th.dark ? C.teal950 : C.teal900;
+  // The player card stays dark navy in both themes — the Mihrab
+  // Tilawah card (sampled #232C49, 11-33-42-51), never the green.
+  const cardBg = C.navy;
 
   return (
     <View style={[styles.card, { backgroundColor: cardBg }]}>
@@ -460,7 +459,7 @@ export default function TilawahPlayer({
           hitSlop={6}
         >
           {audio.busy && audioActive ? (
-            <ActivityIndicator color={C.peachText} size="large" />
+            <ActivityIndicator color={C.white} size="large" />
           ) : (
             <Text style={styles.playGlyph}>{audio.playing ? '❚❚' : '▶'}</Text>
           )}
@@ -720,8 +719,8 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     marginTop: 6,
   },
-  reciterName: { fontFamily: F.sans, fontSize: 14, color: C.peachMid },
-  reciterChevron: { fontSize: 16, color: C.peachMid },
+  reciterName: { fontFamily: F.sans, fontSize: 14, color: C.skyBlue },
+  reciterChevron: { fontSize: 16, color: C.skyBlue },
   /* 4 — ayah seek bar (draggable, thumb) + time. */
   scrubTouch: { height: 28, justifyContent: 'center', marginTop: 8 },
   scrubTrack: {
@@ -730,13 +729,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.22)',
     overflow: 'hidden',
   },
-  scrubFill: { height: 5, borderRadius: 2.5, backgroundColor: C.peachMid },
+  scrubFill: { height: 5, borderRadius: 2.5, backgroundColor: C.skyBlue },
   scrubThumb: {
     position: 'absolute',
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: C.peachMid,
+    backgroundColor: C.skyBlue,
     marginLeft: -6,
   },
   timeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -762,7 +761,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginTop: 6,
   },
-  progressFill: { height: 3, borderRadius: 1.5, backgroundColor: C.peachMid },
+  progressFill: { height: 3, borderRadius: 1.5, backgroundColor: C.skyBlue },
   /* 6 — transport. Not mirrored: previous on the left, next on the
      right, in every language — media transport keeps its
      left-to-right order on both platforms. */
@@ -783,11 +782,11 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: C.peachMid,
+    backgroundColor: C.skyBlue,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  playGlyph: { fontSize: 26, color: C.peachText, textAlign: 'center' },
+  playGlyph: { fontSize: 26, color: C.navy, textAlign: 'center' },
   /* 7 — one quiet row of pills. Painted only when on. */
   optionsRow: {
     flexDirection: 'row',
@@ -806,13 +805,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pillOn: { backgroundColor: C.peachMid },
+  pillOn: { backgroundColor: C.skyBlue },
   pillText: { fontFamily: F.sans, fontSize: 13, fontWeight: '700', color: C.white },
-  pillTextOn: { color: C.peachText },
+  pillTextOn: { color: C.navy },
   sleepStatus: {
     fontFamily: F.sans,
     fontSize: 12.5,
-    color: C.peachMid,
+    color: C.skyBlue,
     textAlign: 'center',
     marginTop: 8,
   },

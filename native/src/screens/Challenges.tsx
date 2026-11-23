@@ -1,11 +1,11 @@
 /**
  * Challenges — rebuilt to the approved preview (§20 in the preview file).
- * Dark-teal hero card for the first active challenge: Day X / total,
- * streak, a 30-cell streak grid (✓ done, 😢 missed, peach today),
+ * Deep-green hero card for the first active challenge: Day X / total,
+ * streak, a 30-cell streak grid (✓ done, 😢 missed, tint today),
  * REAL Share (OS share sheet) and REAL Invite (pick a friend — the
  * invite goes through POST /api/friends/invites). Friends' streak
  * card from GET /api/friends/:id/shared-challenges (shared progress
- * only, never private data). Peach dare card with a REAL rotating
+ * only, never private data). Tint dare card with a REAL rotating
  * dare (fixed list of harmless dares). Template chips join real
  * challenges (rules shown before joining); "+ Apna banao" creates a
  * real custom challenge via POST /api/challenges/. No "coming soon"
@@ -799,7 +799,7 @@ const styles = StyleSheet.create({
     width: '12.5%',
     aspectRatio: 1,
     borderRadius: 9,
-    backgroundColor: '#EDF3F0',
+    backgroundColor: C.teal100,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -812,7 +812,7 @@ const styles = StyleSheet.create({
   heroNote: { fontFamily: 'PlusJakartaSans', fontSize: 12.5, color: C.navInactive, marginTop: 10, lineHeight: 18 },
   heroBtns: { flexDirection: 'row', gap: 8, marginTop: 14 },
   checkedIn: { fontFamily: 'PlusJakartaSans', fontSize: 13, fontWeight: '700', color: C.navInactive, textAlign: 'center', marginTop: 4 },
-  leave: { fontFamily: 'PlusJakartaSans', fontSize: 13, fontWeight: '700', color: C.peach, textAlign: 'center', marginTop: 10 },
+  leave: { fontFamily: 'PlusJakartaSans', fontSize: 13, fontWeight: '700', color: C.peachInk, textAlign: 'center', marginTop: 10 },
   friendRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: C.line },
   reqBtns: { flexDirection: 'row', gap: 6 },
   userBtns: { flexDirection: 'column', gap: 6, alignItems: 'flex-end' },
@@ -825,7 +825,7 @@ const styles = StyleSheet.create({
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.teal700, alignItems: 'center', justifyContent: 'center' },
   avatarPeach: { backgroundColor: C.peachMid },
   avatarText: { fontFamily: 'PlusJakartaSans', fontSize: 17, fontWeight: '800', color: C.white },
-  avatarTextPeach: { color: C.peachText },
+  avatarTextPeach: { color: C.white },
   friendName: { fontFamily: 'PlusJakartaSans', fontSize: 15, fontWeight: '700', color: C.ink, flex: 1 },
   friendSub: { fontFamily: 'PlusJakartaSans', fontSize: 12.5, color: C.muted, marginTop: 2 },
   rankTag: {

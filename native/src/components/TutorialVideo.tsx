@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: 'rgba(11,74,65,0.85)',
+    backgroundColor: 'rgba(31,94,73,0.85)',
     borderWidth: 2,
     borderColor: C.white,
     alignItems: 'center',

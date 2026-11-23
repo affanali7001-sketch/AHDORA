@@ -114,8 +114,8 @@ const MAX_REMINDERS = 30;
 const CHANNEL_ID = 'ahdora-fasting';
 const IDS_KEY = '@ahdora/notif/fastingIds';
 const ENABLED_KEY = '@ahdora/notif/fastingEnabled';
-/** Deep teal from the app theme (C.teal700) — on-brand, no new colour. */
-const TEAL = '#0B4A41';
+/** Mihrab primary green from the app theme (C.teal700) — on-brand, no new colour. */
+const TEAL = '#1F5E49';
 
 /* ------------------------------------------------------------------ */
 /* Date helpers (local calendar, no timezone tricks)                  */

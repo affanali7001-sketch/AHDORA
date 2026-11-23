@@ -503,7 +503,7 @@ const styles = StyleSheet.create({
   savedText: { fontSize: 14, fontWeight: '700', color: C.teal, marginTop: 12 },
   lockCard: { backgroundColor: C.teal950, borderColor: C.teal950, marginTop: 16 },
   lockTitle: { color: C.white, fontSize: 20, fontWeight: '800' },
-  lockBody: { color: '#B8CFCB', fontSize: 14, lineHeight: 21, marginTop: 8, marginBottom: 16 },
+  lockBody: { color: C.navInactive, fontSize: 14, lineHeight: 21, marginTop: 8, marginBottom: 16 },
   permRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 6 },
   permText: { flex: 1 },
   permTitle: { fontSize: 15, fontWeight: '800', color: C.ink },

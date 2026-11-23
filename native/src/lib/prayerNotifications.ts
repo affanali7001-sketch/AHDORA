@@ -84,8 +84,8 @@ export const SLEEP_WARN_KEY = '@ahdora/sleep/warn5min';
 /** Sleep warnings live on their own channel + id list (see header). */
 const SLEEP_CHANNEL_ID = 'ahdora-sleep';
 const SLEEP_IDS_KEY = '@ahdora/notif/sleepIds';
-/** Deep teal from the app theme (C.teal700) — on-brand, no new colour. */
-const TEAL = '#0B4A41';
+/** Mihrab primary green from the app theme (C.teal700) — on-brand, no new colour. */
+const TEAL = '#1F5E49';
 
 export type PermissionStatus = 'granted' | 'denied' | 'undetermined';
 

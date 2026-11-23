@@ -103,7 +103,7 @@ export default function MiniPlayer({ onOpenReader }: { onOpenReader: () => void 
 
 const styles = StyleSheet.create({
   wrap: {
-    backgroundColor: C.teal900,
+    backgroundColor: C.navy,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     overflow: 'hidden',
@@ -114,7 +114,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: 3,
-    backgroundColor: C.peachMid,
+    backgroundColor: C.skyBlue,
   },
   bar: {
     height: 56,

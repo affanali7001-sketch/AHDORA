@@ -376,7 +376,7 @@ const styles = StyleSheet.create({
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.teal700, alignItems: 'center', justifyContent: 'center' },
   avatarPeach: { backgroundColor: C.peachMid },
   avatarText: { fontFamily: 'PlusJakartaSans', fontSize: 17, fontWeight: '800', color: C.white },
-  avatarTextPeach: { color: C.peachText },
+  avatarTextPeach: { color: C.white },
   name: { fontFamily: 'PlusJakartaSans', fontSize: 14.5, fontWeight: '700', color: C.ink },
   sub: { fontFamily: 'PlusJakartaSans', fontSize: 12.5, color: C.muted, marginTop: 2 },
   reqBtns: { flexDirection: 'row', gap: 6 },

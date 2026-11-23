@@ -23,7 +23,7 @@ export type BeadEffect = 'plain' | 'metallic' | 'chromatic' | '3d';
 
 export type TasbihDesign = {
   shape: BeadShape;
-  /** Hex colour, e.g. '#E9A93B'. */
+  /** Hex colour, e.g. '#1F5E49'. */
   color: string;
   effect: BeadEffect;
 };
@@ -35,10 +35,10 @@ export type SavedDesign = {
   design: TasbihDesign;
 };
 
-/** The golden flower bead from the Mihrab screenshot — the default. */
+/** The green flower bead — the Mihrab-palette default (was gold; the theme has no gold). */
 export const DEFAULT_DESIGN: TasbihDesign = {
   shape: 'flower',
-  color: '#E9A93B',
+  color: '#1F5E49',
   effect: 'metallic',
 };
 
@@ -59,7 +59,7 @@ export const PRESET_COLORS: readonly { name: string; color: string }[] = [
   { name: 'Black', color: '#262626' },
   { name: 'Brown', color: '#8B5E34' },
   { name: 'Blue', color: '#2F6F9F' },
-  { name: 'Teal', color: '#0B4A41' },
+  { name: 'Deep Green', color: '#0F4C44' },
   { name: 'Rose', color: '#B0506A' },
 ];
 
@@ -70,7 +70,7 @@ export const BASE_COLORS: readonly string[] = [
   '#8B5E34',
   '#262626',
   '#1E6B52',
-  '#0B4A41',
+  '#1F5E49',
   '#2F6F9F',
   '#6A4FA3',
   '#B0506A',
@@ -207,7 +207,7 @@ function enqueueWrite(work: () => Promise<void>): Promise<void> {
   return run;
 }
 
-/** The user's current design (the default golden flower bead when none saved). */
+/** The user's current design (the default green flower bead when none saved). */
 export async function loadDesign(uid: string): Promise<TasbihDesign> {
   try {
     const raw = await AsyncStorage.getItem(designKey(uid));

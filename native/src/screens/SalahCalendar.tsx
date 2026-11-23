@@ -2,7 +2,7 @@
  * Salah Calendar — rebuilt to the approved preview (§8): title +
  * real current month, a 7-column grid where each cell shows the day
  * number plus a coloured dot (teal = all 5 prayers, peach = some)
- * or a 😢 emoji on a missed day; today’s cell is dark teal. Below,
+ * or a 😢 emoji on a missed day; today’s cell is deep green. Below,
  * a legend card with the real month counts — full-prayer days and
  * Qaza pending. No month arrows (current month only), no tap-a-day
  * detail panel, no percentage anywhere, no bottom edit button.

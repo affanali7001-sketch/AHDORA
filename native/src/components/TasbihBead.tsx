@@ -3,7 +3,7 @@
  * react-native-svg (no Mihrab code — this is AHDORA's own rendering).
  *
  * Shapes: flower (8 petals around a centre, like the Mihrab
- * screenshot's golden flower beads), circle, square, triangle,
+ * screenshot's green flower beads), circle, square, triangle,
  * diamond. The flower is 8 small circles around a centre circle —
  * no image asset, so it recolours cleanly with any base colour.
  *

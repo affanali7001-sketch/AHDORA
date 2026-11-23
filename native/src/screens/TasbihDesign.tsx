@@ -59,7 +59,7 @@ const EFFECT_KEYS: Record<BeadEffect, 'tasEffectPlain' | 'tasEffectMetallic' | '
 export default function TasbihDesignScreen({ lang, user }: ScreenProps) {
   const s = stringsFor(lang);
   const uid = user?.id ?? 'anon';
-  const [design, setDesign] = useState<TasbihDesign>({ shape: 'flower', color: '#E9A93B', effect: 'metallic' });
+  const [design, setDesign] = useState<TasbihDesign>({ shape: 'flower', color: '#1F5E49', effect: 'metallic' });
   const [saved, setSaved] = useState<SavedDesign[]>([]);
 
   useEffect(() => {
@@ -239,7 +239,7 @@ const styles = StyleSheet.create({
     color: C.ink,
   },
   previewArea: {
-    backgroundColor: '#EFEAF6',
+    backgroundColor: '#E2EEEA',
     borderRadius: S.radiusSm,
     alignItems: 'center',
     justifyContent: 'center',

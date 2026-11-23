@@ -359,7 +359,8 @@ export default function TasbeehScreen({ lang, user, goTo, goBack }: ScreenProps)
   );
 }
 
-const GOLD = '#E9A93B';
+// Mihrab primary green — the Tasbih accent (was gold; the theme has no gold).
+const GREEN = '#1F5E49';
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000000' },
@@ -389,7 +390,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
-  chipOn: { borderColor: GOLD, backgroundColor: '#241D08' },
+  chipOn: { borderColor: GREEN, backgroundColor: '#0F4C44' },
   chipText: { fontFamily: F.sans, fontSize: 13.5, fontWeight: '700', color: '#999999' },
   chipTextOn: { color: '#FFFFFF' },
   targetRow: {
@@ -465,20 +466,20 @@ const styles = StyleSheet.create({
   completeBox: {
     marginTop: 18,
     borderWidth: 1.5,
-    borderColor: GOLD,
+    borderColor: GREEN,
     borderRadius: 16,
-    backgroundColor: '#1A1503',
+    backgroundColor: '#0F4C44',
     padding: 14,
   },
   completeText: { fontFamily: F.sans, fontSize: 15, fontWeight: '800', color: '#FFFFFF' },
   completeRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
   continueBtn: {
-    backgroundColor: GOLD,
+    backgroundColor: GREEN,
     borderRadius: 999,
     paddingHorizontal: 16,
     paddingVertical: 9,
   },
-  continueBtnText: { fontFamily: F.sans, fontSize: 13.5, fontWeight: '800', color: '#241D08' },
+  continueBtnText: { fontFamily: F.sans, fontSize: 13.5, fontWeight: '800', color: '#FAF7F2' },
   completeResetBtn: {
     borderWidth: 1,
     borderColor: '#555555',

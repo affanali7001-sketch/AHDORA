@@ -1,5 +1,5 @@
 /**
- * Home — rebuilt to the approved preview (§5): dark-teal gradient
+ * Home — rebuilt to the approved preview (§5): deep-green gradient
  * header (TealHead) with Arabic salam, the real user's name, the real
  * date + live Hijri date, and a translucent next-prayer card with a
  * real countdown; then the 12 preview tiles (icon + label only, no
@@ -11,7 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ScreenId, ScreenProps } from '../lib/nav';
 import { stringsFor, type AppLanguage } from '../lib/strings';
-import { loadMinimal } from '../lib/minimal';
+import { loadMinimal, saveMinimal } from '../lib/minimal';
 import { DARK, useAppTheme } from '../lib/appTheme';
 import { C, F, L, T } from '../lib/theme';
 import { Card, Chip, EmptyState, PillButton, TealHead, Tile, TileGrid } from '../components/ui';
@@ -55,19 +55,30 @@ type HomeTile = { id: ScreenId; label: string; icon: string; peach?: boolean };
 /** Local strings for the Minimal today view (Tasbeeh pattern — strings.ts untouched). */
 const STRINGS: Record<
   AppLanguage,
-  { todayTimes: string; tapToSee: string; tapToHide: string; prayed: string }
+  {
+    todayTimes: string;
+    tapToSee: string;
+    tapToHide: string;
+    prayed: string;
+    minimalNote: string;
+    showAllTiles: string;
+  }
 > = {
   en: {
     todayTimes: "Today's prayer times",
     tapToSee: 'Tap to see all times',
     tapToHide: 'Tap to hide',
     prayed: 'Prayed',
+    minimalNote: 'Tiles are hidden in Minimal view — tap below to show them.',
+    showAllTiles: 'Show all tiles',
   },
   hi: {
     todayTimes: 'Aaj ke namaz ke time',
     tapToSee: 'Saare time dekhne ke liye dabao',
     tapToHide: 'Chhupane ke liye dabao',
     prayed: 'Padh li',
+    minimalNote: 'Minimal view mein tiles chhupe hain — dikhane ke liye neeche dabao.',
+    showAllTiles: 'Saare buttons dikhao',
   },
 };
 
@@ -93,6 +104,16 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
   const [minimal, setMinimal] = useState(false);
   /** The day's times in Minimal mode start collapsed; tap to expand. */
   const [timesOpen, setTimesOpen] = useState(false);
+
+  /** Leave the Minimal view from inside it: turn the preference OFF
+      (persisted, so it stays off on the next visit) and show the
+      full tile view immediately. Without this, a user who switched
+      Minimal on in Profile → Settings has no way back from Home —
+      the tiles look "vanished" with no exit in sight. */
+  const exitMinimal = useCallback(() => {
+    setMinimal(false);
+    void saveMinimal(uid, false);
+  }, [uid]);
 
   const load = useCallback(() => {
     let active = true;
@@ -199,7 +220,7 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
       ? `${summaryParts.join(' · ')} ${s.homeTodayDetail}`
       : s.homeEmpty;
 
-  // The teal header is shared by both layouts: salam, greeting,
+  // The green header is shared by both layouts: salam, greeting,
   // date + Hijri date, and the live next-prayer card with countdown.
   // Extracted once so the Minimal branch below reuses the exact
   // same header instead of duplicating it.
@@ -239,7 +260,9 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
   );
 
   // Minimal today view: ONLY the header (next prayer + countdown)
-  // and the day's prayer times as an expandable section. No top
+  // and the day's prayer times as an expandable section, plus the
+  // exit: a note explaining why the tiles are hidden and a button
+  // that turns Minimal off and restores the full tile view. No top
   // bar, no tiles grid, no "Aaj ek nazar me" card, no study or
   // challenge summary — all times come from the fetch above.
   if (minimal) {
@@ -288,6 +311,20 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
               : null}
           </Card>
         ) : null}
+        {/* Minimal-view exit: explains the hidden tiles and restores
+            them in one tap — the view is self-recoverable, so the
+            user can never get stuck here. */}
+        <Text style={[T.cardBody, { marginTop: 14 }, th.dark && styles.mutedDark]}>
+          {ms.minimalNote}
+        </Text>
+        <View style={{ marginTop: 10 }}>
+          <PillButton
+            label={ms.showAllTiles}
+            variant="peach"
+            block
+            onPress={exitMinimal}
+          />
+        </View>
         {error ? <Text style={T.error}>{error}</Text> : null}
       </ScrollView>
     );
@@ -295,9 +332,9 @@ export default function HomeScreen({ lang, user, goTo }: ScreenProps) {
 
   return (
     <ScrollView contentContainerStyle={L.scroll} showsVerticalScrollIndicator={false}>
-      {/* AHDORA + search bar on a WHITE bar above the teal header
-          (user request 2026-11-22): the brand sits on white, in dark
-          teal — NOT inside the green where the salam is. */}
+      {/* AHDORA + search bar on a WHITE bar above the green header
+          (user request 2026-11-22): the brand sits on white, in deep
+          green — NOT inside the green where the salam is. */}
       <View style={[styles.topBar, th.dark && styles.topBarDark]}>
         <Text style={[styles.brand, th.dark && styles.textDark]}>AHDORA</Text>
         <Pressable

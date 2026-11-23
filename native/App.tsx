@@ -440,7 +440,7 @@ const styles = StyleSheet.create({
   loadingText: { fontFamily: F.sans, marginTop: 12, fontSize: 14, color: C.muted },
   pillNav: {
     // In-flow, NOT absolute: the floating pill used to overlap the
-    // MiniPlayer (same dark teal, buttons hidden under it — user
+    // MiniPlayer (same dark navy, buttons hidden under it — user
     // report 2026-11-22). Stacked in the column — content, then
     // MiniPlayer, then the pill at the very bottom — nothing is
     // covered and every button stays visible and tappable. The

@@ -1,6 +1,6 @@
 /**
  * Login screen (preview §3) — segmented Log in / Create account tabs,
- * email + password, peach note. Logic UNCHANGED from the verified
+ * email + password, tint note. Logic UNCHANGED from the verified
  * Phase 1 flow: login() from api.ts (CSRF + manual cookie jar).
  *
  * "Password bhool gaye?" opens a real reset flow in this same screen:

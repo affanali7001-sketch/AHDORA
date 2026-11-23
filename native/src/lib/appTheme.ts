@@ -16,7 +16,7 @@
  * Mood Remedy — the screens the user opens first — plus the press
  * animations gate in the shared ui components. Other screens still
  * render the light theme until they are migrated; the light theme
- * colors (Ice White / Deep Teal / Soft Peach) are unchanged.
+ * colors (Mihrab cream / green, see src/lib/theme.ts) are unchanged.
  */
 import { useSyncExternalStore } from 'react';
 import { Appearance } from 'react-native';
@@ -25,17 +25,19 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export type ThemePref = 'light' | 'system' | 'dark';
 export type ResolvedTheme = 'light' | 'dark';
 
-/** Dark palette — deep teal family, same layout, no gold. */
+/** Dark palette — Mihrab dark navy (sampled 11-34-04-76 dark Home +
+ * 11-33-42-51 Tilawah player): navy bg/cards, cream text, light-blue
+ * accent. Same layout, no gold. */
 export const DARK = {
-  bg: '#06231F',
-  card: '#0B3D34',
-  border: '#155E4E',
-  text: '#F4F8F6',
-  muted: '#A7C3B6',
-  accent: '#6FC7A8',
-  chip: '#0E4A3E',
-  peachBg: '#FBD9BE',
-  peachText: '#8A4416',
+  bg: '#1D2441',
+  card: '#0F1630',
+  border: '#232C49',
+  text: '#FAF7F2',
+  muted: '#949AB3',
+  accent: '#87A5D9',
+  chip: '#232C49',
+  peachBg: '#E2EEEA',
+  peachText: '#1F5E49',
 } as const;
 
 type ThemeState = {

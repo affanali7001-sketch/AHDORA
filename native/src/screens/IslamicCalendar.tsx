@@ -24,7 +24,7 @@
  *
  * Any date, any year, any month (user request 2026-11-22): tap the
  * month header to jump straight to a year + month (phone-calendar
- * style), or step with Prev/Next. Today is dark teal, Juma has a
+ * style), or step with Prev/Next. Today is deep green, Juma has a
  * peach border, days with a special day get a peach dot, and the
  * month's special days are listed below the grid with Urdu +
  * English names.

@@ -4,7 +4,7 @@
  * Hijri month + peach tag showing the Gregorian range it spans,
  * Hinglish weekday headers, and a grid where the HIJRI day is big
  * and the Gregorian date ("Nov 21") is small. Juma (Friday) cells
- * have a peach border/background; today’s cell is dark teal.
+ * have a tint border/background; today’s cell is deep green.
  *
  * Big days (user request 2026-11-22): a dark hero card at the top
  * shows the NEXT big day — Ramadan, Eid-ul-Fitr, Eid-ul-Adha

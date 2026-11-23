@@ -43,7 +43,7 @@ import type { ScreenProps } from '../lib/nav';
 import { takeQuranPageTarget, takeQuranSurahTarget } from '../lib/navTarget';
 import { stringsFor, type AppLanguage } from '../lib/strings';
 import { C, F, L, S, T } from '../lib/theme';
-import { useAppTheme } from '../lib/appTheme';
+import { DARK, useAppTheme } from '../lib/appTheme';
 import { Chip, Field, Input, PillButton, Switch, TealHead } from '../components/ui';
 import TilawahPlayer from '../components/TilawahPlayer';
 import {
@@ -92,13 +92,15 @@ const TOTAL_PAGES = 604;
 const TAJWEED_TOGGLE_KEY = 'ahdora:quran:tajweed:on';
 const BISMILLAH = 'بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ';
 const ALQURAN_BASE = 'https://api.alquran.cloud/v1';
-/* Preview-mandated mushaf colours (preview §11, .mushaf / .mushaf-text /
- * .ayah.playing) — the only hex values outside the foundation tokens. */
-const MUSHAF_BG = '#FFFDF6';
-const MUSHAF_INK = '#1C1A15';
-const MUSHAF_BG_DARK = '#0A2E28';
-const MUSHAF_INK_DARK = '#F2EFE6';
-const PLAYING_BG = '#FFF4E6';
+/* Mihrab mushaf colours (sampled 11-33-31-61 + 11-33-40-59): white
+ * page, near-black ink, dark-navy dark page, cream dark ink, pale
+ * green tint for the playing ayah — the only hex values outside
+ * the foundation tokens. */
+const MUSHAF_BG = '#FFFFFF';
+const MUSHAF_INK = '#191814';
+const MUSHAF_BG_DARK = '#0F1630';
+const MUSHAF_INK_DARK = '#FAF7F2';
+const PLAYING_BG = '#E2EEEA';
 
 /** Render tajweed segments as coloured spans (plain ink for rule null). */
 function TajweedSpans({ segments, dark }: { segments: TajweedSegment[]; dark: boolean }) {
@@ -1157,7 +1159,7 @@ export default function QuranBookScreen({
           <View style={[styles.mushaf, th.dark && styles.mushafDark]}>
             <View style={[styles.mushafInner, th.dark && styles.mushafInnerDark]}>
               <View style={styles.stripe} />
-              <Text style={[styles.pageNo, th.dark && { color: '#A7C3B6' }]}>
+              <Text style={[styles.pageNo, th.dark && { color: DARK.muted }]}>
                 — {page} —
               </Text>
               {segments.map((seg) => {
@@ -1185,7 +1187,7 @@ export default function QuranBookScreen({
                             ۞ {seg.surah.name} ۞
                           </Text>
                           <Text
-                            style={[styles.surahBandMeta, th.dark && { color: '#A7C3B6' }]}
+                            style={[styles.surahBandMeta, th.dark && { color: DARK.muted }]}
                           >
                             Surah {seg.surah.number} · {seg.surah.englishName} ·{' '}
                             {seg.surah.numberOfAyahs} {s.aayatWord} ·{' '}
@@ -1221,7 +1223,7 @@ export default function QuranBookScreen({
                               playing
                                 ? {
                                     backgroundColor: th.dark
-                                      ? 'rgba(251,217,190,0.22)'
+                                      ? 'rgba(135,165,217,0.25)'
                                       : PLAYING_BG,
                                   }
                                 : undefined
@@ -1244,13 +1246,13 @@ export default function QuranBookScreen({
               })}
               <View style={styles.stripe} />
               <View style={styles.mushafFoot}>
-                <Text style={[styles.footText, th.dark && { color: '#A7C3B6' }]}>
+                <Text style={[styles.footText, th.dark && { color: DARK.muted }]}>
                   PARA {firstAyah?.juz ?? ''}
                 </Text>
-                <Text style={[styles.footText, th.dark && { color: '#A7C3B6' }]}>
+                <Text style={[styles.footText, th.dark && { color: DARK.muted }]}>
                   SURAH {firstSeg?.surah.englishName.toUpperCase() ?? ''}
                 </Text>
-                <Text style={[styles.footText, th.dark && { color: '#A7C3B6' }]}>
+                <Text style={[styles.footText, th.dark && { color: DARK.muted }]}>
                   PAGE {page}
                 </Text>
               </View>
@@ -1588,9 +1590,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     backgroundColor: MUSHAF_BG,
   },
-  /* RN has no repeating-linear-gradient: a translucent teal bar is
+  /* RN has no repeating-linear-gradient: a translucent green bar is
    * the closest honest stand-in for the preview's stripe rows. */
-  stripe: { height: 7, backgroundColor: 'rgba(11,74,65,0.16)', borderRadius: 3 },
+  stripe: { height: 7, backgroundColor: 'rgba(31,94,73,0.16)', borderRadius: 3 },
   pageNo: {
     fontFamily: F.sans,
     fontSize: 12.5,
@@ -1645,10 +1647,10 @@ const styles = StyleSheet.create({
     backgroundColor: C.teal100,
     borderRadius: 13,
   },
-  markerDark: { color: '#A7C3B6', backgroundColor: 'rgba(255,255,255,0.12)' },
-  mushafDark: { backgroundColor: MUSHAF_BG_DARK, borderColor: '#155E4E' },
-  mushafInnerDark: { backgroundColor: MUSHAF_BG_DARK, borderColor: '#155E4E' },
-  surahBandDark: { backgroundColor: '#0E4A3E', borderColor: '#155E4E' },
+  markerDark: { color: DARK.muted, backgroundColor: 'rgba(255,255,255,0.12)' },
+  mushafDark: { backgroundColor: MUSHAF_BG_DARK, borderColor: DARK.border },
+  mushafInnerDark: { backgroundColor: MUSHAF_BG_DARK, borderColor: DARK.border },
+  surahBandDark: { backgroundColor: DARK.chip, borderColor: DARK.border },
   surahBandMeta: {
     fontFamily: F.sans,
     fontSize: 12.5,
@@ -1757,7 +1759,7 @@ const styles = StyleSheet.create({
   playBtnPeach: { backgroundColor: C.peachMid },
   playBtnTeal: { backgroundColor: C.teal700 },
   playIcon: { fontSize: 20, textAlign: 'center' },
-  playIconPeach: { color: C.peachText },
+  playIconPeach: { color: C.white },
   playIconTeal: { color: C.white },
   playerBody: { flex: 1 },
   playerTitle: { fontFamily: F.sans, fontSize: 14.5, fontWeight: '800', color: C.ink },

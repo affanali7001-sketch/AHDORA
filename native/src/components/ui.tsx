@@ -1,8 +1,9 @@
 /**
  * Shared UI primitives for the AHDORA native app.
- * Rebuilt to the approved preview spec (~/workspace/ts-spaces/ahdora-ui-preview/index.html):
- * Ice White / Deep Teal / Soft Peach, no gold. Pill buttons, chips, 52x32 switch,
- * teal-head gradient, 3-col tile grid, segmented control, status pills, progress bar, fields.
+ * Mihrab palette (see src/lib/theme.ts): cream background, deep-green
+ * headers and primary buttons, pale-green tint for soft surfaces.
+ * Pill buttons, chips, 52x32 switch, green-head gradient, 3-col tile
+ * grid, segmented control, status pills, progress bar, fields.
  */
 import type { ReactNode } from 'react';
 import {
@@ -162,7 +163,7 @@ export function Chip({
   );
 }
 
-/** 52x32 switch (preview .switch): track #CBD8D1 off / teal500 on, white 26px knob. */
+/** 52x32 switch: track switchOff grey off / teal500 (green) on, white 26px knob. */
 export function Switch({
   value,
   onValueChange,
@@ -189,7 +190,7 @@ export function Switch({
   );
 }
 
-/** Dark teal header block (preview .teal-head): 160deg teal900→teal700 gradient, radius 24. */
+/** Deep-green header block: teal900→teal700 (deep green → primary green) gradient, radius 24. */
 export function TealHead({
   children,
   style,
@@ -214,7 +215,7 @@ export function TileGrid({ children }: { children: ReactNode }) {
   return <View style={styles.tiles}>{children}</View>;
 }
 
-/** One tile (preview .tile): white card, 42px icon chip in teal100 (peach variant: peach bg). */
+/** One tile: white card, 42px icon chip in teal100 (tint); the `peach` prop (kept name) switches the chip to the tint surface. */
 export function Tile({
   label,
   icon,
@@ -226,7 +227,7 @@ export function Tile({
   icon: ReactNode;
   onPress: () => void;
   peach?: boolean;
-  /** Dark-theme variant: dark teal card, light label. */
+  /** Dark-theme variant: dark navy card, light label. */
   dark?: boolean;
 }) {
   const { animations } = useAppTheme();
@@ -250,7 +251,7 @@ export function Tile({
   );
 }
 
-/** Segmented control (preview .segmented): teal100 track, teal900 active pill. */
+/** Segmented control: teal100 (tint) track, teal900 (deep green) active pill. */
 export function SegmentedControl<T extends string>({
   options,
   value,
@@ -282,7 +283,7 @@ export function SegmentedControl<T extends string>({
 
 export type PrayerStatus = 'prayed' | 'missed' | 'qaza' | 'not-yet' | 'none';
 
-/** Status pill (preview .status-btn): prayed teal500/white, missed pink/red, qaza amber, not-yet plain. */
+/** Status pill: prayed green/white, missed pink/red, qaza amber, not-yet plain. */
 export function StatusPill({
   state,
   label,
@@ -331,7 +332,7 @@ export function StatusPill({
   );
 }
 
-/** Field label (preview .field label): 12.5px bold teal700. */
+/** Field label: 12.5px bold teal700 (primary green). */
 export function Field({
   label,
   children,
@@ -347,7 +348,7 @@ export function Field({
   );
 }
 
-/** Text input (preview .field input): radius 16, 1.5px line border, 13px/16px padding, 15px text. */
+/** Text input: radius 16, 1.5px line border, 13px/16px padding, 15px text. */
 export function Input(props: TextInputProps) {
   return (
     <TextInput
@@ -399,7 +400,7 @@ const styles = StyleSheet.create({
   btnDisabled: { opacity: 0.55 },
   btnPressed: { transform: [{ scale: 0.96 }] },
   btnTextLight: { fontFamily: F.sans, color: C.white, fontSize: 15, fontWeight: '800' },
-  btnTextPeach: { fontFamily: F.sans, color: C.peachText, fontSize: 15, fontWeight: '800' },
+  btnTextPeach: { fontFamily: F.sans, color: C.white, fontSize: 15, fontWeight: '800' },
   btnTextGhost: { fontFamily: F.sans, color: C.teal900, fontSize: 15, fontWeight: '800' },
   btnTextSmall: { fontSize: 13.5 },
   progressTrack: {

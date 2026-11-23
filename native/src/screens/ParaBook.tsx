@@ -62,11 +62,11 @@ import {
 const TOTAL_PAGES = 604;
 const BISMILLAH = 'بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ';
 const ALQURAN_BASE = 'https://api.alquran.cloud/v1';
-/* Same mushaf colours as QuranBook (preview §11) — the only hex values
- * outside the foundation tokens. */
-const MUSHAF_BG = '#FFFDF6';
-const MUSHAF_INK = '#1C1A15';
-const PLAYING_BG = '#FFF4E6';
+/* Same mushaf colours as QuranBook (Mihrab palette) — the only hex
+ * values outside the foundation tokens. */
+const MUSHAF_BG = '#FFFFFF';
+const MUSHAF_INK = '#191814';
+const PLAYING_BG = '#E2EEEA';
 
 export type JuzInfo = {
   number: number;
@@ -1214,7 +1214,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     backgroundColor: MUSHAF_BG,
   },
-  stripe: { height: 7, backgroundColor: 'rgba(11,74,65,0.16)', borderRadius: 3 },
+  stripe: { height: 7, backgroundColor: 'rgba(31,94,73,0.16)', borderRadius: 3 },
   pageNo: {
     fontFamily: F.sans,
     fontSize: 12.5,
@@ -1313,7 +1313,7 @@ const styles = StyleSheet.create({
   playBtnPeach: { backgroundColor: C.peachMid },
   playBtnTeal: { backgroundColor: C.teal700 },
   playIcon: { fontSize: 20, textAlign: 'center' },
-  playIconPeach: { color: C.peachText },
+  playIconPeach: { color: C.white },
   playIconTeal: { color: C.white },
   playerBody: { flex: 1 },
   playerTitle: { fontFamily: F.sans, fontSize: 14.5, fontWeight: '800', color: C.ink },

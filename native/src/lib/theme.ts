@@ -1,40 +1,71 @@
 /**
  * Design system for the AHDORA native app.
  *
- * Palette — EXACT preview tokens (~/workspace/ts-spaces/ahdora-ui-preview/index.html,
- * phone vars, lines 84-86). Ice White / Deep Teal / Soft Peach. NO gold anywhere.
+ * Palette — MIHRAB app UI, sampled from the Mihrab app screenshots
+ * (~/workspace/user/media_library/image/, 2026-11-23 11:33–11:34) with
+ * PIL pixel sampling — every value below traces to a screenshot:
+ * - Primary green #1F5E49 — the "Morning" pill (11-33-34-88 Duas)
+ *   and the "Unmark today" button (11-33-54-21 Fasting), both
+ *   sampled twice; the marketing green behind them is #1E5D48.
+ * - Deep green #0F4C44 — the Mihrab logo tile (11-33-31-61).
+ * - Cream background #FAF7F2 — Duas screen bg (11-33-34-88) and
+ *   Hifz screen bg (11-34-04-76), both sampled.
+ * - Pale green tint #E2EEEA — "Fast kept" card (11-33-54-21) and
+ *   the selected Translation tab (11-33-57-50), both sampled.
+ * - Ink #191814 — Fasting/Duas titles; muted grey #888682 — Duas
+ *   transliteration; bronze #847147 — "Juz" label (11-33-31-61).
+ * - Dark navy #232C49 — Tilawah player card (11-33-42-51); dark
+ *   navy bg #1D2441 + card #0F1630 + nav #161D37, light-blue accent
+ *   #87A5D9 (play button) and muted #949AB3 (nav labels), all from
+ *   the dark Home in 11-34-04-76.
+ * The old Ice White / Deep Teal / Soft Peach palette is retired:
+ * the `peach*` token names stay as aliases (screens use them) but
+ * now point at the green tint — NO gold anywhere. The dark navy
+ * Tilawah player card stays navy, as in the screenshots.
  */
 import { StyleSheet } from 'react-native';
 
 export const C = {
-  ice: '#F4F8F6',
+  // Mihrab palette (sampled — see the header comment for sources).
+  green: '#1F5E49', // primary green — headers, buttons, selected pills
+  greenDeep: '#0F4C44', // deep green — header gradient, pill nav, dark cards
+  cream: '#FAF7F2', // cream/off-white app background
+  tint: '#E2EEEA', // pale green tint — selected tabs, soft cards, hairlines
+  bronze: '#847147', // muted bronze accent — mushaf "Juz" labels
+  navy: '#232C49', // dark navy — Tilawah player card (stays navy)
+  skyBlue: '#87A5D9', // light blue — accents on the navy player / dark mode
+  mushafBg: '#FFFFFF', // mushaf page (sampled white, 11-33-31-61)
+  mushafInk: '#191814',
+  // Legacy token names — same values as above, so every screen that
+  // already uses them picks up the Mihrab palette with no edits.
+  ice: '#FAF7F2', // = cream
   white: '#FFFFFF',
-  ink: '#152420',
-  muted: '#5E7267',
-  teal950: '#06302A',
-  teal900: '#07332E',
-  teal700: '#0B4A41',
-  teal500: '#0E7A64',
-  teal100: '#DDEEE8',
-  peach: '#FBD9BE',
-  peachMid: '#F6A96B',
-  peachInk: '#8A4416',
+  ink: '#191814',
+  muted: '#888682',
+  teal950: '#0F4C44', // = greenDeep
+  teal900: '#0F4C44', // = greenDeep
+  teal700: '#1F5E49', // = green
+  teal500: '#1F5E49', // = green
+  teal100: '#E2EEEA', // = tint
+  peach: '#E2EEEA', // retired: soft peach is now the pale green tint
+  peachMid: '#1F5E49', // retired: peach accent is now the primary green
+  peachInk: '#1F5E49', // retired: dark text on tint
   red: '#C2402E',
   amber: '#B97A12',
-  line: '#E0EAE4',
+  line: '#E2EEEA', // = tint
   // Preview extras.
-  switchOff: '#CBD8D1',
-  navInactive: '#BFD8CF',
-  peachText: '#4A2405',
+  switchOff: '#9CA2AE', // sampled Mihrab toggle-off track (11-33-54-21)
+  navInactive: '#E2EEEA', // pale tint text on the deep-green header/nav
+  peachText: '#1F5E49', // = green (dark text on tint surfaces)
   missedBg: '#FADFD9',
   missedBorder: '#F0B7AA',
   qazaBg: '#FCE9C8',
   qazaBorder: '#EBCB8B',
-  // Aliases kept for screens written before the redesign — same preview values.
-  teal: '#0B4A41', // = teal700
-  teal2: '#0E7A64', // = teal500
-  peach2: '#FDEBD9', // preview peach-soft
-  peachDeep: '#8A4416', // = peachInk
+  // Aliases kept for screens written before the redesign — same values.
+  teal: '#1F5E49', // = teal700
+  teal2: '#1F5E49', // = teal500
+  peach2: '#E2EEEA', // = tint
+  peachDeep: '#1F5E49', // = peachInk
 } as const;
 
 export const S = {

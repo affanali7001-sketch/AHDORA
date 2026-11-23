@@ -39,9 +39,9 @@ import {
 } from '../lib/apiWorship';
 
 const BISMILLAH = 'بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ';
-/* Preview-mandated mushaf colours — same values as QuranBook.tsx. */
-const MUSHAF_BG = '#FFFDF6';
-const MUSHAF_INK = '#1C1A15';
+/* Mihrab mushaf colours — same values as QuranBook.tsx. */
+const MUSHAF_BG = '#FFFFFF';
+const MUSHAF_INK = '#191814';
 
 /** Screen-local labels with no global key in strings.ts. */
 const STRINGS: Record<
@@ -289,7 +289,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     backgroundColor: MUSHAF_BG,
   },
-  stripe: { height: 7, backgroundColor: 'rgba(11,74,65,0.16)', borderRadius: 3 },
+  stripe: { height: 7, backgroundColor: 'rgba(31,94,73,0.16)', borderRadius: 3 },
   pageNo: {
     fontFamily: F.sans,
     fontSize: 12.5,

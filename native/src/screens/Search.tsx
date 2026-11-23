@@ -254,7 +254,7 @@ const styles = StyleSheet.create({
   },
   avatarPeach: { backgroundColor: C.peachMid },
   avatarText: { fontFamily: 'PlusJakartaSans', fontSize: 17, fontWeight: '800', color: C.white },
-  avatarTextPeach: { color: C.peachText },
+  avatarTextPeach: { color: C.white },
   name: { fontFamily: 'PlusJakartaSans', fontSize: 14.5, fontWeight: '700', color: C.ink },
   sub: { fontFamily: 'PlusJakartaSans', fontSize: 12.5, color: C.muted, marginTop: 2 },
   rowBtns: { flexDirection: 'column', gap: 6, alignItems: 'flex-end' },

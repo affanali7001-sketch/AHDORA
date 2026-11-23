@@ -1,5 +1,5 @@
 /**
- * Onboarding (preview §4) — 8 steps, header + peach "Step X of 8" tag +
+ * Onboarding (preview §4) — 8 steps, header + tint "Step X of 8" tag +
  * 12.5%-per-step progress bar. Only the preview's fields are shown;
  * everything the server contract carries but the preview hides keeps
  * its existing defaults (emptyProfileForm / loaded profile) and is
@@ -803,7 +803,7 @@ const styles = StyleSheet.create({
   footerRow: { flexDirection: 'row', gap: 10, marginTop: 22 },
   modalWrap: {
     flex: 1,
-    backgroundColor: 'rgba(6, 48, 42, 0.55)',
+    backgroundColor: 'rgba(15, 76, 68, 0.55)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,

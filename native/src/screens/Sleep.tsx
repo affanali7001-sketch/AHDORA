@@ -1,6 +1,6 @@
 /**
  * Sleep — rebuilt to the approved preview (§18 in the preview file).
- * Dark-teal header card with the REAL schedule (from /api/profile),
+ * Deep-green header card with the REAL schedule (from /api/profile),
  * "Kal raat" card that NEVER shows the schedule as real sleep (no
  * health data is connected, so an honest empty state is shown),
  * two switches (bedtime block + 5-minute warning), and a ghost
