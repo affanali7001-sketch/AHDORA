@@ -279,9 +279,10 @@ if (isProduction) {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
     "img-src 'self' data:",
-    // Tutorial video streams from Google Drive (uc URL redirects to
-    // drive.usercontent.google.com).
-    "media-src 'self' https://drive.google.com https://drive.usercontent.google.com",
+    // Tutorial video streams from the project's own R2 bucket (inline,
+    // Content-Type video/mp4, no attachment disposition) so the <video>
+    // tag can play it. Drive URLs are kept as a fallback origin.
+    "media-src 'self' https://pub-87105ed976e049e0818b0d586ab75785.r2.dev https://drive.google.com https://drive.usercontent.google.com",
     "connect-src 'self' ws: wss:",
     "base-uri 'none'",
     "frame-ancestors 'none'",

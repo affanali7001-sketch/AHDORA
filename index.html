@@ -285,6 +285,178 @@
       .reveal.in { opacity: 1; transform: none; }
       @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; } }
     </style>
+    <style>
+      /* ============================================================
+         MOBILE-FIRST LAYER — the phone is the primary device.
+         Base rules below are written for small screens first;
+         min-width queries only enhance the layout on larger screens.
+         ============================================================ */
+
+      /* Never scroll sideways, never clip content */
+      html, body { overflow-x: hidden; max-width: 100%; }
+      body { -webkit-text-size-adjust: 100%; }
+      img, video, svg { max-width: 100%; }
+      h1, h2, h3, p, li, a, code { overflow-wrap: break-word; }
+      .wrap { padding-left: 16px; padding-right: 16px; }
+      @media (min-width: 640px) { .wrap { padding-left: 24px; padding-right: 24px; } }
+
+      /* Comfortable reading size on phones — no pinch-zoom needed */
+      body { font-size: 16px; }
+      section { padding: 56px 0; }
+      @media (min-width: 768px) { section { padding: 84px 0; } }
+      .sec-head { margin-bottom: 30px; }
+      @media (min-width: 768px) { .sec-head { margin-bottom: 44px; } }
+      .sec-head h2 { font-size: clamp(1.8rem, 6.4vw, 2.7rem); line-height: 1.15; }
+      .sec-head p { font-size: 1rem; line-height: 1.65; }
+
+      /* On phones, content is always visible — no scroll-reveal
+         hiding sections if the observer is slow or JS is blocked */
+      @media (max-width: 900px) {
+        .reveal { opacity: 1; transform: none; transition: none; }
+      }
+
+      /* ---------- Nav: thumb-first on phones ---------- */
+      .nav-in { flex-wrap: wrap; row-gap: 10px; padding-top: 10px; padding-bottom: 12px; min-height: 0; }
+      .brand { font-size: 1.2rem; min-height: 44px; }
+      .brand img { width: 36px; height: 36px; }
+      /* Language switcher gets its own full-width row on phones,
+         each half a big, easy tap target */
+      .lang-switch { order: 3; flex: 1 1 100%; margin-left: 0; display: flex; padding: 4px; }
+      .lang-switch button { flex: 1 1 50%; min-height: 48px; padding: 12px 10px; font-size: .98rem; }
+      .nav-links { margin-left: auto; }
+      .nav-links a:not(.nav-cta) { display: none; }
+      .nav-links a.nav-cta { margin-left: 0; min-height: 48px; padding: 12px 20px; font-size: 1rem; border-radius: 12px; display: inline-flex; align-items: center; }
+      @media (min-width: 768px) {
+        .nav-in { flex-wrap: nowrap; row-gap: 0; padding-top: 0; padding-bottom: 0; min-height: 64px; }
+        .brand { font-size: 1.3rem; }
+        .brand img { width: 38px; height: 38px; }
+        .lang-switch { order: 0; flex: none; margin-left: auto; display: inline-flex; padding: 3px; }
+        .lang-switch button { flex: none; min-height: 38px; padding: 8px 16px; font-size: .88rem; }
+        .nav-links { margin-left: 0; }
+        .nav-links a:not(.nav-cta) { display: inline-flex; }
+        .nav-links a.nav-cta { margin-left: 8px; min-height: 40px; padding: 10px 12px; font-size: .95rem; border-radius: 10px; }
+      }
+
+      /* ---------- Hero: single column, stacked, big CTAs ---------- */
+      .hero-grid { grid-template-columns: 1fr; gap: 36px; padding: 34px 0 52px; }
+      .hero h1 { font-size: clamp(2.9rem, 14.5vw, 4rem); margin: 18px 0 8px; }
+      .hero .tagline { font-size: clamp(1.32rem, 5.6vw, 1.6rem); line-height: 1.3; max-width: none; }
+      .hero .sub { font-size: 1rem; line-height: 1.65; margin-top: 14px; max-width: none; }
+      .hero-badge { font-size: .88rem; padding: 8px 14px; max-width: 100%; }
+      .cta-row { flex-direction: column; flex-wrap: nowrap; gap: 12px; margin-top: 26px; }
+      .btn { min-height: 58px; padding: 14px 20px; font-size: 1.02rem; border-radius: 14px; }
+      .cta-row .btn { width: 100%; }
+      .hero-note { font-size: .95rem; align-items: flex-start; line-height: 1.55; margin-top: 14px; }
+      .meaning { margin-top: 32px; padding-top: 22px; }
+      .meaning-grid { grid-template-columns: repeat(2, 1fr); gap: 12px 16px; }
+      .meaning-item span { font-size: .97rem; line-height: 1.35; }
+      .phone { width: min(292px, 86vw); }
+      .phone-stage::before { width: 260px; height: 260px; }
+      .phone-caption { font-size: .92rem; line-height: 1.55; padding: 0 6px; }
+      @media (min-width: 560px) {
+        .cta-row { flex-direction: row; flex-wrap: wrap; }
+        .cta-row .btn { width: auto; }
+      }
+      @media (min-width: 900px) {
+        .hero-grid { grid-template-columns: 1.05fr 0.95fr; gap: 48px; padding: 72px 0 84px; }
+        .hero h1 { font-size: clamp(3.4rem, 9vw, 5.6rem); margin: 22px 0 6px; }
+        .hero .tagline { font-size: clamp(1.35rem, 3.4vw, 1.9rem); max-width: 30ch; }
+        .hero .sub { font-size: 1.05rem; max-width: 52ch; margin-top: 16px; }
+        .cta-row { margin-top: 30px; }
+        .btn { min-height: 52px; }
+        .meaning { margin-top: 40px; padding-top: 24px; }
+        .meaning-grid { grid-template-columns: repeat(3, 1fr); gap: 10px 18px; }
+        .phone { width: min(320px, 86vw); }
+        .phone-stage::before { width: 340px; height: 340px; }
+      }
+
+      /* ---------- Video: always fits the phone screen ---------- */
+      .video-frame { width: 100%; max-width: 100%; border-radius: 14px; }
+      .video-frame video { width: 100%; height: 100%; object-fit: contain; }
+      .video-points { flex-direction: column; flex-wrap: nowrap; gap: 8px; margin-top: 22px; }
+      .video-points li { width: 100%; padding: 11px 14px; font-size: .96rem; line-height: 1.5; border-radius: 14px; align-items: flex-start; }
+      .video-points svg { margin-top: 3px; }
+      @media (min-width: 640px) {
+        .video-points { flex-direction: row; flex-wrap: wrap; margin-top: 28px; }
+        .video-points li { width: auto; padding: 8px 14px; font-size: .9rem; border-radius: 999px; align-items: center; }
+        .video-points svg { margin-top: 0; }
+      }
+      @media (min-width: 900px) { .video-frame { max-width: 920px; border-radius: 18px; } }
+
+      /* ---------- Features: one per row on phones ---------- */
+      .feat-grid { grid-template-columns: 1fr; gap: 14px; }
+      .feat { padding: 22px 20px; }
+      .feat p { font-size: .97rem; line-height: 1.65; }
+      .feat h3 { font-size: 1.15rem; }
+      @media (min-width: 640px) { .feat-grid { grid-template-columns: repeat(2, 1fr); gap: 16px; } .feat { padding: 24px 22px; } }
+      @media (min-width: 1024px) { .feat-grid { grid-template-columns: repeat(4, 1fr); } }
+
+      /* ---------- Quran section ---------- */
+      .quran-grid { grid-template-columns: 1fr; gap: 36px; }
+      .mushaf { max-width: 100%; padding: 10px; }
+      .mushaf-inner { padding: 18px 14px 14px; }
+      .mushaf .ayah { font-size: 1.4rem; }
+      .quran-points b { font-size: 1.05rem; }
+      .quran-points span { font-size: .97rem; line-height: 1.6; }
+      @media (min-width: 900px) {
+        .quran-grid { grid-template-columns: 1fr 1fr; gap: 52px; }
+        .mushaf { max-width: 430px; padding: 14px; }
+        .mushaf-inner { padding: 22px 20px 16px; }
+        .mushaf .ayah { font-size: 1.55rem; }
+      }
+
+      /* ---------- Download: stacked cards, full-width buttons ---------- */
+      .dl-grid { grid-template-columns: 1fr; gap: 16px; }
+      .dl-card { padding: 26px 22px; border-radius: 20px; }
+      .dl-card h3 { font-size: 1.5rem; }
+      .dl-card p { font-size: 1rem; line-height: 1.65; max-width: none; }
+      .dl-card .btn { width: 100%; justify-content: center; margin-top: 20px; }
+      /* Repo address + Copy stack vertically so the long URL
+         never pushes the button off a narrow screen */
+      .repo-box { flex-direction: column; align-items: stretch; gap: 12px; padding: 14px; }
+      .repo-box code { font-size: .85rem; overflow-wrap: anywhere; }
+      .copy-btn { width: 100%; min-height: 52px; padding: 13px 16px; font-size: 1rem; border-radius: 11px; }
+      .soon-badge { margin-top: 20px; padding: 11px 18px; font-size: .85rem; }
+      .dl-note { font-size: .97rem; line-height: 1.65; max-width: none; }
+      .dl-steps { grid-template-columns: 1fr; gap: 20px; margin-top: 30px; }
+      .step span { font-size: .95rem; line-height: 1.6; }
+      .step b { font-size: 1rem; }
+      @media (min-width: 640px) {
+        .repo-box { flex-direction: row; align-items: center; padding: 12px 12px 12px 14px; }
+        .copy-btn { width: auto; min-height: 44px; padding: 10px 18px; font-size: .9rem; }
+        .dl-card .btn { width: auto; justify-content: flex-start; }
+      }
+      @media (min-width: 768px) { .dl-steps { grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 34px; } }
+      @media (min-width: 1024px) {
+        .dl-grid { grid-template-columns: repeat(3, 1fr); gap: 18px; }
+        .dl-card { padding: 34px 30px; border-radius: 24px; }
+        .dl-card h3 { font-size: 1.6rem; }
+        .dl-card p { max-width: 42ch; }
+        .dl-card .btn { width: auto; }
+      }
+
+      /* ---------- FAQ: big tap rows on phones ---------- */
+      .faq-list { max-width: 100%; }
+      details.faq summary { min-height: 60px; padding: 16px; font-size: 1rem; line-height: 1.45; }
+      details.faq .faq-body { padding: 0 16px 18px; font-size: 1rem; line-height: 1.65; }
+      @media (min-width: 768px) {
+        .faq-list { max-width: 780px; }
+        details.faq summary { padding: 18px 20px; min-height: 56px; font-size: 1.02rem; }
+        details.faq .faq-body { padding: 0 20px 20px; font-size: .97rem; }
+      }
+
+      /* ---------- Footer: stacked, tappable links ---------- */
+      footer { padding: 44px 0 30px; }
+      .foot-grid { grid-template-columns: 1fr; gap: 30px; }
+      footer ul a { min-height: 44px; display: inline-flex; align-items: center; padding: 8px 0; font-size: .97rem; }
+      .foot-mail { min-height: 48px; font-size: 1rem; overflow-wrap: anywhere; }
+      .foot-bottom { font-size: .88rem; line-height: 1.6; }
+      @media (min-width: 768px) {
+        footer { padding: 56px 0 34px; }
+        .foot-grid { grid-template-columns: 1.4fr 1fr 1fr; gap: 36px; }
+        footer ul a { min-height: 32px; padding: 6px 0; font-size: .93rem; }
+      }
+    </style>
   </head>
   <body>
 
@@ -395,7 +567,7 @@
           <p data-i18n="videoP">12.6 minute ki is Hinglish video me sab kuch step by step dikhaya gaya hai — download se lekar har ek permission tak. Pehle ye video dekh lein, phir install karein, koi confusion nahi rahega.</p>
         </div>
         <div class="video-frame reveal">
-          <video controls preload="metadata" playsinline src="https://drive.google.com/uc?export=download&id=12O3U3LmH8EdBiQ-S4K8_jVXkx4UMPG2w" title="AHDORA tutorial video — download aur permissions guide (Hinglish)"></video>
+          <video controls preload="metadata" playsinline src="https://pub-87105ed976e049e0818b0d586ab75785.r2.dev/ahdora-tutorial.mp4" title="AHDORA tutorial video — download aur permissions guide (Hinglish)"></video>
         </div>
         <ul class="video-points reveal">
           <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span data-i18n="vp1">App download karne ka poora tareeqa</span></li>
