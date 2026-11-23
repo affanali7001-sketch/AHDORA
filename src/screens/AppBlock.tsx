@@ -202,6 +202,12 @@ export default function AppBlockScreen({ lang, goTo }: ScreenProps) {
   const lockedPrayer = useMemo(() => currentPrayerLock(config, now), [config, now]);
   const sleepIn = useMemo(() => minutesUntilSleep(config, now), [config, now]);
   const sleepWarning = sleepIn !== null && sleepIn > 0 && sleepIn <= 5;
+  /** A Focus session is running right now (and its end is still ahead). */
+  const studyActiveNow = useMemo(() => {
+    if (!config.study_active || !config.study_end) return false;
+    const end = new Date(config.study_end).getTime();
+    return Number.isFinite(end) && end > now.getTime();
+  }, [config.study_active, config.study_end, now]);
 
   const blockedSet = useMemo(() => new Set(config.blocked_packages), [config.blocked_packages]);
 
@@ -397,7 +403,15 @@ export default function AppBlockScreen({ lang, goTo }: ScreenProps) {
                 value={config.prayer_block_enabled}
                 onValueChange={(v) => {
                   setSavedMsg(null);
-                  setConfig((c) => ({ ...c, prayer_block_enabled: v }));
+                  setConfig((c) => ({
+                    ...c,
+                    prayer_block_enabled: v,
+                    // Turning a sub-block on must also turn the
+                    // master on — otherwise the toggle silently does
+                    // nothing (the service only enforces when the
+                    // master is on).
+                    blocking_enabled: v ? true : c.blocking_enabled,
+                  }));
                 }}
               />
             </View>
@@ -426,7 +440,11 @@ export default function AppBlockScreen({ lang, goTo }: ScreenProps) {
                 value={config.sleep_block_enabled}
                 onValueChange={(v) => {
                   setSavedMsg(null);
-                  setConfig((c) => ({ ...c, sleep_block_enabled: v }));
+                  setConfig((c) => ({
+                    ...c,
+                    sleep_block_enabled: v,
+                    blocking_enabled: v ? true : c.blocking_enabled,
+                  }));
                 }}
               />
             </View>
@@ -451,6 +469,32 @@ export default function AppBlockScreen({ lang, goTo }: ScreenProps) {
                 }}
               />
             </View>
+          </Card>
+
+          <SectionTitle title={s.abStudyTitle} />
+          <Card>
+            <Text style={T.cardBody}>{s.abStudySub}</Text>
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleText}>
+                <Text style={styles.toggleLabel}>
+                  {config.study_block_enabled ? s.abStudyOn : s.abStudyOff}
+                </Text>
+              </View>
+              <Switch
+                value={config.study_block_enabled}
+                onValueChange={(v) => {
+                  setSavedMsg(null);
+                  setConfig((c) => ({
+                    ...c,
+                    study_block_enabled: v,
+                    blocking_enabled: v ? true : c.blocking_enabled,
+                  }));
+                }}
+              />
+            </View>
+            {studyActiveNow ? (
+              <Text style={[T.cardBody, { marginTop: 10 }]}>{s.abStudyActive}</Text>
+            ) : null}
           </Card>
 
           <SectionTitle
