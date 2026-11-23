@@ -1,0 +1,1 @@
+Batch 4 fixes: Urdu tarjuma now plays directly from the player card with a Tarjuma pill and Auto-play toggle; player card is more compact; tilawat audio keeps playing in the background with lock-screen controls; uninstall protection now guides you through Android's restricted-settings step.

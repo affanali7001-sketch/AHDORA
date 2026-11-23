@@ -1,0 +1,17 @@
+AHDORA is an Islamic lifestyle and productivity app that brings Salah, Quran, study, focus, sleep and challenges together in one place.
+
+Salah: live prayer times by city, prayer tracker with Qaza support, monthly calendar and reminders.
+
+Quran: the full Quran as a real mushaf book (604 pages, Uthmani script), continuous tilawat audio with Urdu tarjuma, and a daily reading log.
+
+Study: subjects, tasks, daily planner and a real Pomodoro timer.
+
+Focus and sleep: focus sessions, sleep schedule and reminders.
+
+Challenges: 30-day and 365-day challenges with friends, points and badges.
+
+Friends: connect with friends only when both sides accept — never automatic.
+
+Hijri calendar: Hijri and Gregorian dates, Ramadan, Eid and other big days with countdowns, plus a mosque finder.
+
+Every action is saved to your own account and works across devices. No fake data, no fake statistics — only your real activity.
