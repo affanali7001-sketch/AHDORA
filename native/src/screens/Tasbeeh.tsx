@@ -36,6 +36,30 @@
  * still rise above the line box, and the count is single-line
  * with adjustsFontSizeToFit so 3–6 digit counts shrink instead of
  * running into the bead column.
+ *
+ * 2026-11-23 (Run #48) — the overlap CAME BACK on the phone even
+ * though this file already had the reserved blocks: the English
+ * name painted across the big count, and the "Target complete"
+ * card painted over the target pills. Measured off the user's
+ * screenshot (1080x2376): the count's glyphs start ~75dp ABOVE
+ * where the label block ends, and the card sits ~55dp into the
+ * pills row. Root cause: the counter was `flex: 1` with its
+ * content `justifyContent: 'center'` — whenever the counter's
+ * content (count + out-of + status + total + Reset + completion
+ * card) grew taller than the flex space left over (large font
+ * scale, a completed session adding the card), Yoga centred the
+ * overflow and it painted equally UP over the dhikr name and
+ * DOWN over the pills. React Native does not clip overflow, so
+ * "reserved blocks" were never a guarantee. The fix is
+ * structural, not another margin: the whole screen is now a
+ * vertical ScrollView in plain document flow (tall content
+ * scrolls instead of overlapping), the counter has a fixed
+ * min-height and NO flex: 1 (it can never be squeezed), the
+ * completion card lives OUTSIDE the counter as its own block
+ * (it can never touch the pills), the count is smaller (88pt),
+ * and the chips row has a pinned height so it cannot stretch
+ * into a gap. Overlap is impossible by construction now, at any
+ * font scale and any count.
  */
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -212,7 +236,12 @@ export default function TasbeehScreen({ lang, user, goTo, goBack }: ScreenProps)
   const dhikr = DHIKRS[dhikrIndex];
 
   return (
-    <View style={styles.root}>
+    <ScrollView
+      style={styles.root}
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+    >
       <StatusBar style="light" />
 
       {/* Header: title + Design button. */}
@@ -229,7 +258,12 @@ export default function TasbeehScreen({ lang, user, goTo, goBack }: ScreenProps)
       </View>
 
       {/* Dhikr picker — horizontal chips, same 6 dhikr as before. */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.chipRow}
+        style={styles.chipScroll}
+      >
         {DHIKRS.map((d, i) => (
           <Pressable
             key={d.name}
@@ -256,7 +290,11 @@ export default function TasbeehScreen({ lang, user, goTo, goBack }: ScreenProps)
         <Text style={styles.dhikrName}>{dhikr.display}</Text>
       </View>
 
-      {/* Counter area — the whole area is the tap target. */}
+      {/* Counter area — the whole area is the tap target. It has a
+          fixed min-height and NO flex: 1: it can never be squeezed
+          by the rows around it, so its content can never overflow
+          up over the dhikr name. Tall content just makes the
+          screen scroll (outer ScrollView) instead of overlapping. */}
       <Pressable
         onPress={() => void handleTap()}
         style={styles.counter}
@@ -289,30 +327,6 @@ export default function TasbeehScreen({ lang, user, goTo, goBack }: ScreenProps)
           >
             <Text style={styles.resetText}>{s.tasReset}</Text>
           </Pressable>
-
-          {complete && !continued ? (
-            <View style={styles.completeBox}>
-              <Text style={styles.completeText}>{s.tasComplete}</Text>
-              <View style={styles.completeRow}>
-                <Pressable
-                  onPress={() => setContinued(true)}
-                  style={styles.continueBtn}
-                  accessibilityRole="button"
-                  accessibilityLabel={s.tasContinue}
-                >
-                  <Text style={styles.continueBtnText}>{s.tasContinue}</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => void handleReset()}
-                  style={styles.completeResetBtn}
-                  accessibilityRole="button"
-                  accessibilityLabel={s.tasReset}
-                >
-                  <Text style={styles.completeResetText}>{s.tasReset}</Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : null}
         </View>
 
         {/* Bead string — a real misbaha: beads on a thread, lit as you count. */}
@@ -333,6 +347,37 @@ export default function TasbeehScreen({ lang, user, goTo, goBack }: ScreenProps)
           </View>
         </View>
       </Pressable>
+
+      {/* Completion card — its OWN block below the counter, never
+          inside it: it used to grow the counter's content until the
+          counter overflowed down over the target pills (and the
+          pills painted across the card). As a sibling it can only
+          push the pills further down, never share pixels with them.
+          It is also no longer nested inside the tap Pressable, so
+          tapping "Keep counting" cannot also count a tap. */}
+      {complete && !continued ? (
+        <View style={styles.completeBox}>
+          <Text style={styles.completeText}>{s.tasComplete}</Text>
+          <View style={styles.completeRow}>
+            <Pressable
+              onPress={() => setContinued(true)}
+              style={styles.continueBtn}
+              accessibilityRole="button"
+              accessibilityLabel={s.tasContinue}
+            >
+              <Text style={styles.continueBtnText}>{s.tasContinue}</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => void handleReset()}
+              style={styles.completeResetBtn}
+              accessibilityRole="button"
+              accessibilityLabel={s.tasReset}
+            >
+              <Text style={styles.completeResetText}>{s.tasReset}</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
 
       {/* Target picker — presets + custom number. It sits BELOW the
           count now, so it can never crowd the dhikr text above. */}
@@ -371,7 +416,7 @@ export default function TasbeehScreen({ lang, user, goTo, goBack }: ScreenProps)
       >
         <Text style={styles.exitText}>{s.tasExit}</Text>
       </Pressable>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -380,6 +425,9 @@ const GREEN = '#1F5E49';
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000000' },
+  /** Plain document flow: blocks stack, tall content scrolls —
+      nothing can ever be squeezed into overlapping its neighbour. */
+  scrollContent: { paddingBottom: 24 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -397,6 +445,10 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   designBtnText: { fontFamily: F.sans, fontSize: 13, fontWeight: '700', color: '#FFFFFF' },
+  /** Pinned height: the chips are ~46dp tall; without this the
+      horizontal ScrollView measured far taller on the phone and
+      left a ~120dp black gap under the header (Run #48). */
+  chipScroll: { height: 52, flexGrow: 0 },
   chipRow: { paddingHorizontal: 16, paddingVertical: 6, gap: 8, alignItems: 'center' },
   chip: {
     backgroundColor: '#161616',
@@ -430,7 +482,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
   },
-  counter: { flex: 1, flexDirection: 'row', paddingHorizontal: 20, paddingTop: 8 },
+  counter: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    // NO flex: 1 — the counter keeps a fixed min-height and grows
+    // with its content instead of being squeezed by the rows
+    // around it (the squeeze + centred content was the overlap).
+    minHeight: 280,
+  },
   countCol: { flex: 1, justifyContent: 'center', paddingRight: 8 },
   /**
    * The dhikr label's own reserved block, directly below the dhikr
@@ -466,9 +526,11 @@ const styles = StyleSheet.create({
   },
   count: {
     fontFamily: F.sans,
-    fontSize: 110,
+    // 88pt (was 110): still huge, but leaves real headroom at
+    // enlarged font scales instead of running into the label above.
+    fontSize: 88,
     fontWeight: '200',
-    lineHeight: 122,
+    lineHeight: 100,
     color: '#FFFFFF',
   },
   outOf: { fontFamily: F.sans, fontSize: 18, color: '#888888', marginTop: 2 },
@@ -483,7 +545,11 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
   },
   completeBox: {
-    marginTop: 18,
+    // A sibling block now (not inside the counter): full width
+    // with side margins, its own space above the target pills.
+    marginTop: 8,
+    marginBottom: 4,
+    marginHorizontal: 20,
     borderWidth: 1.5,
     borderColor: GREEN,
     borderRadius: 16,
