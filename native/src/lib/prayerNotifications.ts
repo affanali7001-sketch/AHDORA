@@ -41,12 +41,25 @@
  * so no warning could ever arrive. refreshSleepWarnings() below
  * schedules the real thing: a notification at the sleep time itself
  * and, when the 5-minute warning is on, one 5 minutes before it —
- * for today and tomorrow, from the real sleep schedule. The same
- * best-effort limit as prayer alerts applies (Android 12+ may shift
- * a non-exact alarm by a few minutes; this code does not request
- * SCHEDULE_EXACT_ALARM). Sleep warnings have their own id list, so
- * cancelling prayer alerts never cancels sleep warnings or vice
- * versa.
+ * for today and tomorrow, from the real sleep schedule.
+ *
+ * REAL-TIME DELIVERY (fixed 2026-11-23, batch 2 problem 3): the
+ * warnings used to be scheduled with the default 'bestEffort'
+ * delivery (AlarmManager.setExactAndAllowWhileIdle). On OnePlus /
+ * ColorOS, Doze + battery optimization defers those alarms
+ * indefinitely while the app is closed — the warning only arrived
+ * when the user woke the device and opened the app ("sirf check
+ * krta hu to aata hai"). Both warnings now use delivery:
+ * 'alarmClock' (AlarmManager.setAlarmClock), which the system
+ * delivers at the requested time and never defers for battery
+ * optimization. That needs the SCHEDULE_EXACT_ALARM permission
+ * (declared in app.json; Android 14+ grants it only after the
+ * user allows it in Settings — the Sleep screen shows the real
+ * state and opens that page). Without the permission expo falls
+ * back to 'bestEffort', so the Sleep screen says so honestly
+ * instead of pretending the warning is exact. Sleep warnings have
+ * their own id list, so cancelling prayer alerts never cancels
+ * sleep warnings or vice versa.
  *
  * Every function here never throws: failures resolve to a safe
  * default (false / 'undetermined' / 0 scheduled) so a notification
@@ -620,6 +633,10 @@ export async function refreshSleepWarnings(
               type: Notifications.SchedulableTriggerInputTypes.DATE,
               date: at,
               channelId: SLEEP_CHANNEL_ID,
+              // Alarm-clock delivery: fires at the exact time even
+              // in Doze / battery optimization (see header). Without
+              // SCHEDULE_EXACT_ALARM this falls back to bestEffort.
+              delivery: 'alarmClock',
             },
           });
           ids.push(id);
@@ -644,6 +661,7 @@ export async function refreshSleepWarnings(
                 type: Notifications.SchedulableTriggerInputTypes.DATE,
                 date: early,
                 channelId: SLEEP_CHANNEL_ID,
+                delivery: 'alarmClock',
               },
             });
             ids.push(id);

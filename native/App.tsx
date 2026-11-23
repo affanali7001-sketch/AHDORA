@@ -38,6 +38,7 @@ import { Amiri_400Regular, Amiri_700Bold } from '@expo-google-fonts/amiri';
 import { logout, restoreSession, setOnUnauthorized, type AuthUser } from './src/lib/api';
 import { loadProfileWithCompletion } from './src/lib/apiCore';
 import { refreshPrayerNotifications, refreshSleepWarningsFromStorage } from './src/lib/prayerNotifications';
+import { syncScheduleFromServer, syncStudyBlockFromServer } from './src/lib/appBlock';
 import { DARK, initAppTheme, useAppTheme } from './src/lib/appTheme';
 import { PILL_NAV, type ScreenId, type ScreenProps } from './src/lib/nav';
 import { stringsFor, type AppLanguage } from './src/lib/strings';
@@ -181,6 +182,16 @@ export default function App() {
           // Re-schedule sleep warnings too (same fire-and-forget;
           // no-ops when no sleep time is set or permission missing).
           void refreshSleepWarningsFromStorage();
+          // Push today's + tomorrow's prayer times and the sleep
+          // window into the native blocker, so prayer/sleep
+          // blocking works even if the user never opens App Block
+          // (before this, the service only learned the schedule
+          // when those screens were opened).
+          void syncScheduleFromServer();
+          // Mirror the active Focus session into the native blocker
+          // (study blocking) — covers the app being reopened
+          // mid-session and sessions that ended while closed.
+          void syncStudyBlockFromServer();
         }
         setRestoringSession(false);
       })

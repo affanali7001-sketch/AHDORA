@@ -34,6 +34,9 @@ import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -52,9 +55,62 @@ class AhdoraAdmin : Module() {
       dpm.isAdminActive(admin)
     }
 
-    Function("openDeviceAdminSettings") {
-      val context = appContext.reactContext ?: return@Function null
+    /**
+     * Opens Android's own device-admin activation screen for the
+     * receiver and reports what actually happened — the old version
+     * was a fire-and-forget Function that returned nothing, so when
+     * the screen failed to open (receiver missing from the build,
+     * intent rejected) the toggle just sat there and the Profile
+     * screen "refreshed" with nothing to show for it. Returns
+     * { opened: true } when the system screen was launched,
+     * { opened: false, error: 'receiver-missing' } when the
+     * receiver is not in this build, { opened: false, error:
+     * 'start-failed' } when Android refused the intent, and
+     * { opened: false, error: 'unavailable' } with no React
+     * context. The JS side shows the matching honest message and
+     * offers the Security-settings fallback instead of a dead
+     * toggle. If the admin is already active, the same screen shows
+     * Deactivate — that is how protection is switched off.
+     */
+    AsyncFunction("openDeviceAdminSettings") {
+      val context = appContext.reactContext
+        ?: return@AsyncFunction mapOf<String, Any>("opened" to false, "error" to "unavailable")
+      val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
       val admin = ComponentName(context, context.packageName + RECEIVER_CLASS_SUFFIX)
+      // Already active: the system screen opens on Deactivate.
+      val alreadyActive = try {
+        dpm?.isAdminActive(admin) == true
+      } catch (_: Exception) {
+        false
+      }
+      if (!alreadyActive) {
+        // Is the receiver actually in this build? If the config
+        // plugin never declared it, ACTION_ADD_DEVICE_ADMIN has
+        // nothing to activate and startActivity throws — check
+        // first so the failure is reported, not swallowed.
+        val receiverExists = try {
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.packageManager.getReceiverInfo(
+              admin,
+              PackageManager.ComponentInfoFlags.of(0),
+            )
+          } else {
+            @Suppress("DEPRECATION")
+            context.packageManager.getReceiverInfo(admin, 0)
+          }
+          true
+        } catch (_: PackageManager.NameNotFoundException) {
+          false
+        } catch (_: Exception) {
+          false
+        }
+        if (!receiverExists) {
+          return@AsyncFunction mapOf<String, Any>(
+            "opened" to false,
+            "error" to "receiver-missing",
+          )
+        }
+      }
       val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
         putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
         putExtra(
@@ -63,8 +119,31 @@ class AhdoraAdmin : Module() {
         )
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
       }
-      (context as? Activity)?.startActivity(intent) ?: context.startActivity(intent)
-      null
+      return@AsyncFunction try {
+        (context as? Activity)?.startActivity(intent) ?: context.startActivity(intent)
+        mapOf<String, Any>("opened" to true)
+      } catch (_: Exception) {
+        mapOf<String, Any>("opened" to false, "error" to "start-failed")
+      }
+    }
+
+    /**
+     * Fallback when the activation screen cannot be opened: the
+     * system Security settings page, where "Device admin apps"
+     * lists AHDORA and the admin can be switched on by hand.
+     * Returns true only when the page was actually launched.
+     */
+    AsyncFunction("openSecuritySettings") {
+      val context = appContext.reactContext ?: return@AsyncFunction false
+      val intent = Intent(Settings.ACTION_SECURITY_SETTINGS).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      try {
+        (context as? Activity)?.startActivity(intent) ?: context.startActivity(intent)
+        true
+      } catch (_: Exception) {
+        false
+      }
     }
   }
 }

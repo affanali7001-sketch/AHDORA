@@ -202,6 +202,12 @@ export default function AppBlockScreen({ lang, goTo }: ScreenProps) {
   const lockedPrayer = useMemo(() => currentPrayerLock(config, now), [config, now]);
   const sleepIn = useMemo(() => minutesUntilSleep(config, now), [config, now]);
   const sleepWarning = sleepIn !== null && sleepIn > 0 && sleepIn <= 5;
+  /** A Focus session is running right now (and its end is still ahead). */
+  const studyActiveNow = useMemo(() => {
+    if (!config.study_active || !config.study_end) return false;
+    const end = new Date(config.study_end).getTime();
+    return Number.isFinite(end) && end > now.getTime();
+  }, [config.study_active, config.study_end, now]);
 
   const blockedSet = useMemo(() => new Set(config.blocked_packages), [config.blocked_packages]);
 
@@ -225,6 +231,22 @@ export default function AppBlockScreen({ lang, goTo }: ScreenProps) {
       else set.add(pkg);
       return { ...c, blocked_packages: [...set] };
     });
+  }
+
+  /** Select every installed app at once (the list already excludes
+      AHDORA itself and calls / emergency, so selecting all is
+      safe) — the user asked not to tap every app one by one. */
+  function selectAllApps() {
+    setSavedMsg(null);
+    setConfig((c) => ({
+      ...c,
+      blocked_packages: apps.map((a) => a.packageName),
+    }));
+  }
+
+  function deselectAllApps() {
+    setSavedMsg(null);
+    setConfig((c) => ({ ...c, blocked_packages: [] }));
   }
 
   async function onSave() {
@@ -381,7 +403,15 @@ export default function AppBlockScreen({ lang, goTo }: ScreenProps) {
                 value={config.prayer_block_enabled}
                 onValueChange={(v) => {
                   setSavedMsg(null);
-                  setConfig((c) => ({ ...c, prayer_block_enabled: v }));
+                  setConfig((c) => ({
+                    ...c,
+                    prayer_block_enabled: v,
+                    // Turning a sub-block on must also turn the
+                    // master on — otherwise the toggle silently does
+                    // nothing (the service only enforces when the
+                    // master is on).
+                    blocking_enabled: v ? true : c.blocking_enabled,
+                  }));
                 }}
               />
             </View>
@@ -410,7 +440,11 @@ export default function AppBlockScreen({ lang, goTo }: ScreenProps) {
                 value={config.sleep_block_enabled}
                 onValueChange={(v) => {
                   setSavedMsg(null);
-                  setConfig((c) => ({ ...c, sleep_block_enabled: v }));
+                  setConfig((c) => ({
+                    ...c,
+                    sleep_block_enabled: v,
+                    blocking_enabled: v ? true : c.blocking_enabled,
+                  }));
                 }}
               />
             </View>
@@ -437,11 +471,53 @@ export default function AppBlockScreen({ lang, goTo }: ScreenProps) {
             </View>
           </Card>
 
+          <SectionTitle title={s.abStudyTitle} />
+          <Card>
+            <Text style={T.cardBody}>{s.abStudySub}</Text>
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleText}>
+                <Text style={styles.toggleLabel}>
+                  {config.study_block_enabled ? s.abStudyOn : s.abStudyOff}
+                </Text>
+              </View>
+              <Switch
+                value={config.study_block_enabled}
+                onValueChange={(v) => {
+                  setSavedMsg(null);
+                  setConfig((c) => ({
+                    ...c,
+                    study_block_enabled: v,
+                    blocking_enabled: v ? true : c.blocking_enabled,
+                  }));
+                }}
+              />
+            </View>
+            {studyActiveNow ? (
+              <Text style={[T.cardBody, { marginTop: 10 }]}>{s.abStudyActive}</Text>
+            ) : null}
+          </Card>
+
           <SectionTitle
             title={`${s.abPickTitle} (${config.blocked_packages.length})`}
           />
           <Card>
             <Text style={T.cardBody}>{s.abPickSub}</Text>
+            <View style={styles.pickActions}>
+              <PillButton
+                label={s.abSelectAll}
+                small
+                variant="ghost"
+                onPress={selectAllApps}
+                disabled={apps.length === 0}
+              />
+              <PillButton
+                label={s.abDeselectAll}
+                small
+                variant="ghost"
+                onPress={deselectAllApps}
+                disabled={config.blocked_packages.length === 0}
+              />
+            </View>
             <TextInput
               value={query}
               onChangeText={setQuery}
@@ -517,6 +593,7 @@ const styles = StyleSheet.create({
   toggleLabel: { fontSize: 15, fontWeight: '800', color: C.ink },
   toggleSub: { fontSize: 13, color: C.muted, lineHeight: 18, marginTop: 2 },
   miniLabel: { fontSize: 12, fontWeight: '800', letterSpacing: 1, color: C.muted, marginTop: 14 },
+  pickActions: { flexDirection: 'row', gap: 8, marginTop: 12 },
   timeRow: { fontSize: 15, color: C.ink, marginTop: 6, fontWeight: '600' },
   search: {
     backgroundColor: C.ice,

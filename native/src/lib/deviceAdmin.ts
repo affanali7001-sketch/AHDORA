@@ -28,7 +28,17 @@ import { requireNativeModule } from 'expo';
 
 type AhdoraAdminNativeModule = {
   isAdminActive: () => Promise<boolean>;
-  openDeviceAdminSettings: () => void;
+  /**
+   * Opens Android's own device-admin activation screen and reports
+   * what actually happened: { opened: true } when the system screen
+   * launched, { opened: false, error } when it could not be opened
+   * ('receiver-missing' | 'start-failed' | 'unavailable' | 'unknown').
+   * The old fire-and-forget call returned nothing, so a failed open
+   * looked exactly like a successful one until the toggle never moved.
+   */
+  openDeviceAdminSettings: () => Promise<{ opened?: unknown; error?: unknown }>;
+  /** Opens the system Security settings page (fallback path). */
+  openSecuritySettings: () => Promise<boolean>;
 };
 
 let cachedModule: AhdoraAdminNativeModule | null | undefined;
@@ -63,18 +73,52 @@ export async function isDeviceAdminActive(): Promise<boolean> {
   }
 }
 
+export type AdminActivationResult = {
+  opened: boolean;
+  error?: 'receiver-missing' | 'start-failed' | 'unavailable' | 'unknown';
+};
+
 /**
  * Opens Android's own device-admin screen for AHDORA. If the admin
  * is not active it shows Activate; if it is active it shows
- * Deactivate. Returns false when the native module is unavailable
- * (Expo Go / iOS) — the caller shows the "needs the real APK" note.
+ * Deactivate. Returns whether the system screen actually opened
+ * (and why not, when it did not) — the caller must show that
+ * result, because a failed open otherwise looks like a tap that
+ * did nothing. Returns { opened: false, error: 'unavailable' }
+ * when the native module is missing (Expo Go / iOS) — the caller
+ * shows the "needs the real APK" note.
  */
-export function requestDeviceAdminActivation(): boolean {
+export async function requestDeviceAdminActivation(): Promise<AdminActivationResult> {
+  const m = getNativeModule();
+  if (!m) return { opened: false, error: 'unavailable' };
+  try {
+    const res = await m.openDeviceAdminSettings();
+    if (!res || typeof res !== 'object') return { opened: false, error: 'unknown' };
+    if (res.opened === true) return { opened: true };
+    const err = res.error;
+    return {
+      opened: false,
+      error:
+        err === 'receiver-missing' || err === 'start-failed' || err === 'unavailable'
+          ? err
+          : 'unknown',
+    };
+  } catch {
+    return { opened: false, error: 'unknown' };
+  }
+}
+
+/**
+ * Fallback: opens the system Security settings page, where
+ * "Device admin apps" lists AHDORA and the admin can be switched
+ * on by hand. Returns false when the native module is unavailable
+ * or the page could not be opened.
+ */
+export async function openDeviceAdminSecuritySettings(): Promise<boolean> {
   const m = getNativeModule();
   if (!m) return false;
   try {
-    m.openDeviceAdminSettings();
-    return true;
+    return (await m.openSecuritySettings()) === true;
   } catch {
     return false;
   }

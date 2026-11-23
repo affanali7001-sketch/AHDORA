@@ -30,6 +30,7 @@ import {
   studyStats,
   type PomodoroSession,
 } from '../lib/apiSocial';
+import { syncStudyBlockFromSession } from '../lib/appBlock';
 
 const PRESETS = [15, 25, 50];
 
@@ -87,6 +88,12 @@ export default function FocusScreen({ lang }: ScreenProps) {
         setRemainingMs(active.remainingMs);
         setSelectedMinutes(active.plannedMinutes);
       }
+      // Mirror the server session into the native blocker: a running
+      // session blocks the picked apps (study blocking), any other
+      // state clears it. Covers the app being reopened mid-session.
+      void syncStudyBlockFromSession(
+        active ? { status: active.status, remainingMs: active.remainingMs } : null,
+      );
       if (subjects.length > 0) {
         setSubjectName(subjects[0].name);
         setSubjectId(subjects[0].id);
@@ -128,6 +135,8 @@ export default function FocusScreen({ lang }: ScreenProps) {
         setSavedNote(s.focusSaved.replace('{n}', String(done.focusMinutesEarned)));
         setTodayFocus((prev) => (prev === null ? done.focusMinutesEarned : prev + done.focusMinutesEarned));
         setWeekSessions((prev) => (prev === null ? 1 : prev + 1));
+        // Session over — the study block lifts at once.
+        void syncStudyBlockFromSession(null);
       })
       .catch((e: unknown) => {
         setError(e instanceof Error ? e.message : s.errorGeneric);
@@ -146,6 +155,11 @@ export default function FocusScreen({ lang }: ScreenProps) {
       const created = await pomodoroStart(selectedMinutes, subjectId);
       setSession(created);
       setRemainingMs(created.remainingMs);
+      // Study blocking starts with the session.
+      void syncStudyBlockFromSession({
+        status: created.status,
+        remainingMs: created.remainingMs,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : s.errorGeneric);
     } finally {
@@ -160,6 +174,11 @@ export default function FocusScreen({ lang }: ScreenProps) {
       const updated = await pomodoroPause(session.id);
       setSession(updated);
       setRemainingMs(updated.remainingMs);
+      // Paused = not studying right now — the block lifts.
+      void syncStudyBlockFromSession({
+        status: updated.status,
+        remainingMs: updated.remainingMs,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : s.errorGeneric);
     } finally {
@@ -174,6 +193,11 @@ export default function FocusScreen({ lang }: ScreenProps) {
       const updated = await pomodoroResume(session.id);
       setSession(updated);
       setRemainingMs(updated.remainingMs);
+      // Back to studying — the block resumes.
+      void syncStudyBlockFromSession({
+        status: updated.status,
+        remainingMs: updated.remainingMs,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : s.errorGeneric);
     } finally {
@@ -194,6 +218,8 @@ export default function FocusScreen({ lang }: ScreenProps) {
       setSession(null);
       setRemainingMs(selectedMinutes * 60_000);
       setSavedNote('');
+      // Session abandoned — the study block lifts at once.
+      void syncStudyBlockFromSession(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : s.errorGeneric);
     } finally {

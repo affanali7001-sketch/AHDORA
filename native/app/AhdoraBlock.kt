@@ -141,6 +141,47 @@ class AhdoraBlock : Module() {
         ?: ""
     }
 
+    /**
+     * Exact alarms (sleep warnings) — can the app schedule them?
+     * Android 12+ needs SCHEDULE_EXACT_ALARM (declared in app.json)
+     * for 'alarmClock' delivery; on Android 14+ a fresh install
+     * does NOT have it until the user allows it in Settings
+     * ("Alarms & reminders"). Below Android 12 there is no such
+     * permission, so this is always true. False here means the
+     * sleep warnings fall back to best-effort delivery and may
+     * arrive late or never while the phone sleeps — the Sleep
+     * screen shows that honestly and offers the settings page.
+     */
+    AsyncFunction("canScheduleExactAlarms") {
+      val context = appContext.reactContext ?: return@AsyncFunction false
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return@AsyncFunction true
+      val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager
+        ?: return@AsyncFunction false
+      alarmManager.canScheduleExactAlarms()
+    }
+
+    /**
+     * Opens the system "Alarms & reminders" page for AHDORA, where
+     * the user allows exact alarms (Android 12+). Below Android 12
+     * there is no such page, so the app details page opens instead.
+     */
+    Function("openExactAlarmSettings") {
+      val context = appContext.reactContext ?: return@Function null
+      val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+          data = android.net.Uri.parse("package:${context.packageName}")
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+      } else {
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+          data = android.net.Uri.parse("package:${context.packageName}")
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+      }
+      (context as? Activity)?.startActivity(intent) ?: context.startActivity(intent)
+      null
+    }
+
     AsyncFunction("setConfig") { json: String ->
       val context = appContext.reactContext ?: return@AsyncFunction false
       context.getSharedPreferences("ahdora_block", Context.MODE_PRIVATE)

@@ -35,6 +35,11 @@ import java.util.Locale
  *    prayer as prayed for today and removes the overlay.
  *  - SLEEP: during the sleep window, only the user-picked blocked apps
  *    are blocked (YouTube is exempt only if the user allowed it).
+ *  - STUDY: while a Focus (Pomodoro) session is running, only the
+ *    user-picked blocked apps are blocked; the block lifts itself
+ *    when the session's end time passes, even if the app is closed.
+ *
+ * Precedence when windows overlap: prayer, then study, then sleep.
  *
  * Never blocked (calls / emergency / the app itself / Settings):
  * the dialer, emergency, System UI, Settings, and AHDORA itself.
@@ -50,10 +55,16 @@ class AhdoraBlockService : AccessibilityService() {
     const val KEY_BLOCKING_ENABLED = "blocking_enabled"
     const val KEY_PRAYER_BLOCK_ENABLED = "prayer_block_enabled"
     const val KEY_SLEEP_BLOCK_ENABLED = "sleep_block_enabled"
+    const val KEY_STUDY_BLOCK_ENABLED = "study_block_enabled"
+    const val KEY_STUDY_ACTIVE = "study_active"
+    const val KEY_STUDY_END = "study_end"
     const val KEY_BLOCKED_PACKAGES = "blocked_packages"
     const val KEY_YOUTUBE_ALLOWED = "youtube_allowed"
     const val KEY_PRAYER_TIMES = "prayer_times"
     const val KEY_PRAYER_NAMES = "prayer_names"
+    const val KEY_PRAYER_DATE = "prayer_date"
+    const val KEY_PRAYER_TIMES_TOMORROW = "prayer_times_tomorrow"
+    const val KEY_PRAYER_NAMES_TOMORROW = "prayer_names_tomorrow"
     const val KEY_PRAYER_GRACE_MIN = "prayer_grace_min"
     const val KEY_SLEEP_START = "sleep_start"
     const val KEY_SLEEP_END = "sleep_end"
@@ -81,19 +92,61 @@ class AhdoraBlockService : AccessibilityService() {
 
   private var windowManager: WindowManager? = null
   private var overlayView: View? = null
-  private var overlayMode: String? = null // "prayer" or "sleep"
+  private var overlayMode: String? = null // "prayer", "sleep" or "study"
   private var overlayPrayerName: String? = null
+  /**
+   * Uptime (ms) when the overlay was last added. Adding the overlay
+   * itself fires a TYPE_WINDOW_STATE_CHANGED event for OUR OWN
+   * package (com.ahdora.app) — and removing it fires another one
+   * when the blocked app regains focus. Without a guard, evaluate()
+   * sees our own package (always allowed) and tears the overlay
+   * down, the blocked app fires again, and the overlay is rebuilt
+   * — a visible flicker/glitch loop on every blocked app, exactly
+   * what the user reported on WhatsApp at sleep time. Events from
+   * our own package within GRACE_MS of showing the overlay are the
+   * overlay's own echo and are ignored; a genuine switch to AHDORA
+   * after that still removes it (see onAccessibilityEvent).
+   */
+  private var overlayShownAt: Long = 0L
+  private val overlayGraceMs: Long = 5000L
   /** Last foreground package seen, for the periodic re-check below. */
   private var lastPkg: String? = null
   private val handler = Handler(Looper.getMainLooper())
+  /**
+   * Re-evaluate the block the moment the schedule changes. Every
+   * schedule save (Sleep screen, App Block screen, Onboarding,
+   * startup sync) rewrites the single "config" blob in the same
+   * SharedPreferences the service reads — this listener fires on
+   * that write and re-evaluates the last foreground app on the
+   * main thread at once. Before it, a changed schedule only took
+   * effect on the next window-change event or the periodic
+   * re-check, so a block the user had just edited away stayed
+   * stuck on. (Listener callbacks can arrive on the writer's
+   * thread, so the evaluate is posted to the main handler —
+   * WindowManager calls must be on the main thread.)
+   */
+  private val configListener =
+    SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+      if (key == "config") {
+        handler.post {
+          try {
+            lastPkg?.let { evaluate(it) }
+          } catch (_: Exception) {
+            // Never crash the service on a re-check failure.
+          }
+        }
+      }
+    }
   /**
    * Accessibility events only fire when the foreground window CHANGES.
    * Without this, blocking would never start if the user is already
    * inside a blocked app when the sleep window (or a prayer lock)
    * begins, and a sleep overlay would never lift when the window
    * ends while the app is still in front. Re-evaluate the last
-   * foreground package every minute so time-based windows are
-   * enforced and released even with no window change.
+   * foreground package every 30 seconds so time-based windows are
+   * enforced and released even with no window change. (30s, not
+   * 60s: a block that should have lifted — window ended, schedule
+   * changed — must not linger a full minute.)
    */
   private val recheckRunnable = object : Runnable {
     override fun run() {
@@ -102,14 +155,15 @@ class AhdoraBlockService : AccessibilityService() {
       } catch (_: Exception) {
         // Never crash the service on a re-check failure.
       }
-      handler.postDelayed(this, 60_000L)
+      handler.postDelayed(this, 30_000L)
     }
   }
 
   override fun onServiceConnected() {
     super.onServiceConnected()
     windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-    handler.postDelayed(recheckRunnable, 60_000L)
+    prefs().registerOnSharedPreferenceChangeListener(configListener)
+    handler.postDelayed(recheckRunnable, 30_000L)
   }
 
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -117,6 +171,17 @@ class AhdoraBlockService : AccessibilityService() {
     if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
     val pkg = event.packageName?.toString() ?: return
     lastPkg = pkg
+    // Our own package: when the overlay is showing, an event from
+    // com.ahdora.app within a few seconds of the overlay appearing
+    // is the overlay's own echo (see overlayShownAt) — evaluating
+    // it would tear the overlay down and start the flicker loop.
+    // After the grace window, a genuine switch to AHDORA still
+    // evaluates normally and lifts the overlay.
+    if (pkg == PKG_AHDORA && overlayView != null &&
+      android.os.SystemClock.uptimeMillis() - overlayShownAt < overlayGraceMs
+    ) {
+      return
+    }
     try {
       evaluate(pkg)
     } catch (_: Exception) {
@@ -130,6 +195,11 @@ class AhdoraBlockService : AccessibilityService() {
 
   override fun onDestroy() {
     handler.removeCallbacks(recheckRunnable)
+    try {
+      prefs().unregisterOnSharedPreferenceChangeListener(configListener)
+    } catch (_: Exception) {
+      // Already unregistered.
+    }
     removeOverlay()
     super.onDestroy()
   }
@@ -208,6 +278,16 @@ class AhdoraBlockService : AccessibilityService() {
       showOverlay("prayer", prayer)
       return
     }
+    // Study block: blocks only the user-picked packages, while a
+    // Focus session is running.
+    if (isStudyWindow(cfg, now)) {
+      val blocked = configStringList(cfg, KEY_BLOCKED_PACKAGES).toSet()
+      val youtubeAllowed = configBool(cfg, KEY_YOUTUBE_ALLOWED, false)
+      if (blocked.contains(pkg) && !(youtubeAllowed && pkg == PKG_YOUTUBE)) {
+        showOverlay("study", null)
+        return
+      }
+    }
     // Sleep block: blocks only the user-picked packages.
     if (isSleepWindow(cfg, now) && configBool(cfg, KEY_SLEEP_BLOCK_ENABLED, false)) {
       val blocked = configStringList(cfg, KEY_BLOCKED_PACKAGES).toSet()
@@ -224,15 +304,35 @@ class AhdoraBlockService : AccessibilityService() {
    * Returns the prayer name whose lock window covers [now], or null.
    * A prayer locks from its time until time + grace minutes, unless the
    * user already confirmed that prayer today.
+   *
+   * Which day's times: the config carries today's list (with the
+   * date it belongs to) plus tomorrow's list. Before this, only
+   * one day's list existed, so after midnight the service kept
+   * enforcing YESTERDAY's times until the app was opened and
+   * re-synced — prayer blocking silently used the wrong day.
    */
   private fun currentPrayerLock(cfg: JSONObject, now: Calendar): String? {
     if (!configBool(cfg, KEY_PRAYER_BLOCK_ENABLED, false)) return null
-    val times = configStringList(cfg, KEY_PRAYER_TIMES)
-    val names = configStringList(cfg, KEY_PRAYER_NAMES)
+    val today = dateKey(now)
+    val syncDate = configString(cfg, KEY_PRAYER_DATE)
+    val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+    val times: List<String>
+    val names: List<String>
+    when (syncDate) {
+      today -> {
+        times = configStringList(cfg, KEY_PRAYER_TIMES)
+        names = configStringList(cfg, KEY_PRAYER_NAMES)
+      }
+      dateKey(yesterday) -> {
+        // Synced yesterday: today's times are the "tomorrow" list.
+        times = configStringList(cfg, KEY_PRAYER_TIMES_TOMORROW)
+        names = configStringList(cfg, KEY_PRAYER_NAMES_TOMORROW)
+      }
+      else -> return null // No dated list — never guess from a stale one.
+    }
     if (times.isEmpty()) return null
     val grace = configInt(cfg, KEY_PRAYER_GRACE_MIN, DEFAULT_GRACE_MIN)
     val prayed = configPrayed(cfg)
-    val today = dateKey(now)
     for (i in times.indices) {
       val name = names.getOrNull(i) ?: "Namaz"
       if (prayed[name] == today) continue
@@ -241,6 +341,28 @@ class AhdoraBlockService : AccessibilityService() {
       if (!now.before(start) && now.before(end)) return name
     }
     return null
+  }
+
+  /**
+   * True while a Focus (Pomodoro) study session is running: the
+   * setting is on, the JS side marked a session active, and its
+   * wall-clock end is still in the future. The end check is the
+   * self-heal — if the app was closed when the session ended (or
+   * the JS side never cleared it), the block still lifts on its
+   * own instead of blocking forever.
+   */
+  private fun isStudyWindow(cfg: JSONObject, now: Calendar): Boolean {
+    if (!configBool(cfg, KEY_STUDY_BLOCK_ENABLED, false)) return false
+    if (!configBool(cfg, KEY_STUDY_ACTIVE, false)) return false
+    val endStr = configString(cfg, KEY_STUDY_END) ?: return false
+    val endMs = try {
+      SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+        timeZone = java.util.TimeZone.getTimeZone("UTC")
+      }.parse(endStr)?.time
+    } catch (_: Exception) {
+      null
+    } ?: return false
+    return now.timeInMillis < endMs
   }
 
   /** True when [now] falls inside the sleep window (handles overnight). */
@@ -310,17 +432,21 @@ class AhdoraBlockService : AccessibilityService() {
       setPadding(48, 48, 48, 48)
     }
     val title = TextView(ctx).apply {
-      text = if (mode == "prayer") "Namaz ka time" else "Sone ka time"
+      text = when (mode) {
+        "prayer" -> "Namaz ka time"
+        "study" -> "Padhai ka time"
+        else -> "Sone ka time"
+      }
       setTextColor(Color.WHITE)
       setTextSize(TypedValue.COMPLEX_UNIT_SP, 28f)
       typeface = Typeface.DEFAULT_BOLD
       gravity = Gravity.CENTER
     }
     val body = TextView(ctx).apply {
-      text = if (mode == "prayer") {
-        "Saare apps band hain jab tak aap namaz na padh lein."
-      } else {
-        "Sone ka time hai. Ye apps ab band hain — subah uthne par khulenge."
+      text = when (mode) {
+        "prayer" -> "Saare apps band hain jab tak aap namaz na padh lein."
+        "study" -> "Focus session chal rahi hai — ye apps ab band hain. Session khatam hote hi khul jayenge."
+        else -> "Sone ka time hai. Ye apps ab band hain — subah uthne par khulenge."
       }
       setTextColor(Color.parseColor("#B8CFCB"))
       setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
@@ -353,7 +479,11 @@ class AhdoraBlockService : AccessibilityService() {
       root.addView(hint)
     } else {
       val hint = TextView(ctx).apply {
-        text = "Calls aur emergency hamesha khule rehte hain."
+        text = if (mode == "study") {
+          "AHDORA kholo aur session khatam karo — block hat jayega."
+        } else {
+          "Calls aur emergency hamesha khule rehte hain."
+        }
         setTextColor(Color.parseColor("#B8CFCB"))
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
         gravity = Gravity.CENTER
@@ -367,7 +497,19 @@ class AhdoraBlockService : AccessibilityService() {
         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
       else
         @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_SYSTEM_ALERT,
-      WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+      // Sleep and study have no button, so the overlay never takes
+      // input focus: without this, showing it steals focus from the
+      // blocked app and the focus change fires another window event
+      // — more churn for the flicker loop above. The overlay still
+      // eats every touch (it is a full-screen view), so the app
+      // behind stays unusable. Prayer keeps focus so its "prayed"
+      // button can be tapped.
+      if (mode != "prayer") {
+        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+          WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+      } else {
+        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+      },
       android.graphics.PixelFormat.TRANSLUCENT
     )
     try {
@@ -375,11 +517,13 @@ class AhdoraBlockService : AccessibilityService() {
       overlayView = root
       overlayMode = mode
       overlayPrayerName = prayerName
+      overlayShownAt = android.os.SystemClock.uptimeMillis()
     } catch (_: Exception) {
       // Overlay permission missing or WindowManager rejected it; skip.
       overlayView = null
       overlayMode = null
       overlayPrayerName = null
+      overlayShownAt = 0L
     }
   }
 
@@ -393,5 +537,6 @@ class AhdoraBlockService : AccessibilityService() {
     overlayView = null
     overlayMode = null
     overlayPrayerName = null
+    overlayShownAt = 0L
   }
 }

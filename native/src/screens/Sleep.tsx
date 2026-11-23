@@ -23,7 +23,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
 import { stringsFor } from '../lib/strings';
 import { C, L, T } from '../lib/theme';
@@ -31,8 +31,10 @@ import { Card, PillButton, Switch, TealHead } from '../components/ui';
 import { getProfile } from '../lib/apiSocial';
 import { formatTime12h } from '../lib/apiCore';
 import {
+  canScheduleExactAlarms,
   isAppBlockAvailable,
   loadAppBlockConfig,
+  openExactAlarmSettings,
   saveAppBlockConfig,
   syncScheduleFromServer,
 } from '../lib/appBlock';
@@ -89,6 +91,10 @@ export default function SleepScreen({ lang, goTo }: ScreenProps) {
   const [warnFirst, setWarnFirst] = useState(true);
   const [permStatus, setPermStatus] = useState<PermissionStatus>('undetermined');
   const [warnState, setWarnState] = useState<SleepWarningState | null>(null);
+  // Exact-alarm permission (Android 12+): the sleep warnings are
+  // scheduled with 'alarmClock' delivery, which needs it. null =
+  // unknown (Expo Go / iOS / check failed) — the card is hidden.
+  const [exactAlarm, setExactAlarm] = useState<boolean | null>(null);
   const [syncMsg, setSyncMsg] = useState('');
   const [testMsg, setTestMsg] = useState('');
   const [testBusy, setTestBusy] = useState(false);
@@ -107,11 +113,12 @@ export default function SleepScreen({ lang, goTo }: ScreenProps) {
     setError('');
     setSyncMsg('');
     try {
-      const [{ profile }, blockRaw, warnRaw, perm] = await Promise.all([
+      const [{ profile }, blockRaw, warnRaw, perm, exact] = await Promise.all([
         getProfile(),
         AsyncStorage.getItem(SLEEP_BLOCK_KEY),
         AsyncStorage.getItem(SLEEP_WARN_KEY),
         getNotificationPermissionStatus(),
+        canScheduleExactAlarms(),
       ]);
       const start =
         typeof profile?.sleepStartTime === 'string'
@@ -127,6 +134,7 @@ export default function SleepScreen({ lang, goTo }: ScreenProps) {
       setBlockApps(block);
       setWarnFirst(warn);
       setPermStatus(perm);
+      setExactAlarm(exact);
       // Push the saved sleep window to the native blocker every time
       // this screen opens, so a sleep time changed in Onboarding or
       // Profile reaches the service without a visit to App Block.
@@ -142,6 +150,18 @@ export default function SleepScreen({ lang, goTo }: ScreenProps) {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  // The exact-alarm page opens in system Settings, where the user
+  // allows it and comes back. Re-check the real state and
+  // re-schedule the warnings every time the app comes back to the
+  // foreground — otherwise the screen would keep saying "off"
+  // after the user just switched it on.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void load();
+    });
+    return () => sub.remove();
   }, [load]);
 
   /** Bedtime block: save the flag AND push it into the native config. */
@@ -308,6 +328,28 @@ export default function SleepScreen({ lang, goTo }: ScreenProps) {
               />
             </View>
             {testMsg ? <Text style={styles.testMsg}>{testMsg}</Text> : null}
+            {/* Exact alarms: without this Android permission the
+                'alarmClock' warnings fall back to best-effort and
+                may never arrive while the phone sleeps — say so
+                plainly and open the exact page to allow it. */}
+            {exactAlarm === false ? (
+              <View style={{ marginTop: 14 }}>
+                <Text style={T.cardTitle}>{s.sleepExactT}</Text>
+                <Text style={[T.cardBody, { marginTop: 4 }]}>{s.sleepExactS}</Text>
+                <View style={{ marginTop: 10 }}>
+                  <PillButton
+                    label={s.sleepExactBtn}
+                    small
+                    onPress={() => {
+                      openExactAlarmSettings();
+                    }}
+                  />
+                </View>
+              </View>
+            ) : null}
+            {exactAlarm === true ? (
+              <Text style={[T.cardBody, { marginTop: 10 }]}>{s.sleepExactOn}</Text>
+            ) : null}
           </Card>
           <Text style={styles.note}>{s.sleepWarnNote}</Text>
           <Text style={styles.note}>{s.sleepPhoneNote}</Text>

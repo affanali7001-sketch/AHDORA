@@ -16,10 +16,10 @@
  * /api/auth/export, shared as a file) and account deletion (DELETE
  * /api/auth/account with password confirmation, then logout).
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { apiFetch, changePassword } from '../lib/api';
-import { isDeviceAdminActive, isDeviceAdminAvailable, requestDeviceAdminActivation } from '../lib/deviceAdmin';
+import { isDeviceAdminActive, isDeviceAdminAvailable, openDeviceAdminSecuritySettings, requestDeviceAdminActivation } from '../lib/deviceAdmin';
 import type { ScreenProps } from '../lib/nav';
 import { stringsFor, type AppLanguage } from '../lib/strings';
 import { loadMinimal, saveMinimal } from '../lib/minimal';
@@ -97,6 +97,16 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
   // False in Expo Go / on iOS, where the native admin module does
   // not exist — the switch is then disabled and the note says so.
   const [adminAvailable, setAdminAvailable] = useState(false);
+  // Set when the system activation screen could not be opened at
+  // all — the switch then shows this honest error + a retry and a
+  // Security-settings fallback, instead of silently doing nothing.
+  const [adminError, setAdminError] = useState<string | null>(null);
+  const [adminBusy, setAdminBusy] = useState(false);
+  /** True after the first load finished — later reloads (e.g. coming
+      back from the system activation screen) must NOT flash the whole
+      screen to a spinner: that flash is exactly what the user saw as
+      "sirf refresh ho raha hai" when the toggle did nothing. */
+  const loadedOnce = useRef(false);
   const [minimal, setMinimal] = useState(false);
   // Live notification-permission state for the Notifications row:
   // when permission is missing the row says so honestly, so the
@@ -118,8 +128,13 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
   const [exportNote, setExportNote] = useState('');
 
   const load = useCallback(async () => {
-    setLoading(true);
-    setError('');
+    // Only the FIRST load shows the full-screen spinner; later
+    // reloads update the rows silently (see loadedOnce above).
+    const first = !loadedOnce.current;
+    if (first) {
+      setLoading(true);
+      setError('');
+    }
     try {
       const [prof, rw, adminActive, minimalStored, permDetail] = await Promise.all([
         getProfile(),
@@ -140,9 +155,12 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
       setMinimal(minimalStored);
       setNotifPermOff(permDetail.status !== 'granted');
     } catch (e) {
-      setError(e instanceof Error ? e.message : s.errorGeneric);
+      if (first) setError(e instanceof Error ? e.message : s.errorGeneric);
     } finally {
-      setLoading(false);
+      if (first) {
+        loadedOnce.current = true;
+        setLoading(false);
+      }
     }
   }, [s.errorGeneric, uid]);
 
@@ -165,14 +183,46 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
    * The switch shows the REAL native state and never flips itself:
    * tapping it opens Android's own device-admin screen, where the
    * user taps Activate (or Deactivate when it is already on).
-   * Android never lets an app activate an admin silently. The switch
-   * updates when the app comes back (see the AppState listener).
-   * Turning OFF also goes through that system screen on purpose —
-   * a one-tap off inside the app would make the protection
-   * meaningless. In Expo Go the module is missing and this is a no-op.
+   * Android never lets an app activate an admin silently. The
+   * switch updates when the app comes back (see the AppState
+   * listener). Turning OFF also goes through that system screen on
+   * purpose — a one-tap off inside the app would make the
+   * protection meaningless. In Expo Go the module is missing and
+   * this is a no-op.
+   *
+   * 2026-11-23 fix: the old call was fire-and-forget and returned
+   * nothing, so when the system screen failed to open the toggle
+   * just sat there while load() flashed the screen — "sirf refresh
+   * ho raha hai". Now the native call reports whether the screen
+   * actually opened; on failure the error + retry + Security
+   * settings fallback are shown below the switch instead of a
+   * dead toggle.
    */
-  function toggleUninstall() {
-    requestDeviceAdminActivation();
+  async function toggleUninstall() {
+    if (adminBusy) return;
+    setAdminBusy(true);
+    setAdminError(null);
+    try {
+      const res = await requestDeviceAdminActivation();
+      if (!res.opened) {
+        setAdminError(
+          res.error === 'receiver-missing' ? s.pfUninstallNoReceiver : s.pfUninstallFailed,
+        );
+        return;
+      }
+      // The system screen opened; the AppState listener re-reads
+      // the real state when the user comes back. Re-check once
+      // more after a short delay in case the return was fast.
+      setTimeout(() => {
+        void load();
+      }, 1200);
+    } finally {
+      setAdminBusy(false);
+    }
+  }
+
+  async function openAdminSecuritySettings() {
+    await openDeviceAdminSecuritySettings();
   }
 
   async function toggleMinimal(value: boolean) {
@@ -305,8 +355,8 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
               </View>
               <Switch
                 value={uninstall}
-                disabled={!adminAvailable}
-                onValueChange={() => toggleUninstall()}
+                disabled={!adminAvailable || adminBusy}
+                onValueChange={() => void toggleUninstall()}
               />
             </View>
             <Text
@@ -321,6 +371,25 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
                   : s.pfUninstallOff
                 : s.pfUninstallNeedApk}
             </Text>
+            {adminError ? (
+              <View>
+                <Text style={[T.error, { marginTop: 8 }]}>{adminError}</Text>
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                  <PillButton
+                    label={s.pfUninstallRetry}
+                    small
+                    onPress={() => void toggleUninstall()}
+                    disabled={adminBusy}
+                  />
+                  <PillButton
+                    label={s.pfUninstallOpenSecurity}
+                    small
+                    variant="ghost"
+                    onPress={() => void openAdminSecuritySettings()}
+                  />
+                </View>
+              </View>
+            ) : null}
             <Text style={[styles.honestNote, th.dark && styles.mutedDark]}>{s.pfUninstallNote}</Text>
             <View style={[styles.row, th.dark && styles.rowDark]}>
               <View style={styles.rowText}>

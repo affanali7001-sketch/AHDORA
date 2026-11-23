@@ -40,6 +40,7 @@ import {
   type PrayerName,
   type ProfileForm,
 } from '../lib/apiCore';
+import { syncScheduleFromServer } from '../lib/appBlock';
 
 const ORDINALS = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th'];
 
@@ -245,6 +246,12 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
     setError('');
     try {
       await saveProfilePartial(form, step);
+      // A changed sleep/prayer time reaches the native blocker
+      // right away, so a block running on the old schedule lifts
+      // at once instead of lingering (see AhdoraBlockService's
+      // config listener). Fire-and-forget; a failure never blocks
+      // the save itself.
+      void syncScheduleFromServer();
       onOnboardingDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : s.errorGeneric);
@@ -259,6 +266,10 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
     setError('');
     try {
       await saveProfileComplete(form);
+      // Same immediate sync as skip() above — the saved schedule
+      // (sleep time, prayer times, Tahajjud) is what the blocker
+      // enforces, so it must follow the new values at once.
+      void syncScheduleFromServer();
       setDone(true);
       onOnboardingDone();
     } catch (e) {
