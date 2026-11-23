@@ -146,14 +146,20 @@ export const QURAN_SLEEP_TIMER_MINUTES = [5, 10, 15, 30, 60] as const;
  * Tilawat reciters, all on EveryAyah per-ayah audio — the same
  * authorized pattern as the existing Alafasy audio:
  *   https://everyayah.com/data/<folder>/<surah 3-digit><ayah 3-digit>.mp3
- * Every folder below was verified live 2026-11-23 (HEAD + a ranged
- * GET of 001001.mp3: HTTP 200/206, audio/mpeg, real MP3 bytes).
- * Folders that 404'd and were NOT included: Minshawi_Murattal_128kbps
- * (correct spelling is Minshawy), Abdurrahman_As-Sudais_192kbps
- * (correct spelling is Abdurrahmaan), MaherAlMuaiqly_64kbps (needs
- * the underscore: Maher_AlMuaiqly_64kbps), Saad_Al-Ghamdi_64kbps
- * (Ghamadi_40kbps is the working folder), AbdulBasit_Murattal_192kbps
- * (needs the underscore: Abdul_Basit_Murattal_192kbps).
+ * Every folder below was verified live (HEAD of 001001.mp3,
+ * 002286.mp3 and 114006.mp3 — all three HTTP 200, audio/mpeg —
+ * plus a ranged GET returning real MP3 bytes): the first 7 on
+ * 2026-11-23 (HEAD + a ranged GET of 001001.mp3), the next 24 on
+ * 2026-11-23 (HEAD of all three files + ranged GETs of 001001 and
+ * 002286). Folders that 404'd and were NOT included:
+ * Minshawi_Murattal_128kbps (correct spelling is Minshawy),
+ * Abdurrahman_As-Sudais_192kbps (correct spelling is Abdurrahmaan),
+ * MaherAlMuaiqly_64kbps (needs the underscore:
+ * Maher_AlMuaiqly_64kbps), Saad_Al-Ghamdi_64kbps (Ghamadi_40kbps
+ * is the working folder), AbdulBasit_Murattal_192kbps (needs the
+ * underscore: Abdul_Basit_Murattal_192kbps). The mp3quran/ and
+ * warsh/ folders were NOT included — whole-surah files, not
+ * EveryAyah per-ayah audio.
  * The Urdu tarjuma voice (Shamshad Ali Khan) is NOT in this list —
  * the picker never changes it.
  */
@@ -184,6 +190,80 @@ export const QURAN_RECITERS: QuranReciter[] = [
   },
   { id: 'Maher_AlMuaiqly_64kbps', name: 'Maher Al-Muaiqly', bitrate: '64 kbps' },
   { id: 'Ghamadi_40kbps', name: 'Saad Al-Ghamdi', bitrate: '40 kbps' },
+  // Added 2026-11-23 (Rest area) — all HEAD-verified at 001001,
+  // 002286 and 114006, plus ranged GETs with real MP3 bytes.
+  { id: 'Saood_ash-Shuraym_128kbps', name: 'Saood Ash-Shuraym', bitrate: '128 kbps' },
+  {
+    id: 'Abu_Bakr_Ash-Shaatree_128kbps',
+    name: 'Abu Bakr Al-Shatri',
+    bitrate: '128 kbps',
+  },
+  { id: 'Hani_Rifai_192kbps', name: 'Hani Ar-Rifai', bitrate: '192 kbps' },
+  {
+    id: 'Mohammad_al_Tablaway_128kbps',
+    name: 'Mohammad Al-Tablawi',
+    bitrate: '128 kbps',
+  },
+  {
+    id: 'ahmed_ibn_ali_al_ajamy_128kbps',
+    name: 'Ahmed ibn Ali Al-Ajamy',
+    bitrate: '128 kbps',
+  },
+  { id: 'Muhammad_Ayyoub_128kbps', name: 'Muhammad Ayyub', bitrate: '128 kbps' },
+  { id: 'Muhammad_Jibreel_128kbps', name: 'Muhammad Jibreel', bitrate: '128 kbps' },
+  { id: 'Yasser_Ad-Dussary_128kbps', name: 'Yasser Al-Dosari', bitrate: '128 kbps' },
+  { id: 'Hudhaify_128kbps', name: 'Ali Al-Hudhaify', bitrate: '128 kbps' },
+  { id: 'Nasser_Alqatami_128kbps', name: 'Nasser Al-Qatami', bitrate: '128 kbps' },
+  { id: 'Abdullah_Basfar_64kbps', name: 'Abdullah Basfar', bitrate: '64 kbps' },
+  { id: 'Fares_Abbad_64kbps', name: 'Fares Abbad', bitrate: '64 kbps' },
+  { id: 'Salah_Al_Budair_128kbps', name: 'Salah Al-Budair', bitrate: '128 kbps' },
+  {
+    id: 'Abdul_Basit_Murattal_64kbps',
+    name: 'Abdul Basit Abdus-Samad (Murattal 64 kbps)',
+    bitrate: '64 kbps',
+  },
+  {
+    id: 'Husary_64kbps',
+    name: 'Mahmoud Khalil Al-Husary (64 kbps)',
+    bitrate: '64 kbps',
+  },
+  { id: 'Ibrahim_Akhdar_32kbps', name: 'Ibrahim Al-Akhdar', bitrate: '32 kbps' },
+  {
+    id: 'Mahmoud_Ali_Al_Banna_32kbps',
+    name: 'Mahmoud Ali Al-Banna',
+    bitrate: '32 kbps',
+  },
+  { id: 'Ali_Jaber_64kbps', name: 'Ali Jaber', bitrate: '64 kbps' },
+  {
+    id: 'Abdullah_Matroud_128kbps',
+    name: 'Abdullah Al-Matroud',
+    bitrate: '128 kbps',
+  },
+  {
+    id: 'Muhammad_AbdulKareem_128kbps',
+    name: 'Muhammad Abdul Kareem',
+    bitrate: '128 kbps',
+  },
+  {
+    id: 'Minshawy_Mujawwad_192kbps',
+    name: 'Mohamed Siddiq El-Minshawi (Mujawwad)',
+    bitrate: '192 kbps',
+  },
+  {
+    id: 'Abdul_Basit_Mujawwad_128kbps',
+    name: 'Abdul Basit Abdus-Samad (Mujawwad)',
+    bitrate: '128 kbps',
+  },
+  {
+    id: 'Abdullaah_3awwaad_Al-Juhaynee_128kbps',
+    name: 'Abdullah Awwad Al-Juhani',
+    bitrate: '128 kbps',
+  },
+  {
+    id: 'Husary_Muallim_128kbps',
+    name: 'Mahmoud Khalil Al-Husary (Muallim — teaching)',
+    bitrate: '128 kbps',
+  },
 ];
 
 export const DEFAULT_QURAN_RECITER_ID = 'Alafasy_128kbps';

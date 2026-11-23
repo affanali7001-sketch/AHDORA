@@ -4,8 +4,10 @@
  *
  * Real data only: Uthmani Arabic from AlQuran Cloud
  * (GET /v1/page/{n}, 1–604), Urdu translation text from the
- * Junagarhi edition, English (Saheeh International) + transliteration
- * from AlQuran Cloud (verified live 2026-11-22), continuous tilawat
+ * Junagarhi edition, a second translation line the reader picks
+ * (14 editions, live from AlQuran Cloud, Saheeh International by
+ * default — see src/lib/translations.ts) + transliteration from
+ * AlQuran Cloud (verified live 2026-11-22), continuous tilawat
  * audio from EveryAyah (Mishary Rashid Alafasy) with the AlQuran
  * Cloud CDN as fallback, and Urdu tarjuma audio from Shamshad Ali
  * Khan (ur.khan, Islamic Network CDN, 64 kbps) — see
@@ -51,6 +53,14 @@ import {
   type TajweedFamilyId,
   type TajweedSegment,
 } from '../lib/tajweed';
+import {
+  DEFAULT_QURAN_TRANSLATION_ID,
+  fetchTranslationSurah,
+  loadQuranTranslation,
+  QURAN_TRANSLATIONS,
+  setQuranTranslation,
+  translationFor,
+} from '../lib/translations';
 import {
   getQuranAudioState,
   loadQuranPlaybackPrefs,
@@ -177,6 +187,10 @@ const STRINGS: Record<
     tafsirFailed: string;
     tafsirSource: (edition: string, source: string) => string;
     tafsirClose: string;
+    translationTitle: string;
+    translationNote: string;
+    translationLoading: string;
+    translationFailed: string;
   }
 > = {
   en: {
@@ -228,6 +242,11 @@ const STRINGS: Record<
     tafsirFailed: 'Tafsir could not be loaded. Check your connection and try again.',
     tafsirSource: (edition, source) => `Source: ${edition} · ${source}`,
     tafsirClose: 'Close',
+    translationTitle: 'Translation',
+    translationNote:
+      'Urdu (Junagarhi) above never changes — the tarjuma voice reads that. This picks the second translation line.',
+    translationLoading: 'Loading translation…',
+    translationFailed: 'Translation could not be loaded — the Urdu above is complete.',
   },
   hi: {
     todayRead: 'Aaj kitna padha',
@@ -277,6 +296,11 @@ const STRINGS: Record<
     tafsirFailed: 'Tafsir load nahi ho paya. Internet check karke dobara try karo.',
     tafsirSource: (edition, source) => `Source: ${edition} · ${source}`,
     tafsirClose: 'Band karo',
+    translationTitle: 'Tarjuma',
+    translationNote:
+      'Upar wala Urdu (Junagarhi) kabhi nahi badlega — tarjume ki awaaz wahi padhti hai. Ye dusri tarjuma line chunega.',
+    translationLoading: 'Tarjuma load ho raha hai…',
+    translationFailed: 'Tarjuma load nahi ho paya — upar wala Urdu poora hai.',
   },
 };
 
@@ -351,11 +375,21 @@ export default function QuranBookScreen({
   const [surahQuery, setSurahQuery] = useState('');
   const [surahError, setSurahError] = useState<string | null>(null);
 
-  // Tarjuma: always visible (no toggle). Urdu + English + transliteration.
+  // Tarjuma: always visible (no toggle). Urdu + transliteration +
+  // a second translation line the reader picks (Saheeh International
+  // by default — see src/lib/translations.ts). The Urdu (Junagarhi)
+  // never changes: the tarjuma voice reads that edition.
   const [urduByGlobal, setUrduByGlobal] = useState<Map<number, string>>(new Map());
-  const [englishByGlobal, setEnglishByGlobal] = useState<Map<number, string>>(new Map());
+  const [translationByGlobal, setTranslationByGlobal] = useState<Map<number, string>>(
+    new Map(),
+  );
   const [translitByGlobal, setTranslitByGlobal] = useState<Map<number, string>>(new Map());
   const [tarjumaFailed, setTarjumaFailed] = useState(false);
+  const [translationId, setTranslationId] = useState(DEFAULT_QURAN_TRANSLATION_ID);
+  const translationIdRef = useRef(DEFAULT_QURAN_TRANSLATION_ID);
+  const [translationLoading, setTranslationLoading] = useState(false);
+  const [translationFailed, setTranslationFailed] = useState(false);
+  const pickedTranslation = translationFor(translationId);
 
   // Audio lives in the GLOBAL player (src/lib/quranAudio) so it keeps
   // playing on other screens; this screen only mirrors its state.
@@ -392,6 +426,10 @@ export default function QuranBookScreen({
   useEffect(() => {
     void loadQuranReciter();
     void loadQuranPlaybackPrefs();
+    void loadQuranTranslation().then((id) => {
+      translationIdRef.current = id;
+      setTranslationId(id);
+    });
     void (async () => {
       try {
         const saved = await AsyncStorage.getItem(TAJWEED_TOGGLE_KEY);
@@ -496,6 +534,49 @@ export default function QuranBookScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /**
+   * Load the picked translation for the surahs on one page, from the
+   * per-surah cache (see src/lib/translations.ts). Returns true when
+   * at least one surah loaded; a failure never throws — the Urdu
+   * above stays complete and the picker shows the failure note.
+   */
+  const loadTranslationForPage = useCallback(
+    async (surahNumbers: number[], edition: string): Promise<boolean> => {
+      setTranslationLoading(true);
+      setTranslationFailed(false);
+      const results = await Promise.allSettled(
+        surahNumbers.map((sn) => fetchTranslationSurah(sn, edition)),
+      );
+      if (!mountedRef.current) return false;
+      const next = new Map<number, string>();
+      let ok = false;
+      for (const res of results) {
+        if (res.status === 'fulfilled') {
+          ok = true;
+          for (const a of res.value.ayahs) next.set(a.number, a.text);
+        }
+      }
+      setTranslationByGlobal(next);
+      setTranslationFailed(!ok);
+      setTranslationLoading(false);
+      return ok;
+    },
+    [],
+  );
+
+  /** Switch the picked translation (persisted) and reload this
+   * page's second translation line. The Urdu above and the audio
+   * are untouched. */
+  function onTranslationPick(id: string): void {
+    if (id === translationIdRef.current) return;
+    translationIdRef.current = id;
+    setTranslationId(id);
+    void setQuranTranslation(id);
+    if (!mushaf) return;
+    const surahNumbers = [...new Set(mushaf.ayahs.map((a) => a.surah.number))];
+    void loadTranslationForPage(surahNumbers, id);
+  }
+
   const loadPage = useCallback(async (n: number) => {
     setPageLoading(true);
     setPageError(null);
@@ -504,9 +585,10 @@ export default function QuranBookScreen({
     setTafsirLoading(false);
     setTafsirError(null);
     setUrduByGlobal(new Map());
-    setEnglishByGlobal(new Map());
+    setTranslationByGlobal(new Map());
     setTranslitByGlobal(new Map());
     setTarjumaFailed(false);
+    setTranslationFailed(false);
     setTajweedByKey(new Map());
     setTajweedFailed(false);
     setTajweedLoading(false);
@@ -517,22 +599,23 @@ export default function QuranBookScreen({
       setPage(n);
       lastPageRef.current = n;
       sessionOpenedRef.current = true;
-      // Tarjuma (always visible): Urdu + English + transliteration.
-      // Each edition failing on its own must not fail the page.
-      const [urduRes, enRes, trRes] = await Promise.allSettled([
+      // Tarjuma (always visible): Urdu + transliteration + the
+      // picked translation (per-surah cache). Each edition failing
+      // on its own must not fail the page.
+      const surahNumbers = [...new Set(data.ayahs.map((a) => a.surah.number))];
+      const [urduRes, trRes] = await Promise.allSettled([
         fetchUrduPage(n),
-        fetchEditionPage(n, 'en.sahih'),
         fetchEditionPage(n, 'en.transliteration'),
       ]);
+      const translationOk = await loadTranslationForPage(
+        surahNumbers,
+        translationIdRef.current,
+      );
       if (!mountedRef.current) return;
-      let anyOk = false;
+      let anyOk = translationOk;
       if (urduRes.status === 'fulfilled') {
         anyOk = true;
         setUrduByGlobal(new Map(urduRes.value.map((u: UrduAyah) => [u.number, u.text])));
-      }
-      if (enRes.status === 'fulfilled') {
-        anyOk = true;
-        setEnglishByGlobal(new Map(enRes.value.map((a) => [a.number, a.text])));
       }
       if (trRes.status === 'fulfilled') {
         anyOk = true;
@@ -542,7 +625,6 @@ export default function QuranBookScreen({
       // Tajweed colours: one cached fetch per surah on this page
       // (quran.com v4). Independent of the tarjuma — if it fails,
       // the plain Arabic above stays complete.
-      const surahNumbers = [...new Set(data.ayahs.map((a) => a.surah.number))];
       setTajweedLoading(true);
       const tajweedResults = await Promise.allSettled(
         surahNumbers.map((n) => fetchTajweedSurah(n)),
@@ -1224,6 +1306,39 @@ export default function QuranBookScreen({
           </View>
           {pageJumpMsg ? <Text style={T.error}>{pageJumpMsg}</Text> : null}
 
+          {/* Translation picker: 14 live AlQuran Cloud editions
+              (see src/lib/translations.ts). The Urdu (Junagarhi)
+              above never changes — this picks the second line only,
+              and the tarjuma voice still reads Junagarhi. */}
+          <View style={styles.translationRow}>
+            <Text style={styles.autoTitle}>{s.translationTitle}</Text>
+            <Text style={styles.autoNote}>{s.translationNote}</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.translationChips}
+            >
+              {QURAN_TRANSLATIONS.map((t) => (
+                <Chip
+                  key={t.id}
+                  label={`${t.language} · ${t.translator}`}
+                  selected={translationId === t.id}
+                  onPress={() => onTranslationPick(t.id)}
+                />
+              ))}
+            </ScrollView>
+            <Text style={styles.autoNote}>
+              {pickedTranslation.language} — {pickedTranslation.translator}{' '}
+              (AlQuran Cloud)
+            </Text>
+            {translationLoading ? (
+              <Text style={styles.audioLoading}>{s.translationLoading}</Text>
+            ) : null}
+            {translationFailed ? (
+              <Text style={T.error}>{s.translationFailed}</Text>
+            ) : null}
+          </View>
+
           <View style={styles.tarjumaHead}>
             <Text style={styles.sectionTitle}>{shared.rdTarjumaH}</Text>
             <PillButton
@@ -1259,8 +1374,14 @@ export default function QuranBookScreen({
                   {urduByGlobal.get(a.number) ? (
                     <Text style={styles.urduText}>{urduByGlobal.get(a.number)}</Text>
                   ) : null}
-                  {englishByGlobal.get(a.number) ? (
-                    <Text style={styles.english}>{englishByGlobal.get(a.number)}</Text>
+                  {translationByGlobal.get(a.number) ? (
+                    <Text
+                      style={
+                        pickedTranslation.rtl ? styles.urduText : styles.english
+                      }
+                    >
+                      {translationByGlobal.get(a.number)}
+                    </Text>
                   ) : null}
                 </>
               ) : null}
@@ -1547,6 +1668,19 @@ const styles = StyleSheet.create({
     borderColor: C.line,
     padding: 14,
     marginTop: 12,
+  },
+  translationRow: {
+    backgroundColor: C.white,
+    borderRadius: S.radius,
+    borderWidth: 1,
+    borderColor: C.line,
+    padding: 14,
+    marginTop: 12,
+    gap: 8,
+  },
+  translationChips: {
+    flexDirection: 'row',
+    marginVertical: 2,
   },
   legendCard: {
     backgroundColor: C.white,
