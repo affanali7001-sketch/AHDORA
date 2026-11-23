@@ -47,6 +47,19 @@
  * Applies to page playback AND Life Ayahs (same player, same stop
  * path).
  *
+ * Audio <-> book sync (2026-11-23): the state now also carries the
+ * queue position (queueIndex / queueLength) and the surah of the
+ * ayah playing (playingSurah / playingAyahInSurah /
+ * playingSurahAyahs / playingSurahName / playingSurahArabic), so
+ * the readers can follow the audio — navigate to the page the voice
+ * is on, scroll to the playing ayah, and show the tarjuma text
+ * while the tarjuma voice plays. The page in state.page IS the
+ * mushaf page of the playing ayah: the manager only ever plays a
+ * queue it built from the /v1/page/{n} data it fetched for that
+ * page, and the chain advances it with startQuranPage(page+1).
+ * jumpToQuranQueueIndex lets the reader's page scrubber start any
+ * ayah of the current page.
+ *
  * Playback speed (setQuranPlaybackRate, 0.5–2x) applies to the
  * current player and every player created after; repeat
  * (setQuranRepeatMode) is off, the current ayah again, or the
@@ -91,6 +104,24 @@ export type QuranAudioState = {
   /** Repeat mode: off, repeat the current ayah, or repeat the
    * surah on the current page (page-scoped — playback is page-based). */
   repeatMode: QuranRepeatMode;
+  /** Index of the ayah playing inside the current queue (0-based),
+   * and the queue's length — the reader's page scrubber is
+   * (queueIndex + within-ayah fraction) / queueLength. */
+  queueIndex: number;
+  queueLength: number;
+  /** Surah of the ayah currently playing (from the page's mushaf
+   * data, or the Life Ayah playlist) — the reader follows the
+   * audio by surah AND page, so the book never stays on the old
+   * surah while the voice has moved on. Null when nothing plays. */
+  playingSurah: number | null;
+  /** Ayah number inside that surah (1-based). */
+  playingAyahInSurah: number | null;
+  /** Total ayahs in that surah (null for Life Ayahs — the manager
+   * never fetched that surah's metadata). */
+  playingSurahAyahs: number | null;
+  /** English + Arabic name of that surah (Arabic null for Life Ayahs). */
+  playingSurahName: string | null;
+  playingSurahArabic: string | null;
 };
 
 /** Repeat mode for Tilawah playback. */
@@ -257,6 +288,35 @@ function sleepTimerLabel(): string | null {
 }
 
 function snapshot(): QuranAudioState {
+  // Surah of the ayah currently playing. Page playback: the
+  // page's mushaf data names it (the same AlQuran Cloud
+  // /v1/page/{n} data the reader shows — an ayah's `page` field
+  // in that data IS the mapping, so the reader following
+  // `state.page` follows the true mushaf page). Life Ayah
+  // playback: the playlist item names the surah and the ayah
+  // range; the ayah-in-surah is the offset from the range start.
+  let playingSurah: number | null = null;
+  let playingAyahInSurah: number | null = null;
+  let playingSurahAyahs: number | null = null;
+  let playingSurahName: string | null = null;
+  let playingSurahArabic: string | null = null;
+  if (playingAyah !== null && mushaf) {
+    const found = mushaf.ayahs.find((a) => a.number === playingAyah);
+    if (found) {
+      playingSurah = found.surah.number;
+      playingAyahInSurah = found.numberInSurah;
+      playingSurahAyahs = found.surah.numberOfAyahs;
+      playingSurahName = found.surah.englishName;
+      playingSurahArabic = found.surah.name;
+    }
+  } else if (playingAyah !== null && lifeAyah) {
+    const current = lifePlaylist[lifeIndex];
+    if (current) {
+      playingSurah = current.surah;
+      playingAyahInSurah =
+        current.ayahStart + (playingAyah - current.globalAyahStart);
+    }
+  }
   return {
     mode,
     playing: isPlaying,
@@ -273,6 +333,13 @@ function snapshot(): QuranAudioState {
     reciterId,
     playbackRate,
     repeatMode,
+    queueIndex,
+    queueLength: queue.length,
+    playingSurah,
+    playingAyahInSurah,
+    playingSurahAyahs,
+    playingSurahName,
+    playingSurahArabic,
   };
 }
 
@@ -951,6 +1018,18 @@ export function prevQuranAyah(): void {
     // On the first ayah: restart it from the beginning.
     seekQuranTo(0);
   }
+}
+
+/**
+ * Jump to one ayah of the current queue by its index (0-based) —
+ * the reader's page scrubber: dragging to a fraction of the page
+ * starts that ayah. Out-of-range indexes and an empty queue are
+ * ignored. Never throws.
+ */
+export function jumpToQuranQueueIndex(index: number): void {
+  if (!player || queue.length === 0) return;
+  if (!Number.isInteger(index) || index < 0 || index >= queue.length) return;
+  void playAt(index, generation);
 }
 
 export function seekQuranBy(seconds: number): void {

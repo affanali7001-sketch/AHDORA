@@ -22,7 +22,7 @@
  * standard South Asian Para names, confirmed against public Juz
  * listings (ayahdailyapp / quransarif / quranvocab).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -34,26 +34,20 @@ import {
   Text,
   useWindowDimensions,
   View,
+  type ScrollViewInstance,
 } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
 import { stringsFor, type AppLanguage } from '../lib/strings';
 import { C, F, L, S, T } from '../lib/theme';
-import { PillButton, Switch } from '../components/ui';
+import { PillButton } from '../components/ui';
+import TilawahPlayer from '../components/TilawahPlayer';
 import {
   getQuranAudioState,
-  nextQuranAyah,
-  prevQuranAyah,
-  seekQuranBy,
-  setQuranAutoPlay,
-  startQuranPage,
-  stopQuranAudio,
   subscribeQuranAudio,
-  toggleQuranAudio,
   type QuranAudioState,
 } from '../lib/quranAudio';
 import {
   ARABIC_SOURCE,
-  TILAWAT_RECITER,
   URDU_AUDIO,
   URDU_TEXT_NAME,
   fetchMushafPage,
@@ -115,11 +109,6 @@ export const JUZ: JuzInfo[] = [
   { number: 29, name: 'Tabarakalladhi', arabic: 'تبارك الذي', startPage: 562, endPage: 581 },
   { number: 30, name: 'Amma', arabic: 'عم', startPage: 582, endPage: 604 },
 ];
-
-function fmtTime(totalSeconds: number): string {
-  const s = Math.max(0, Math.floor(totalSeconds));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-}
 
 const ARABIC_INDIC = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
 function toArabicIndic(n: number): string {
@@ -321,6 +310,48 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
 
   // Global audio state (the manager owns playback; this screen only mirrors it).
   useEffect(() => subscribeQuranAudio(setAudio), []);
+  const audioRef = useRef(audio);
+  useEffect(() => {
+    audioRef.current = audio;
+  }, [audio]);
+
+  // Audio <-> book sync (same rule as the Quran Book): the book
+  // follows the voice, but a manual page turn or swipe pauses
+  // follow for the ayah playing at that moment — it resumes by
+  // itself when the recitation moves to the next ayah, or at once
+  // from the player's "Follow" pill.
+  const [followPausedAyah, setFollowPausedAyah] = useState<number | null>(null);
+  const followPausedAyahRef = useRef<number | null>(null);
+  // Tarjuma text: visible by default (as before); the player can
+  // hide it — and the tarjuma-sync effect below forces it back
+  // on while the tarjuma voice plays.
+  const [showTranslation, setShowTranslation] = useState(true);
+  // Scroll the playing ayah into view: the current page's
+  // ScrollView + each tarjuma row's Y, measured when it lays out.
+  const pageScrollRef = useRef<ScrollViewInstance | null>(null);
+  const ayahRowY = useRef(new Map<number, number>());
+
+  /** Pause auto-follow for the ayah playing right now. */
+  function pauseFollow(): void {
+    const a = audioRef.current;
+    if (a.playing && a.mode !== null && a.playingAyah !== null) {
+      followPausedAyahRef.current = a.playingAyah;
+      setFollowPausedAyah(a.playingAyah);
+    }
+  }
+
+  /** Resume auto-follow at once (the player's "Follow" pill). */
+  function resumeFollow(): void {
+    followPausedAyahRef.current = null;
+    setFollowPausedAyah(null);
+    const a = audioRef.current;
+    if (a.playing && a.mode !== null && juzRef.current) {
+      const j = JUZ[juzRef.current - 1];
+      if (a.page >= j.startPage && a.page <= j.endPage) {
+        flipTo(a.page - j.startPage, true);
+      }
+    }
+  }
 
   // Keep the refs the audio effect + callbacks read in sync with state.
   useEffect(() => {
@@ -450,9 +481,12 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
   }, [flip]);
 
   const flipTo = useCallback(
-    (i: number) => {
+    (i: number, fromFollow = false) => {
       const jNum = juzRef.current;
       if (!jNum || flippingRef.current) return;
+      // A manual page turn pauses auto-follow for the ayah playing
+      // now; a follow turn (the audio moving on) must not pause it.
+      if (!fromFollow) pauseFollow();
       const j = JUZ[jNum - 1];
       const count = j.endPage - j.startPage + 1;
       const clamped = Math.max(0, Math.min(count - 1, i));
@@ -495,6 +529,8 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
     (n: number) => {
       const j = JUZ[n - 1];
       if (!j) return;
+      // Opening another Juz is a manual navigation — pause follow.
+      pauseFollow();
       juzRef.current = n;
       viewRef.current = 'reader';
       setJuz(n);
@@ -513,21 +549,67 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
   );
 
   // Follow the global manager: when auto-play advances the page, flip
-  // the book to it — but only while this reader is open and the page
-  // is inside this Juz. When the manager advances PAST this Juz's last
+  // the book to it — but only while this reader is open, the page
+  // is inside this Juz, audio is actually playing, and follow is
+  // not paused for the ayah playing now. A manual turn pauses
+  // follow; the pause clears itself when the recitation moves to
+  // the next ayah. When the manager advances PAST this Juz's last
   // page, show the honest "Para complete" card instead.
   useEffect(() => {
     const prev = lastAudioPageRef.current;
     lastAudioPageRef.current = audio.page;
     if (viewRef.current !== 'reader' || !juzRef.current) return;
+    if (!audio.playing || audio.mode === null) return;
+    if (
+      followPausedAyahRef.current !== null &&
+      audio.playingAyah === followPausedAyahRef.current
+    ) {
+      return;
+    }
+    if (followPausedAyahRef.current !== null) {
+      followPausedAyahRef.current = null;
+      setFollowPausedAyah(null);
+    }
     const j = JUZ[juzRef.current - 1];
     if (audio.page >= j.startPage && audio.page <= j.endPage) {
       const idx = audio.page - j.startPage;
-      if (idx !== indexRef.current) flipTo(idx);
+      if (idx !== indexRef.current) flipTo(idx, true);
     } else if (prev >= j.startPage && prev <= j.endPage && audio.page > j.endPage) {
       setParaDone(true);
     }
-  }, [audio.page, flipTo]);
+  }, [audio.page, audio.playingAyah, audio.playing, flipTo]);
+
+  // Tarjuma sync: while the Urdu tarjuma voice plays for the page
+  // open here, the tarjuma TEXT must be visible — never play
+  // tarjuma audio with the text hidden.
+  useEffect(() => {
+    if (view !== 'reader' || !juz) return;
+    if (audio.mode !== 'urdu' || !audio.playing) return;
+    const j = JUZ[juz - 1];
+    if (audio.page !== j.startPage + indexRef.current) return;
+    if (!showTranslation) setShowTranslation(true);
+  }, [audio.mode, audio.playing, audio.page, view, juz, showTranslation]);
+
+  // Scroll the playing ayah into view while following. A manual
+  // scroll of the page pauses follow, so this never fights the
+  // user's finger.
+  useEffect(() => {
+    if (view !== 'reader' || !audio.playing || audio.mode === null) return;
+    if (
+      followPausedAyahRef.current !== null &&
+      audio.playingAyah === followPausedAyahRef.current
+    ) {
+      return;
+    }
+    if (!juz) return;
+    const j = JUZ[juz - 1];
+    if (audio.page !== j.startPage + indexRef.current) return;
+    if (audio.playingAyah === null) return;
+    const y = ayahRowY.current.get(audio.playingAyah);
+    if (y !== undefined) {
+      pageScrollRef.current?.scrollTo({ y: Math.max(0, y - 60), animated: true });
+    }
+  }, [audio.playingAyah, audio.page, audio.playing, view, juz]);
 
   async function markPageRead(): Promise<void> {
     if (!juz || markBusy) return;
@@ -636,82 +718,27 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
         {readerSub ? <Text style={styles.readerSub}>{readerSub}</Text> : null}
       </View>
 
-      {/* Audio controls at the TOP of the reader (user request
-          2026-11-23): the play buttons were buried below the
-          tarjuma inside the page scroll, so the user had to hunt
-          for them. Same layout as the Quran Book's top audio card
-          and the Life Ayahs' two big buttons — Tilawat + Tarjuma
-          side by side, auto-play switch, seek row. The per-page
-          PlayerCards below the tarjuma stay as they are. */}
-      <View style={styles.topAudioCard}>
-        <View style={styles.voiceRow}>
-          <View style={{ flex: 1 }}>
-            <PillButton
-              label={
-                audio.mode === 'tilawat' && audio.page === currentPage && audio.playing
-                  ? s.stopBtn
-                  : s.playTilawat
-              }
-              variant="ghost"
-              small
-              block
-              busy={audio.busy && audio.mode === 'tilawat' && audio.page === currentPage}
-              onPress={() => {
-                if (audio.mode === 'tilawat' && audio.page === currentPage) {
-                  toggleQuranAudio();
-                } else {
-                  void startQuranPage(currentPage, 'tilawat');
-                }
-              }}
-            />
-          </View>
-          <View style={{ flex: 1 }}>
-            <PillButton
-              label={
-                audio.mode === 'urdu' && audio.page === currentPage && audio.playing
-                  ? s.stopBtn
-                  : s.playTarjuma
-              }
-              variant="peach"
-              small
-              block
-              busy={audio.busy && audio.mode === 'urdu' && audio.page === currentPage}
-              onPress={() => {
-                if (audio.mode === 'urdu' && audio.page === currentPage) {
-                  toggleQuranAudio();
-                } else {
-                  void startQuranPage(currentPage, 'urdu');
-                }
-              }}
-            />
-          </View>
-        </View>
-
-        <View style={styles.topAutoRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.autoTitle}>{s.autoPlay}</Text>
-            <Text style={styles.autoNote}>{s.autoPlayNote}</Text>
-          </View>
-          <Switch value={audio.autoPlay} onValueChange={setQuranAutoPlay} />
-        </View>
-
-        {audio.hasAudio ? (
-          <View style={styles.seekRow}>
-            <PillButton label="−10s" small variant="ghost" onPress={() => seekQuranBy(-10)} />
-            <PillButton label="⏮" small variant="ghost" onPress={() => prevQuranAyah()} />
-            <PillButton label="⏭" small variant="ghost" onPress={() => nextQuranAyah()} />
-            <PillButton label="+10s" small variant="ghost" onPress={() => seekQuranBy(10)} />
-            <PillButton
-              label={s.stopAudio}
-              small
-              variant="ghost"
-              onPress={() => stopQuranAudio()}
-            />
-          </View>
-        ) : null}
-        {audio.busy ? <Text style={styles.audioLoading}>{s.audioLoading}</Text> : null}
-        {audio.error ? <Text style={T.error}>{audio.error}</Text> : null}
+      {/* The SAME Tilawah player as the Quran Book (Mihrab layout):
+          one player at the top of the reader, above the book — the
+          old top audio card and the per-page PlayerCards below the
+          tarjuma were duplicate players and are gone; every control
+          they had (play tilawat/tarjuma, seek, auto-play, speed,
+          repeat, sleep, reciter) lives in this one player. */}
+      <View style={styles.playerWrap}>
+        <TilawahPlayer
+          lang={lang}
+          page={currentPage}
+          ayahs={currentMushaf?.ayahs ?? []}
+          showTranslation={showTranslation}
+          onTranslationChange={setShowTranslation}
+          followPaused={followPausedAyah !== null}
+          onFollowResume={resumeFollow}
+          onOpenList={() => setView('list')}
+        />
       </View>
+      <Text style={T.note}>
+        {s.urduAudioCredit} · {URDU_AUDIO.bitrate}
+      </Text>
 
       <View style={styles.book} {...panResponder.panHandlers}>
         {/* Base layer: the page underneath the turn. Keyed by page
@@ -730,6 +757,10 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
             markBusy,
             markMsg,
             retryPage,
+            showTranslation,
+            pageScrollRef,
+            ayahRowY,
+            pauseFollow,
           )}
         </View>
 
@@ -756,6 +787,10 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
                 markBusy,
                 markMsg,
                 retryPage,
+                showTranslation,
+                pageScrollRef,
+                ayahRowY,
+                pauseFollow,
               )}
             </View>
             <View
@@ -829,6 +864,10 @@ function renderBookPage(
   markBusy: boolean,
   markMsg: string | null,
   retryPage: (pageNum: number) => void,
+  showTranslation: boolean,
+  pageScrollRef: RefObject<ScrollViewInstance | null>,
+  ayahRowY: RefObject<Map<number, number>>,
+  onUserScroll: () => void,
 ) {
   if (entry?.error) {
     return (
@@ -870,6 +909,8 @@ function renderBookPage(
 
   return (
     <ScrollView
+      ref={isCurrent ? pageScrollRef : undefined}
+      onScrollBeginDrag={isCurrent ? onUserScroll : undefined}
       nestedScrollEnabled
       showsVerticalScrollIndicator={false}
       contentContainerStyle={styles.pageChildContent}
@@ -940,98 +981,34 @@ function renderBookPage(
           {m.ayahs.map((a) => (
             <View
               key={a.number}
+              onLayout={
+                isCurrent
+                  ? (e) => {
+                      ayahRowY.current.set(a.number, e.nativeEvent.layout.y);
+                    }
+                  : undefined
+              }
               style={[
                 styles.ayahRow,
                 isCurrent && audio.playingAyah === a.number && styles.ayahRowPlaying,
               ]}
             >
               <Text style={styles.ayahArabic}>{a.text.trim()}</Text>
-              {entry.translit?.get(a.number) ? (
-                <Text style={styles.translit}>{entry.translit.get(a.number)}</Text>
-              ) : null}
-              {entry.urdu?.get(a.number) ? (
-                <Text style={styles.urduText}>{entry.urdu.get(a.number)}</Text>
-              ) : null}
-              {entry.english?.get(a.number) ? (
-                <Text style={styles.english}>{entry.english.get(a.number)}</Text>
+              {showTranslation ? (
+                <>
+                  {entry.translit?.get(a.number) ? (
+                    <Text style={styles.translit}>{entry.translit.get(a.number)}</Text>
+                  ) : null}
+                  {entry.urdu?.get(a.number) ? (
+                    <Text style={styles.urduText}>{entry.urdu.get(a.number)}</Text>
+                  ) : null}
+                  {entry.english?.get(a.number) ? (
+                    <Text style={styles.english}>{entry.english.get(a.number)}</Text>
+                  ) : null}
+                </>
               ) : null}
             </View>
           ))}
-
-          <PlayerCard
-            dark
-            title={shared.playerTitle}
-            note={s.playerNote}
-            time={audio.mode === 'tilawat' && audio.page === pageNum ? audio.time : 0}
-            duration={audio.mode === 'tilawat' && audio.page === pageNum ? audio.duration : 0}
-            timeLabel={
-              audio.mode === 'tilawat' && audio.page === pageNum && audio.duration > 0
-                ? `${fmtTime(audio.duration)} · Page ${pageNum}`
-                : `Page ${pageNum}`
-            }
-            playing={audio.mode === 'tilawat' && audio.page === pageNum && audio.playing}
-            busy={audio.busy && audio.mode === 'tilawat' && audio.page === pageNum}
-            onToggle={() => {
-              if (audio.mode === 'tilawat' && audio.page === pageNum) {
-                toggleQuranAudio();
-              } else {
-                void startQuranPage(pageNum, 'tilawat');
-              }
-            }}
-          />
-          <PlayerCard
-            title={shared.urduTitle}
-            note={s.urduNote}
-            time={audio.mode === 'urdu' && audio.page === pageNum ? audio.time : 0}
-            duration={audio.mode === 'urdu' && audio.page === pageNum ? audio.duration : 0}
-            timeLabel={
-              audio.mode === 'urdu' && audio.page === pageNum && audio.duration > 0
-                ? `${fmtTime(audio.duration)} · Page ${pageNum}`
-                : `Page ${pageNum}`
-            }
-            playing={audio.mode === 'urdu' && audio.page === pageNum && audio.playing}
-            busy={audio.busy && audio.mode === 'urdu' && audio.page === pageNum}
-            onToggle={() => {
-              if (audio.mode === 'urdu' && audio.page === pageNum) {
-                toggleQuranAudio();
-              } else {
-                void startQuranPage(pageNum, 'urdu');
-              }
-            }}
-          />
-          {audio.busy && audio.mode ? (
-            <Text style={styles.audioLoading}>{s.audioLoading}</Text>
-          ) : null}
-          {audio.error ? <Text style={T.error}>{audio.error}</Text> : null}
-
-          <View style={styles.autoRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.autoTitle}>{s.autoPlay}</Text>
-              <Text style={styles.autoNote}>{s.autoPlayNote}</Text>
-            </View>
-            <Switch value={audio.autoPlay} onValueChange={setQuranAutoPlay} />
-          </View>
-
-          {audio.hasAudio ? (
-            <View style={styles.seekRow}>
-              <PillButton label="−10s" small variant="ghost" onPress={() => seekQuranBy(-10)} />
-              <PillButton label="⏮" small variant="ghost" onPress={() => prevQuranAyah()} />
-              <PillButton label="⏭" small variant="ghost" onPress={() => nextQuranAyah()} />
-              <PillButton label="+10s" small variant="ghost" onPress={() => seekQuranBy(10)} />
-              <PillButton
-                label={s.stopAudio}
-                small
-                variant="ghost"
-                onPress={() => stopQuranAudio()}
-              />
-            </View>
-          ) : null}
-          <Text style={T.note}>
-            {s.tilawatCredit} · {TILAWAT_RECITER.bitrate}
-          </Text>
-          <Text style={T.note}>
-            {s.urduAudioCredit} · {URDU_AUDIO.bitrate}
-          </Text>
 
           <PillButton
             label={shared.markRead}
@@ -1049,76 +1026,6 @@ function renderBookPage(
         </>
       ) : null}
     </ScrollView>
-  );
-}
-
-/** One audio player card — same look as QuranBook's (§11). */
-function PlayerCard({
-  dark = false,
-  title,
-  note,
-  time,
-  duration,
-  timeLabel,
-  playing,
-  busy,
-  onToggle,
-}: {
-  dark?: boolean;
-  title: string;
-  note: string;
-  time: number;
-  duration: number;
-  timeLabel: string;
-  playing: boolean;
-  busy: boolean;
-  onToggle: () => void;
-}) {
-  const pct = duration > 0 ? Math.min(1, time / duration) : 0;
-  return (
-    <View style={[styles.player, dark ? styles.playerDark : styles.playerLight]}>
-      <View style={styles.playerRow}>
-        <Pressable
-          onPress={onToggle}
-          style={[styles.playBtn, dark ? styles.playBtnPeach : styles.playBtnTeal]}
-          accessibilityRole="button"
-          accessibilityLabel={playing ? 'Stop' : 'Play'}
-        >
-          {busy ? (
-            <ActivityIndicator color={dark ? C.peachText : C.white} />
-          ) : (
-            <Text style={[styles.playIcon, dark ? styles.playIconPeach : styles.playIconTeal]}>
-              {playing ? '■' : '▶'}
-            </Text>
-          )}
-        </Pressable>
-        <View style={styles.playerBody}>
-          <Text style={[styles.playerTitle, dark && styles.playerTitleDark]}>{title}</Text>
-          <View
-            style={[styles.playerTrack, dark ? styles.playerTrackDark : styles.playerTrackLight]}
-          >
-            <View
-              style={[
-                styles.playerFill,
-                {
-                  width: `${pct * 100}%`,
-                  backgroundColor: dark ? C.peachMid : C.teal500,
-                },
-              ]}
-            />
-          </View>
-          <View style={styles.playerTimes}>
-            <Text style={[styles.playerTime, dark && styles.playerTimeDark]}>
-              {fmtTime(time)}
-            </Text>
-            <Text style={[styles.playerTime, dark && styles.playerTimeDark]}>{timeLabel}</Text>
-          </View>
-        </View>
-      </View>
-      <Text style={[styles.playerNote, dark ? styles.playerNoteDark : styles.playerNoteLight]}>
-        {note}
-      </Text>
-    </View>
   );
 }
 
@@ -1420,46 +1327,11 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     marginTop: 3,
   },
-  /* ---- Top audio card (reader): white card above the book, so
-     the play buttons are visible the moment the reader opens.
-     The inner auto-play row is a plain row (not the card-style
-     autoRow) so there is no card-inside-a-card double border. ---- */
-  topAudioCard: {
-    backgroundColor: C.white,
-    borderRadius: S.radius,
-    borderWidth: 1,
-    borderColor: C.line,
-    padding: 14,
-    marginHorizontal: S.pad,
-    marginTop: 12,
-  },
-  voiceRow: { flexDirection: 'row', gap: 8 },
-  topAutoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginTop: 12,
-  },
-  autoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: C.white,
-    borderRadius: S.radius,
-    borderWidth: 1,
-    borderColor: C.line,
-    padding: 14,
-    marginTop: 12,
-  },
-  autoTitle: { fontFamily: F.sans, fontSize: 14.5, fontWeight: '700' as const, color: C.ink },
-  autoNote: { fontFamily: F.sans, fontSize: 12.5, color: C.muted, marginTop: 2 },
-  seekRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 10,
-    flexWrap: 'wrap' as const,
-    justifyContent: 'center',
-  },
+  /* ---- Tilawah player (reader): the ONE player sits above the
+     book, so the play controls are visible the moment the reader
+     opens. The player card carries its own margin — this wrapper
+     only insets it to the reader's padding. ---- */
+  playerWrap: { marginHorizontal: S.pad },
   pageFooter: {
     fontFamily: F.sans,
     fontSize: 12.5,

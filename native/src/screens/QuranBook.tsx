@@ -34,6 +34,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type ScrollViewInstance,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ScreenProps } from '../lib/nav';
@@ -360,6 +361,31 @@ export default function QuranBookScreen({
   // playing on other screens; this screen only mirrors its state.
   const [audio, setAudio] = useState<QuranAudioState>(() => getQuranAudioState());
   useEffect(() => subscribeQuranAudio(setAudio), []);
+  const audioRef = useRef(audio);
+  useEffect(() => {
+    audioRef.current = audio;
+  }, [audio]);
+
+  // Audio <-> book sync: the book follows the voice (see the follow
+  // effect below). A manual navigation or scroll pauses follow for
+  // the ayah playing at that moment — it resumes by itself when
+  // the recitation moves to the next ayah, or at once from the
+  // player's "Follow" pill.
+  const [followPausedAyah, setFollowPausedAyah] = useState<number | null>(null);
+  const followPausedAyahRef = useRef<number | null>(null);
+  // Scroll the playing ayah into view: each tarjuma row's Y,
+  // measured when it lays out.
+  const scrollRef = useRef<ScrollViewInstance | null>(null);
+  const ayahRowY = useRef(new Map<number, number>());
+
+  /** Pause auto-follow for the ayah playing right now. */
+  function pauseFollow(): void {
+    const a = audioRef.current;
+    if (a.playing && a.mode !== null && a.playingAyah !== null) {
+      followPausedAyahRef.current = a.playingAyah;
+      setFollowPausedAyah(a.playingAyah);
+    }
+  }
 
   // Restore the saved tilawat reciter + playback prefs once
   // (defaults: Alafasy, 1x, repeat off, tajweed colours on).
@@ -546,7 +572,10 @@ export default function QuranBookScreen({
   }, []);
 
   const openReader = useCallback(
-    (n: number) => {
+    (n: number, fromFollow = false) => {
+      // A manual page turn pauses auto-follow for the ayah playing
+      // now; a follow turn (the audio moving on) must not pause it.
+      if (!fromFollow) pauseFollow();
       // Audio is global — opening another page does NOT stop it.
       setView('reader');
       void loadPage(n);
@@ -554,6 +583,74 @@ export default function QuranBookScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [loadPage],
   );
+
+  /** Resume auto-follow at once (the player's "Follow" pill) —
+   * jump back to the page the voice is on. */
+  function resumeFollow(): void {
+    followPausedAyahRef.current = null;
+    setFollowPausedAyah(null);
+    const a = audioRef.current;
+    if (a.playing && a.mode !== null && a.page !== page) {
+      openReader(a.page, true);
+    }
+  }
+
+  /* Audio <-> book sync: when the recitation moves to another page,
+     the book follows it — but only while audio is actually playing
+     and follow is not paused for the ayah playing now. The pause
+     clears itself the moment the recitation moves to the next ayah. */
+  useEffect(() => {
+    if (view !== 'reader') return;
+    if (!audio.playing || audio.mode === null) return;
+    if (
+      followPausedAyahRef.current !== null &&
+      audio.playingAyah === followPausedAyahRef.current
+    ) {
+      return;
+    }
+    if (followPausedAyahRef.current !== null) {
+      followPausedAyahRef.current = null;
+      setFollowPausedAyah(null);
+    }
+    if (audio.page !== page) {
+      openReader(audio.page, true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audio.playingAyah, audio.page, audio.playing, view, page]);
+
+  /* Tarjuma sync: when the Urdu tarjuma voice is playing for this
+     page, the tarjuma TEXT must be visible — never play tarjuma
+     audio with the text hidden. The reader's own toggle can hide
+     it again afterwards. */
+  useEffect(() => {
+    if (
+      view === 'reader' &&
+      audio.mode === 'urdu' &&
+      audio.playing &&
+      audio.page === page &&
+      !showTranslation
+    ) {
+      setShowTranslation(true);
+    }
+  }, [audio.mode, audio.playing, audio.page, view, page, showTranslation]);
+
+  /* Scroll the playing ayah into view while following. A manual
+     scroll pauses follow (onScrollBeginDrag on the reader), so
+     this never fights the user's finger. */
+  useEffect(() => {
+    if (view !== 'reader' || !audio.playing || audio.mode === null) return;
+    if (
+      followPausedAyahRef.current !== null &&
+      audio.playingAyah === followPausedAyahRef.current
+    ) {
+      return;
+    }
+    if (audio.page !== page || audio.playingAyah === null) return;
+    const y = ayahRowY.current.get(audio.playingAyah);
+    if (y !== undefined) {
+      scrollRef.current?.scrollTo({ y: Math.max(0, y - 90), animated: true });
+    }
+  }, [audio.playingAyah, audio.page, audio.playing, view, page]);
 
   /* 'reader' route (App.tsx): open at the last-read surah's first
    * page when history exists, else page 1. A Khatmah Continue target
@@ -843,7 +940,12 @@ export default function QuranBookScreen({
       : null;
 
   return (
-    <ScrollView style={styles.scroll} contentContainerStyle={L.scroll}>
+    <ScrollView
+      ref={scrollRef}
+      onScrollBeginDrag={pauseFollow}
+      style={styles.scroll}
+      contentContainerStyle={L.scroll}
+    >
       <PillButton
         label={shared.readerBack}
         variant="ghost"
@@ -880,6 +982,16 @@ export default function QuranBookScreen({
         ayahs={mushaf?.ayahs ?? []}
         showTranslation={showTranslation}
         onTranslationChange={setShowTranslation}
+        followPaused={followPausedAyah !== null}
+        onFollowResume={resumeFollow}
+        onOpenList={() => {
+          if (initialView === 'reader') {
+            goTo('quran');
+          } else {
+            setView('landing');
+            void loadHistory();
+          }
+        }}
       />
       <Text style={T.note}>
         {s.urduAudioCredit} · {URDU_AUDIO.bitrate}
@@ -1127,6 +1239,9 @@ export default function QuranBookScreen({
           {mushaf.ayahs.map((a) => (
             <View
               key={a.number}
+              onLayout={(e) => {
+                ayahRowY.current.set(a.number, e.nativeEvent.layout.y);
+              }}
               style={[
                 styles.ayahRow,
                 audio.playingAyah === a.number && styles.ayahRowPlaying,

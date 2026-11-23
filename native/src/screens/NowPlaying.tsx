@@ -5,33 +5,17 @@
  * (from the global audio state's page) is the "album art" on top —
  * real Uthmani Arabic from AlQuran Cloud, rendered exactly like the
  * Quran Book reader (cream page, teal frame, surah band, circled
- * ayah markers, playing ayah highlighted). Below it: title,
- * progress + tap-to-seek bar, big transport controls, sleep timer,
- * auto-play, and a button back into the book. Nothing else.
+ * ayah markers, playing ayah highlighted). Below it sits the SAME
+ * Tilawah player as the Quran Book and the ParaBook (Mihrab layout),
+ * and a button back into the book. Nothing else.
  *
  * The audio itself lives in the global manager (src/lib/quranAudio);
  * this screen only subscribes and drives it — playback survives
  * navigation, and leaving this screen never stops it.
- *
- * Sleep timer: wired to the real API in quranAudio.ts —
- * setQuranSleepTimer(option) where the option is null (Off),
- * { kind: 'minutes', minutes }, { kind: 'surah-end' } or
- * { kind: 'para-end' }. The manager's state.sleepTimer is the human
- * label ("15 min" / "Surah khatm" / "Para khatm");
- * getQuranSleepTimer() returns the live option. Speed and repeat
- * drive the same manager (setQuranPlaybackRate /
- * setQuranRepeatMode), so this screen and the Quran Book's Tilawah
- * player always agree.
- *
- * Labels: global strings (stringsFor) where they exist; the few
- * labels with no global key live in the local STRINGS record below,
- * the same pattern QuranBook.tsx uses for its own screen-local
- * labels. strings.ts itself is untouched.
  */
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -40,26 +24,12 @@ import {
 import type { ScreenProps } from '../lib/nav';
 import { stringsFor, type AppLanguage } from '../lib/strings';
 import { C, F, L, S, T } from '../lib/theme';
-import { Chip, EmptyState, PillButton, Switch } from '../components/ui';
+import { EmptyState, PillButton } from '../components/ui';
+import TilawahPlayer from '../components/TilawahPlayer';
 import {
-  QURAN_PLAYBACK_RATES,
   getQuranAudioState,
-  getQuranSleepTimer,
-  nextQuranAyah,
-  prevQuranAyah,
-  seekQuranBy,
-  seekQuranTo,
-  setQuranAutoPlay,
-  setQuranPlaybackRate,
-  setQuranRepeatMode,
-  setQuranSleepTimer,
-  startQuranPage,
-  stopQuranAudio,
   subscribeQuranAudio,
-  toggleQuranAudio,
   type QuranAudioState,
-  type QuranRepeatMode,
-  type QuranSleepTimerOption,
 } from '../lib/quranAudio';
 import {
   fetchMushafPage,
@@ -79,66 +49,17 @@ const STRINGS: Record<
   {
     emptyTitle: string;
     emptyBody: string;
-    autoPlay: string;
-    autoPlayNote: string;
-    sleepOff: string;
-    sleep5: string;
-    sleep10: string;
-    sleep15: string;
-    sleep30: string;
-    sleep60: string;
-    sleepSurah: string;
-    sleepPara: string;
-    sleepPending: string;
-    sleepStopsIn: (v: string) => string;
-    sleepStopsSurah: string;
-    sleepStopsPara: string;
   }
 > = {
   en: {
     emptyTitle: 'No audio is playing right now',
     emptyBody: 'Play a page from the Quran Book and the player will show here.',
-    autoPlay: 'Auto-play',
-    autoPlayNote:
-      'Tilawat → Urdu tarjuma → next page, automatically. The page is marked as done.',
-    sleepOff: 'Off',
-    sleep5: '5 min',
-    sleep10: '10 min',
-    sleep15: '15 min',
-    sleep30: '30 min',
-    sleep60: '1 hour',
-    sleepSurah: 'Surah end',
-    sleepPara: 'Para end',
-    sleepPending: 'Sleep timer is coming soon — the controls above already work.',
-    sleepStopsIn: (v: string) => `Stops in ${v}.`,
-    sleepStopsSurah: 'Stops when this surah ends.',
-    sleepStopsPara: 'Stops when this para ends.',
   },
   hi: {
     emptyTitle: 'Abhi koi audio nahi chal raha hai',
     emptyBody: 'Quran Book se koi page chalao, phir yahan player dikhega.',
-    autoPlay: 'Auto-play',
-    autoPlayNote:
-      'Tilawat → Urdu tarjuma → agla page, apne aap. Page padha hua mark ho jayega.',
-    sleepOff: 'Band',
-    sleep5: '5 min',
-    sleep10: '10 min',
-    sleep15: '15 min',
-    sleep30: '30 min',
-    sleep60: '1 ghanta',
-    sleepSurah: 'Surah khatm',
-    sleepPara: 'Paara khatm',
-    sleepPending: 'Sleep timer jald aa raha hai — upar wale controls pehle se kaam karte hain.',
-    sleepStopsIn: (v: string) => `${v} baad band ho jayega.`,
-    sleepStopsSurah: 'Surah khatm hote hi band ho jayega.',
-    sleepStopsPara: 'Paara khatm hote hi band ho jayega.',
   },
 };
-
-function fmtTime(totalSeconds: number): string {
-  const s = Math.max(0, Math.floor(totalSeconds));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-}
 
 const ARABIC_INDIC = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
 function toArabicIndic(n: number): string {
@@ -147,39 +68,6 @@ function toArabicIndic(n: number): string {
     .map((d) => ARABIC_INDIC[Number(d)] ?? d)
     .join('');
 }
-
-/* ------------------------------------------------------------------ */
-/* Sleep timer — real API in quranAudio.ts                             */
-/* ------------------------------------------------------------------ */
-
-/** One sleep-timer choice: minutes, stop at the end of the surah
- * or para, or off. */
-type SleepChoice = number | 'surah-end' | 'para-end' | null;
-
-const SLEEP_OPTIONS: {
-  value: SleepChoice;
-  key:
-    | 'sleepOff'
-    | 'sleep5'
-    | 'sleep10'
-    | 'sleep15'
-    | 'sleep30'
-    | 'sleep60'
-    | 'sleepSurah'
-    | 'sleepPara';
-}[] = [
-  { value: null, key: 'sleepOff' },
-  { value: 5, key: 'sleep5' },
-  { value: 10, key: 'sleep10' },
-  { value: 15, key: 'sleep15' },
-  { value: 30, key: 'sleep30' },
-  { value: 60, key: 'sleep60' },
-  { value: 'surah-end', key: 'sleepSurah' },
-  { value: 'para-end', key: 'sleepPara' },
-];
-
-/** Repeat cycle: off → ayah → surah → off. */
-const REPEAT_CYCLE: QuranRepeatMode[] = ['off', 'ayah', 'surah'];
 
 /* ------------------------------------------------------------------ */
 /* Mushaf page — same rendering as the Quran Book reader               */
@@ -305,63 +193,6 @@ export default function NowPlayingScreen({ lang, goTo }: ScreenProps) {
     };
   }, [page, reloadTick]);
 
-  /* --- seek bar --- */
-  const [trackWidth, setTrackWidth] = useState(0);
-  const pct =
-    audio.duration > 0 ? Math.min(1, Math.max(0, audio.time / audio.duration)) : 0;
-
-  /* --- sleep timer (real API in quranAudio.ts) --- */
-  // The manager's state.sleepTimer is a label string ("15 min" /
-  // "Para khatm"); the live option comes from getQuranSleepTimer().
-  // The chips below work with the UI choice (minutes | 'para-end' |
-  // null) and chooseSleep converts it to the manager's option shape.
-  const liveTimer = getQuranSleepTimer();
-  const activeTimer: SleepChoice =
-    liveTimer === null
-      ? null
-      : liveTimer.kind === 'para-end'
-        ? 'para-end'
-        : liveTimer.kind === 'surah-end'
-          ? 'surah-end'
-          : liveTimer.minutes;
-
-  function chooseSleep(value: SleepChoice) {
-    const option: QuranSleepTimerOption =
-      value === null
-        ? null
-        : value === 'para-end'
-          ? { kind: 'para-end' }
-          : value === 'surah-end'
-            ? { kind: 'surah-end' }
-            : { kind: 'minutes', minutes: value };
-    try {
-      setQuranSleepTimer(option);
-    } catch {
-      /* Never break the screen. */
-    }
-  }
-
-  const sleepStatus =
-    activeTimer === null
-      ? null
-      : activeTimer === 'para-end'
-        ? s.sleepStopsPara
-        : activeTimer === 'surah-end'
-          ? s.sleepStopsSurah
-          : s.sleepStopsIn(`${activeTimer} min`);
-
-  /** Repeat: off → ayah → surah → off (same manager as the Tilawah player). */
-  const repeatLabel =
-    audio.repeatMode === 'ayah'
-      ? shared.tilawahRepeatAyah
-      : audio.repeatMode === 'surah'
-        ? shared.tilawahRepeatSurah
-        : shared.tilawahRepeatOff;
-  function cycleRepeat(): void {
-    const idx = REPEAT_CYCLE.indexOf(audio.repeatMode);
-    setQuranRepeatMode(REPEAT_CYCLE[(idx + 1) % REPEAT_CYCLE.length] ?? 'off');
-  }
-
   if (!audio.hasAudio) {
     return (
       <ScrollView style={styles.scroll} contentContainerStyle={L.scroll}>
@@ -396,142 +227,21 @@ export default function NowPlayingScreen({ lang, goTo }: ScreenProps) {
         <MushafPageView page={pageData} playingAyah={audio.playingAyah} />
       ) : null}
 
-      <Text style={styles.trackTitle}>{audio.title || 'Quran audio'}</Text>
-
-      <Pressable
-        onPress={(e) => {
-          if (trackWidth <= 0 || audio.duration <= 0) return;
-          const fraction = Math.min(1, Math.max(0, e.nativeEvent.locationX / trackWidth));
-          seekQuranTo(fraction * audio.duration);
-        }}
-        onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
-        style={styles.seekTouch}
-        accessibilityLabel="Seek"
-      >
-        <View style={styles.seekTrack}>
-          <View style={[styles.seekFill, { width: `${pct * 100}%` }]} />
-        </View>
-      </Pressable>
-      <View style={styles.timeRow}>
-        <Text style={styles.timeText}>
-          {audio.busy ? shared.loading : fmtTime(audio.time)}
-        </Text>
-        <Text style={styles.timeText}>{fmtTime(audio.duration)}</Text>
-      </View>
-      {audio.error ? <Text style={T.error}>{audio.error}</Text> : null}
-
-      <View style={styles.controls}>
-        <Pressable
-          onPress={() => prevQuranAyah()}
-          style={styles.ctrlBtn}
-          accessibilityRole="button"
-          accessibilityLabel="Previous ayah"
-        >
-          <Text style={styles.ctrlIcon}>⏮</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => toggleQuranAudio()}
-          style={[styles.ctrlBtn, styles.playBtn]}
-          accessibilityRole="button"
-          accessibilityLabel={audio.playing ? 'Pause' : 'Play'}
-        >
-          {audio.busy ? (
-            <ActivityIndicator color={C.peachText} size="large" />
-          ) : (
-            <Text style={[styles.ctrlIcon, styles.playIcon]}>
-              {audio.playing ? '⏸' : '▶'}
-            </Text>
-          )}
-        </Pressable>
-        <Pressable
-          onPress={() => nextQuranAyah()}
-          style={styles.ctrlBtn}
-          accessibilityRole="button"
-          accessibilityLabel="Next ayah"
-        >
-          <Text style={styles.ctrlIcon}>⏭</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => stopQuranAudio()}
-          style={styles.ctrlBtn}
-          accessibilityRole="button"
-          accessibilityLabel="Stop audio"
-        >
-          <Text style={styles.ctrlIcon}>✕</Text>
-        </Pressable>
-      </View>
-      <View style={styles.seekRow}>
-        <PillButton label="−10s" variant="ghost" small onPress={() => seekQuranBy(-10)} />
-        <PillButton label="+10s" variant="ghost" small onPress={() => seekQuranBy(10)} />
-      </View>
-
-      {/* Next page — music-app style: the play button is above, and
-          right below it a clear way to the next page (the user asked
-          for it here, 2026-11-22). Starts the next page playing in
-          the same mode; hidden on the last page. */}
-      {audio.page < 604 ? (
-        <View style={styles.nextPageBtn}>
-          <PillButton
-            label={shared.nextPage}
-            variant="peach"
-            block
-            onPress={() => void startQuranPage(audio.page + 1, audio.mode ?? 'tilawat')}
-          />
-        </View>
-      ) : null}
-
-      <View style={styles.sleepCard}>
-        <View style={styles.sleepHead}>
-          <Text style={styles.sleepTitle}>{shared.sleepTitle}</Text>
-          {sleepStatus ? <Text style={styles.sleepStatus}>{sleepStatus}</Text> : null}
-        </View>
-        <View style={styles.chipRow}>
-          {SLEEP_OPTIONS.map((opt) => (
-            <Chip
-              key={opt.key}
-              label={s[opt.key]}
-              selected={activeTimer === opt.value}
-              onPress={() => chooseSleep(opt.value)}
-            />
-          ))}
-        </View>
-      </View>
-
-      {/* Speed + repeat — same manager as the Quran Book's Tilawah
-          player, so both screens always agree. */}
-      <View style={styles.sleepCard}>
-        <View style={styles.sleepHead}>
-          <Text style={styles.sleepTitle}>{shared.tilawahSpeed}</Text>
-        </View>
-        <View style={styles.chipRow}>
-          {QURAN_PLAYBACK_RATES.map((r) => (
-            <Chip
-              key={r}
-              label={`${r}x`}
-              selected={audio.playbackRate === r}
-              onPress={() => setQuranPlaybackRate(r)}
-            />
-          ))}
-        </View>
-        <View style={styles.sleepHead}>
-          <Text style={styles.sleepTitle}>{shared.tilawahRepeat}</Text>
-        </View>
-        <View style={styles.chipRow}>
-          <Chip
-            label={repeatLabel}
-            selected={audio.repeatMode !== 'off'}
-            onPress={cycleRepeat}
-          />
-        </View>
-      </View>
-
-      <View style={styles.autoRow}>
-        <View style={styles.autoText}>
-          <Text style={styles.autoTitle}>{s.autoPlay}</Text>
-          <Text style={styles.autoNote}>{s.autoPlayNote}</Text>
-        </View>
-        <Switch value={audio.autoPlay} onValueChange={setQuranAutoPlay} />
-      </View>
+      {/* The SAME Tilawah player as the Quran Book and the ParaBook
+          (Mihrab layout) — seek, transport, speed, repeat, sleep,
+          reciter, mode, auto-play all live here, so this screen and
+          the readers always agree. No tarjuma text is shown on this
+          screen, so its translation toggle is hidden rather than
+          offered as a dead switch. */}
+      <TilawahPlayer
+        lang={lang}
+        page={audio.page}
+        ayahs={pageData?.ayahs ?? []}
+        showTranslation
+        onTranslationChange={() => undefined}
+        showTranslationToggle={false}
+        onOpenList={() => goTo('quran')}
+      />
 
       <View style={styles.openBtn}>
         <PillButton
@@ -651,105 +361,5 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     color: C.muted,
   },
-  /* ---- Track / progress ---- */
-  trackTitle: {
-    fontFamily: F.sans,
-    fontSize: 17,
-    fontWeight: '800',
-    color: C.ink,
-    marginTop: 18,
-    textAlign: 'center',
-  },
-  seekTouch: {
-    height: 28,
-    justifyContent: 'center',
-    marginTop: 10,
-  },
-  seekTrack: {
-    height: 6,
-    borderRadius: 999,
-    backgroundColor: C.teal100,
-    overflow: 'hidden',
-  },
-  seekFill: { height: 6, borderRadius: 999, backgroundColor: C.teal500 },
-  timeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 2,
-  },
-  timeText: { fontFamily: F.sans, fontSize: 12.5, color: C.muted },
-  /* ---- Controls ---- */
-  controls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 14,
-    marginTop: 18,
-  },
-  ctrlBtn: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: C.white,
-    borderWidth: 1,
-    borderColor: C.line,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  playBtn: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    backgroundColor: C.peachMid,
-    borderWidth: 0,
-  },
-  ctrlIcon: { fontSize: 22, color: C.teal900, textAlign: 'center' },
-  playIcon: { fontSize: 28, color: C.peachText },
-  seekRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 14,
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-  },
-  nextPageBtn: { marginTop: 14 },
-  /* ---- Sleep timer ---- */
-  sleepCard: {
-    backgroundColor: C.white,
-    borderRadius: S.radius,
-    borderWidth: 1,
-    borderColor: C.line,
-    padding: 14,
-    marginTop: 16,
-  },
-  sleepHead: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  sleepTitle: { fontFamily: F.sans, fontSize: 14.5, fontWeight: '800', color: C.ink },
-  sleepStatus: { fontFamily: F.sans, fontSize: 12.5, color: C.teal500, textAlign: 'right' },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 10,
-  },
-  /* ---- Auto-play ---- */
-  autoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: C.white,
-    borderRadius: S.radius,
-    borderWidth: 1,
-    borderColor: C.line,
-    padding: 14,
-    marginTop: 12,
-  },
-  autoText: { flex: 1 },
-  autoTitle: { fontFamily: F.sans, fontSize: 14.5, fontWeight: '700', color: C.ink },
-  autoNote: { fontFamily: F.sans, fontSize: 12.5, color: C.muted, marginTop: 2 },
   openBtn: { marginTop: 16 },
 });
