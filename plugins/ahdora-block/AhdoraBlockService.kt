@@ -113,6 +113,31 @@ class AhdoraBlockService : AccessibilityService() {
   private var lastPkg: String? = null
   private val handler = Handler(Looper.getMainLooper())
   /**
+   * Re-evaluate the block the moment the schedule changes. Every
+   * schedule save (Sleep screen, App Block screen, Onboarding,
+   * startup sync) rewrites the single "config" blob in the same
+   * SharedPreferences the service reads — this listener fires on
+   * that write and re-evaluates the last foreground app on the
+   * main thread at once. Before it, a changed schedule only took
+   * effect on the next window-change event or the periodic
+   * re-check, so a block the user had just edited away stayed
+   * stuck on. (Listener callbacks can arrive on the writer's
+   * thread, so the evaluate is posted to the main handler —
+   * WindowManager calls must be on the main thread.)
+   */
+  private val configListener =
+    SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+      if (key == "config") {
+        handler.post {
+          try {
+            lastPkg?.let { evaluate(it) }
+          } catch (_: Exception) {
+            // Never crash the service on a re-check failure.
+          }
+        }
+      }
+    }
+  /**
    * Accessibility events only fire when the foreground window CHANGES.
    * Without this, blocking would never start if the user is already
    * inside a blocked app when the sleep window (or a prayer lock)
@@ -137,6 +162,7 @@ class AhdoraBlockService : AccessibilityService() {
   override fun onServiceConnected() {
     super.onServiceConnected()
     windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+    prefs().registerOnSharedPreferenceChangeListener(configListener)
     handler.postDelayed(recheckRunnable, 30_000L)
   }
 
@@ -169,6 +195,11 @@ class AhdoraBlockService : AccessibilityService() {
 
   override fun onDestroy() {
     handler.removeCallbacks(recheckRunnable)
+    try {
+      prefs().unregisterOnSharedPreferenceChangeListener(configListener)
+    } catch (_: Exception) {
+      // Already unregistered.
+    }
     removeOverlay()
     super.onDestroy()
   }
