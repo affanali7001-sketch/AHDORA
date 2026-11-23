@@ -51,6 +51,7 @@ import {
   TAJWEED_FAMILIES,
   tajweedColour,
   type TajweedFamilyId,
+  type TajweedRuleId,
   type TajweedSegment,
 } from '../lib/tajweed';
 import {
@@ -65,7 +66,9 @@ import {
   getQuranAudioState,
   loadQuranPlaybackPrefs,
   loadQuranReciter,
+  startQuranPage,
   subscribeQuranAudio,
+  toggleQuranAudio,
   type QuranAudioState,
 } from '../lib/quranAudio';
 import { fetchTafsir, type TafsirResult } from '../lib/tafsir';
@@ -90,6 +93,7 @@ import {
 
 const TOTAL_PAGES = 604;
 const TAJWEED_TOGGLE_KEY = 'ahdora:quran:tajweed:on';
+const NIGHT_KEY = 'ahdora:quran:night';
 const BISMILLAH = 'بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ';
 const ALQURAN_BASE = 'https://api.alquran.cloud/v1';
 /* Mihrab mushaf colours (sampled 11-33-31-61 + 11-33-40-59): white
@@ -139,6 +143,79 @@ function tajweedFamilyLabelKey(
     case 'tafkheem':
       return 'tajweedFamTafkheem';
   }
+}
+
+/** Distinct tajweed rules in one ayah's coloured segments, in
+ * first-appearance order, each with its example words (the coloured
+ * runs themselves — real words from this ayah, never invented). */
+function tajweedRulesInAyah(
+  segments: TajweedSegment[] | undefined,
+): { rule: TajweedRuleId; words: string[] }[] {
+  if (!segments) return [];
+  const ordered: { rule: TajweedRuleId; words: string[] }[] = [];
+  for (const sg of segments) {
+    if (!sg.rule) continue;
+    const existing = ordered.find((o) => o.rule === sg.rule);
+    if (existing) existing.words.push(sg.text);
+    else ordered.push({ rule: sg.rule, words: [sg.text] });
+  }
+  return ordered;
+}
+
+/** The Tajweed tab of the "Understand" panel: every rule that
+ * actually appears in this ayah, with its coloured example words
+ * from the ayah itself (Mihrab UNDERSTAND layout, rebuilt from
+ * scratch on AHDORA's own tajweed data). */
+function TajweedRulesList({
+  lang,
+  segments,
+  tajweedOn,
+  tajweedFailed,
+  dark,
+}: {
+  lang: AppLanguage;
+  segments: TajweedSegment[] | undefined;
+  tajweedOn: boolean;
+  tajweedFailed: boolean;
+  dark: boolean;
+}) {
+  const shared = stringsFor(lang);
+  if (!tajweedOn) {
+    return <Text style={T.note}>{shared.understandTajweedOff}</Text>;
+  }
+  if (!segments) {
+    return (
+      <Text style={T.error}>
+        {tajweedFailed ? shared.tajweedFailed : shared.tajweedLoading}
+      </Text>
+    );
+  }
+  const rules = tajweedRulesInAyah(segments);
+  if (rules.length === 0) {
+    return <Text style={T.note}>{shared.understandNoTajweed}</Text>;
+  }
+  return (
+    <View>
+      {rules.map(({ rule, words }) => (
+        <View key={rule} style={styles.tajweedRuleRow}>
+          <View
+            style={[
+              styles.legendDot,
+              { backgroundColor: tajweedColour(rule, dark) },
+            ]}
+          />
+          <Text style={styles.tajweedRuleLabel}>
+            {(shared as Record<string, string>)[`tajweedRule_${rule}`] ?? rule}
+          </Text>
+          <Text
+            style={[styles.tajweedRuleWord, { color: tajweedColour(rule, dark) }]}
+          >
+            {words.join(' ')}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
 }
 
 const STRINGS: Record<
@@ -439,6 +516,13 @@ export default function QuranBookScreen({
       } catch {
         /* Default on — colours must never break the reader. */
       }
+      try {
+        const savedNight = await AsyncStorage.getItem(NIGHT_KEY);
+        if (savedNight === 'true') setNight(true);
+        else if (savedNight === 'false') setNight(false);
+      } catch {
+        /* Follows the app theme until the reader picks. */
+      }
     })();
   }, []);
 
@@ -449,11 +533,27 @@ export default function QuranBookScreen({
   const [tafsirLoading, setTafsirLoading] = useState(false);
   const [tafsirError, setTafsirError] = useState<string | null>(null);
 
+  // "Understand" panel: Translation / Tafsir / Tajweed tabs under
+  // ONE ayah (Mihrab UNDERSTAND layout). The tafsir is fetched the
+  // moment the panel opens, so the Tafsir tab is ready when tapped.
+  const [understandAyah, setUnderstandAyah] = useState<MushafAyah | null>(null);
+  const [understandTab, setUnderstandTab] = useState<'translation' | 'tafsir' | 'tajweed'>(
+    'translation',
+  );
+
+  // Night mode for the mushaf page (Mihrab "Night" pill): dark navy
+  // page, cream ink. Per-reader choice, persisted on this phone;
+  // until the reader picks, it follows the app theme. Fullscreen
+  // hides every control except the page itself + page turn.
+  const th = useAppTheme();
+  const [night, setNight] = useState<boolean | null>(null);
+  const nightOn = night ?? th.dark;
+  const [fullscreen, setFullscreen] = useState(false);
+
   // Tajweed colours (quran.com v4, cached per surah — see
   // src/lib/tajweed.ts). Keyed `${surah}:${ayahInSurah}`. On by
   // default; the toggle persists on this phone. A failed fetch
   // falls back to the plain AlQuran Cloud text — never a blocker.
-  const th = useAppTheme();
   const [tajweedOn, setTajweedOn] = useState(true);
   const [tajweedByKey, setTajweedByKey] = useState<Map<string, TajweedSegment[]>>(
     new Map(),
@@ -586,6 +686,8 @@ export default function QuranBookScreen({
     setTafsir(null);
     setTafsirLoading(false);
     setTafsirError(null);
+    setUnderstandAyah(null);
+    setUnderstandTab('translation');
     setUrduByGlobal(new Map());
     setTranslationByGlobal(new Map());
     setTranslitByGlobal(new Map());
@@ -848,6 +950,39 @@ export default function QuranBookScreen({
     setTafsirError(null);
   }
 
+  /** Open the "Understand" panel under one ayah. The tafsir fetch
+   * starts at once, so the Tafsir tab is ready when tapped. */
+  function openUnderstand(a: MushafAyah): void {
+    setUnderstandAyah(a);
+    setUnderstandTab('translation');
+    openTafsir(a);
+  }
+
+  function closeUnderstand(): void {
+    setUnderstandAyah(null);
+    closeTafsir();
+  }
+
+  /** Night mode on/off for the mushaf page (persisted on this phone). */
+  function toggleNight(): void {
+    setNight((prev) => {
+      const next = !(prev ?? th.dark);
+      void AsyncStorage.setItem(NIGHT_KEY, next ? 'true' : 'false').catch(
+        () => undefined,
+      );
+      return next;
+    });
+  }
+
+  /** Header "Audio" button: pause the page's tilawat, or start it. */
+  function onHeaderAudio(): void {
+    if (audio.playing && audio.page === page && audio.mode !== null) {
+      toggleQuranAudio();
+    } else {
+      void startQuranPage(page, 'tilawat');
+    }
+  }
+
   /** Tajweed colours on/off (persisted on this phone). */
   function onTajweedToggle(on: boolean): void {
     setTajweedOn(on);
@@ -1016,12 +1151,19 @@ export default function QuranBookScreen({
   }
   const firstSeg = segments[0];
   const firstAyah = mushaf?.ayahs[0];
-  const readerSub =
-    firstSeg && firstAyah
-      ? `${firstSeg.surah.englishName} · ${
-          firstSeg.surah.revelationType === 'Meccan' ? s.mecca : s.medina
-        } · ${firstSeg.surah.numberOfAyahs} ${s.aayatWord} · ${s.paraWord} ${firstAyah.juz}`
-      : null;
+  // Header "Audio" button state: the page's own tilawat is playing.
+  const headerAudioOn =
+    audio.playing && audio.page === page && audio.mode !== null;
+
+  function goBackFromReader(): void {
+    // Audio is global — leaving the reader does NOT stop it.
+    if (initialView === 'reader') {
+      goTo('quran');
+    } else {
+      setView('landing');
+      void loadHistory();
+    }
+  }
 
   return (
     <ScrollView
@@ -1030,70 +1172,121 @@ export default function QuranBookScreen({
       style={styles.scroll}
       contentContainerStyle={L.scroll}
     >
-      <PillButton
-        label={shared.readerBack}
-        variant="ghost"
-        small
-        onPress={() => {
-          // Audio is global — leaving the reader does NOT stop it.
-          if (initialView === 'reader') {
-            goTo('quran');
-          } else {
-            setView('landing');
-            void loadHistory();
-          }
-        }}
-      />
-      <View style={styles.readerHead}>
-        <Text style={T.h2}>Quran Book</Text>
-        <View style={styles.pageTag}>
-          <Text style={styles.pageTagText}>
-            Page {page} / {TOTAL_PAGES}
+      {/* Mihrab mushaf header: back arrow + surah name, Audio +
+          Translation buttons, fullscreen — then the Juz label and
+          the Night pill, like the printed-mushaf page. */}
+      <View style={styles.mihrabHead}>
+        <Pressable
+          onPress={goBackFromReader}
+          style={styles.headBack}
+          accessibilityRole="button"
+          accessibilityLabel={shared.readerBack}
+          hitSlop={8}
+        >
+          <Text style={styles.headBackGlyph}>‹</Text>
+        </Pressable>
+        <Text style={styles.headTitle} numberOfLines={1}>
+          {firstSeg?.surah.englishName ?? 'Quran Book'}
+        </Text>
+        <Pressable
+          onPress={onHeaderAudio}
+          style={[styles.headBtn, headerAudioOn && styles.headBtnOn]}
+          accessibilityRole="button"
+          accessibilityLabel={shared.readerAudio}
+          hitSlop={6}
+        >
+          <Text style={[styles.headBtnText, headerAudioOn && styles.headBtnTextOn]}>
+            ♪ {shared.readerAudio}
           </Text>
-        </View>
+        </Pressable>
+        <Pressable
+          onPress={() => setShowTranslation((v) => !v)}
+          style={[styles.headBtn, showTranslation && styles.headBtnOn]}
+          accessibilityRole="button"
+          accessibilityLabel={shared.tilawahTranslation}
+          hitSlop={6}
+        >
+          <Text
+            style={[styles.headBtnText, showTranslation && styles.headBtnTextOn]}
+          >
+            {shared.tilawahTranslation}
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setFullscreen((v) => !v)}
+          style={styles.headBtn}
+          accessibilityRole="button"
+          accessibilityLabel={
+            fullscreen ? shared.readerExitFullscreen : shared.readerFullscreen
+          }
+          hitSlop={6}
+        >
+          <Text style={styles.headBtnText}>{fullscreen ? '✕' : '⛶'}</Text>
+        </Pressable>
       </View>
-      {readerSub ? <Text style={styles.readerSub}>{readerSub}</Text> : null}
+      <View style={styles.juzRow}>
+        <Text style={styles.juzLabel}>
+          Juz {firstAyah?.juz ?? ''} · Page {page} / {TOTAL_PAGES}
+        </Text>
+        <Pressable
+          onPress={toggleNight}
+          style={[styles.nightPill, nightOn && styles.nightPillOn]}
+          accessibilityRole="button"
+          accessibilityLabel={shared.readerNight}
+          hitSlop={6}
+        >
+          <Text style={[styles.nightPillText, nightOn && styles.nightPillTextOn]}>
+            ☾ {shared.readerNight}
+          </Text>
+        </Pressable>
+      </View>
 
-      {/* Tilawah player at the TOP of the reader (user request
+      {/* Fullscreen hides the player and the top Next button —
+          only the mushaf page + page turn stay. */}
+      {!fullscreen && (
+        <>
+          {/* Tilawah player at the TOP of the reader (user request
           2026-11-22): the play controls sit right under the page
           label, above the mushaf page — visible without scrolling.
           Full player: play/pause, prev/next ayah, seek bar, speed,
           repeat, sleep timer, reciter picker, auto-play, translation
           toggle — all wired to the global audio manager. */}
-      <TilawahPlayer
-        lang={lang}
-        page={page}
-        ayahs={mushaf?.ayahs ?? []}
-        showTranslation={showTranslation}
-        onTranslationChange={setShowTranslation}
-        followPaused={followPausedAyah !== null}
-        onFollowResume={resumeFollow}
-        onOpenList={() => {
-          if (initialView === 'reader') {
-            goTo('quran');
-          } else {
-            setView('landing');
-            void loadHistory();
-          }
-        }}
-      />
-      <Text style={T.note}>
-        {s.urduAudioCredit} · {URDU_AUDIO.bitrate}
-      </Text>
+          <TilawahPlayer
+            lang={lang}
+            page={page}
+            ayahs={mushaf?.ayahs ?? []}
+            showTranslation={showTranslation}
+            onTranslationChange={setShowTranslation}
+            followPaused={followPausedAyah !== null}
+            onFollowResume={resumeFollow}
+            onOpenList={() => {
+              if (initialView === 'reader') {
+                goTo('quran');
+              } else {
+                setView('landing');
+                void loadHistory();
+              }
+            }}
+          />
+          <Text style={T.note}>
+            {s.urduAudioCredit} · {URDU_AUDIO.bitrate}
+          </Text>
 
-      {/* Next page right below the play controls (user request
+          {/* Next page right below the play controls (user request
           2026-11-22) — the same Next also sits below the mushaf
           page; this one is for turning the page without scrolling. */}
-      {page < TOTAL_PAGES ? (
-        <View style={{ marginTop: 12 }}>
-          <PillButton
-            label={shared.nextPage}
-            variant="peach"
-            block
-            onPress={() => openReader(page + 1)}
-          />
-        </View>
-      ) : null}
+          {page < TOTAL_PAGES ? (
+            <View style={{ marginTop: 12 }}>
+              <PillButton
+                label={shared.nextPage}
+                variant="peach"
+                block
+                onPress={() => openReader(page + 1)}
+              />
+            </View>
+          ) : null}
+        </>
+      )}
 
       {pageLoading ? (
         <ActivityIndicator color={C.teal500} size="large" style={styles.loader} />
@@ -1109,57 +1302,62 @@ export default function QuranBookScreen({
         </View>
       ) : mushaf ? (
         <>
-          {/* Tajweed colours: on/off + legend (King Fahd palette). */}
-          <View style={styles.tajweedRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.autoTitle}>{shared.tajweedTitle}</Text>
-              <Text style={styles.autoNote}>{shared.tajweedNote}</Text>
-            </View>
-            <Switch value={tajweedOn} onValueChange={onTajweedToggle} />
-            <PillButton
-              label={legendOpen ? shared.tajweedHideLegend : shared.tajweedLegend}
-              small
-              variant="ghost"
-              onPress={() => setLegendOpen((v) => !v)}
-            />
-          </View>
-          {tajweedLoading ? (
-            <Text style={styles.audioLoading}>{shared.tajweedLoading}</Text>
-          ) : null}
-          {tajweedFailed && tajweedOn ? (
-            <Text style={T.error}>{shared.tajweedFailed}</Text>
-          ) : null}
-          {legendOpen ? (
-            <View style={styles.legendCard}>
-              {TAJWEED_FAMILIES.map((fam) => (
-                <View key={fam.family}>
-                  <Text style={styles.legendFam}>
-                    {shared[tajweedFamilyLabelKey(fam.family)]}
-                  </Text>
-                  {fam.rules.map((r) => (
-                    <View key={r.id} style={styles.legendRow}>
-                      <View
-                        style={[
-                          styles.legendDot,
-                          { backgroundColor: tajweedColour(r.id, th.dark) },
-                        ]}
-                      />
-                      <Text style={styles.legendText}>
-                        {(shared as Record<string, string>)[`tajweedRule_${r.id}`] ??
-                          r.id}
+          {/* Tajweed colours: on/off + legend (King Fahd palette).
+              Hidden in fullscreen — only the page stays. */}
+          {!fullscreen && (
+            <>
+              <View style={styles.tajweedRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.autoTitle}>{shared.tajweedTitle}</Text>
+                  <Text style={styles.autoNote}>{shared.tajweedNote}</Text>
+                </View>
+                <Switch value={tajweedOn} onValueChange={onTajweedToggle} />
+                <PillButton
+                  label={legendOpen ? shared.tajweedHideLegend : shared.tajweedLegend}
+                  small
+                  variant="ghost"
+                  onPress={() => setLegendOpen((v) => !v)}
+                />
+              </View>
+              {tajweedLoading ? (
+                <Text style={styles.audioLoading}>{shared.tajweedLoading}</Text>
+              ) : null}
+              {tajweedFailed && tajweedOn ? (
+                <Text style={T.error}>{shared.tajweedFailed}</Text>
+              ) : null}
+              {legendOpen ? (
+                <View style={styles.legendCard}>
+                  {TAJWEED_FAMILIES.map((fam) => (
+                    <View key={fam.family}>
+                      <Text style={styles.legendFam}>
+                        {shared[tajweedFamilyLabelKey(fam.family)]}
                       </Text>
+                      {fam.rules.map((r) => (
+                        <View key={r.id} style={styles.legendRow}>
+                          <View
+                            style={[
+                              styles.legendDot,
+                              { backgroundColor: tajweedColour(r.id, nightOn) },
+                            ]}
+                          />
+                          <Text style={styles.legendText}>
+                            {(shared as Record<string, string>)[`tajweedRule_${r.id}`] ??
+                              r.id}
+                          </Text>
+                        </View>
+                      ))}
                     </View>
                   ))}
+                  <Text style={T.note}>{shared.tajweedTafkheemNote}</Text>
                 </View>
-              ))}
-              <Text style={T.note}>{shared.tajweedTafkheemNote}</Text>
-            </View>
-          ) : null}
+              ) : null}
+            </>
+          )}
 
-          <View style={[styles.mushaf, th.dark && styles.mushafDark]}>
-            <View style={[styles.mushafInner, th.dark && styles.mushafInnerDark]}>
+          <View style={[styles.mushaf, nightOn && styles.mushafDark]}>
+            <View style={[styles.mushafInner, nightOn && styles.mushafInnerDark]}>
               <View style={styles.stripe} />
-              <Text style={[styles.pageNo, th.dark && { color: DARK.muted }]}>
+              <Text style={[styles.pageNo, nightOn && { color: DARK.muted }]}>
                 — {page} —
               </Text>
               {segments.map((seg) => {
@@ -1177,17 +1375,17 @@ export default function QuranBookScreen({
                   <View key={`${seg.surah.number}-${seg.ayahs[0]?.numberInSurah ?? 0}`}>
                     {startsHere ? (
                       <View style={styles.bandOuter}>
-                        <View style={[styles.surahBand, th.dark && styles.surahBandDark]}>
+                        <View style={[styles.surahBand, nightOn && styles.surahBandDark]}>
                           <Text
                             style={[
                               styles.surahBandArabic,
-                              th.dark && { color: MUSHAF_INK_DARK },
+                              nightOn && { color: MUSHAF_INK_DARK },
                             ]}
                           >
                             ۞ {seg.surah.name} ۞
                           </Text>
                           <Text
-                            style={[styles.surahBandMeta, th.dark && { color: DARK.muted }]}
+                            style={[styles.surahBandMeta, nightOn && { color: DARK.muted }]}
                           >
                             Surah {seg.surah.number} · {seg.surah.englishName} ·{' '}
                             {seg.surah.numberOfAyahs} {s.aayatWord} ·{' '}
@@ -1197,20 +1395,20 @@ export default function QuranBookScreen({
                       </View>
                     ) : null}
                     {startsHere && seg.surah.number !== 9 ? (
-                      <Text style={[styles.bismillah, th.dark && { color: MUSHAF_INK_DARK }]}>
+                      <Text style={[styles.bismillah, nightOn && { color: MUSHAF_INK_DARK }]}>
                         {bismillahSegs && bismillahSegs.length > 0 ? (
-                          <TajweedSpans segments={bismillahSegs} dark={th.dark} />
+                          <TajweedSpans segments={bismillahSegs} dark={nightOn} />
                         ) : (
                           BISMILLAH
                         )}
                         {seg.surah.number === 1 ? (
-                          <Text style={[styles.marker, th.dark && styles.markerDark]}>
+                          <Text style={[styles.marker, nightOn && styles.markerDark]}>
                             {' '}۝ {toArabicIndic(1)}{' '}
                           </Text>
                         ) : null}
                       </Text>
                     ) : null}
-                    <Text style={[styles.ayahFlow, th.dark && { color: MUSHAF_INK_DARK }]}>
+                    <Text style={[styles.ayahFlow, nightOn && { color: MUSHAF_INK_DARK }]}>
                       {flowAyahs.map((a) => {
                         const segs = tajweedOn
                           ? tajweedByKey.get(`${a.surah.number}:${a.numberInSurah}`)
@@ -1222,7 +1420,7 @@ export default function QuranBookScreen({
                             style={
                               playing
                                 ? {
-                                    backgroundColor: th.dark
+                                    backgroundColor: nightOn
                                       ? 'rgba(135,165,217,0.25)'
                                       : PLAYING_BG,
                                   }
@@ -1230,11 +1428,11 @@ export default function QuranBookScreen({
                             }
                           >
                             {segs && segs.length > 0 ? (
-                              <TajweedSpans segments={segs} dark={th.dark} />
+                              <TajweedSpans segments={segs} dark={nightOn} />
                             ) : (
                               a.text.trim()
                             )}{' '}
-                            <Text style={[styles.marker, th.dark && styles.markerDark]}>
+                            <Text style={[styles.marker, nightOn && styles.markerDark]}>
                               {' '}۝ {toArabicIndic(a.numberInSurah)}{' '}
                             </Text>{' '}
                           </Text>
@@ -1246,13 +1444,13 @@ export default function QuranBookScreen({
               })}
               <View style={styles.stripe} />
               <View style={styles.mushafFoot}>
-                <Text style={[styles.footText, th.dark && { color: DARK.muted }]}>
+                <Text style={[styles.footText, nightOn && { color: DARK.muted }]}>
                   PARA {firstAyah?.juz ?? ''}
                 </Text>
-                <Text style={[styles.footText, th.dark && { color: DARK.muted }]}>
+                <Text style={[styles.footText, nightOn && { color: DARK.muted }]}>
                   SURAH {firstSeg?.surah.englishName.toUpperCase() ?? ''}
                 </Text>
-                <Text style={[styles.footText, th.dark && { color: DARK.muted }]}>
+                <Text style={[styles.footText, nightOn && { color: DARK.muted }]}>
                   PAGE {page}
                 </Text>
               </View>
@@ -1308,11 +1506,15 @@ export default function QuranBookScreen({
           </View>
           {pageJumpMsg ? <Text style={T.error}>{pageJumpMsg}</Text> : null}
 
-          {/* Translation picker: 14 live AlQuran Cloud editions
+          {/* Translation picker + tarjuma list + Understand panels
+              + mark-read — hidden in fullscreen, only the page stays. */}
+          {!fullscreen && (
+            <>
+              {/* Translation picker: 14 live AlQuran Cloud editions
               (see src/lib/translations.ts). The Urdu (Junagarhi)
               above never changes — this picks the second line only,
               and the tarjuma voice still reads Junagarhi. */}
-          <View style={styles.translationRow}>
+              <View style={styles.translationRow}>
             <Text style={styles.autoTitle}>{s.translationTitle}</Text>
             <Text style={styles.autoNote}>{s.translationNote}</Text>
             <ScrollView
@@ -1389,59 +1591,145 @@ export default function QuranBookScreen({
               ) : null}
               <View style={styles.tafsirBtnRow}>
                 <PillButton
-                  label={s.tafsirBtn}
+                  label={shared.understandTitle}
                   small
-                  variant="ghost"
-                  onPress={() => openTafsir(a)}
+                  variant={
+                    understandAyah?.number === a.number ? 'primary' : 'ghost'
+                  }
+                  onPress={() =>
+                    understandAyah?.number === a.number
+                      ? closeUnderstand()
+                      : openUnderstand(a)
+                  }
                 />
               </View>
-            </View>
-          ))}
-
-          {/* Tafsir panel for the selected ayah — real text only,
-              always with its source/edition name (see src/lib/tafsir.ts). */}
-          {tafsirAyah ? (
-            <View style={styles.tafsirCard}>
-              <Text style={styles.tafsirTitle}>
-                {s.tafsirTitle} — Surah {tafsirAyah.surah.englishName} · Ayah{' '}
-                {tafsirAyah.numberInSurah}
-              </Text>
-              {tafsir ? (
-                <Text style={styles.tafsirSource}>
-                  {s.tafsirSource(tafsir.edition.name, tafsir.edition.source)}
-                </Text>
-              ) : null}
-              {tafsirLoading ? (
-                <ActivityIndicator
-                  color={C.teal500}
-                  size="small"
-                  style={styles.tafsirLoader}
-                />
-              ) : tafsirError ? (
-                <>
-                  <Text style={T.error}>{tafsirError}</Text>
-                  <View style={styles.tafsirBtnRow}>
-                    <PillButton
-                      label={shared.retry}
-                      small
-                      variant="primary"
-                      onPress={() => openTafsir(tafsirAyah)}
+              {/* "Understand" panel under this ayah (Mihrab
+                  UNDERSTAND layout): Translation / Tafsir / Tajweed
+                  tabs. Translation = language chips + this ayah's
+                  lines; Tafsir = real text with its source named;
+                  Tajweed = the rules in THIS ayah with coloured
+                  example words from it. */}
+              {understandAyah?.number === a.number ? (
+                <View style={styles.understandCard}>
+                  <View style={styles.understandTabs}>
+                    <Chip
+                      label={shared.understandTranslation}
+                      selected={understandTab === 'translation'}
+                      onPress={() => setUnderstandTab('translation')}
+                    />
+                    <Chip
+                      label={shared.understandTafsir}
+                      selected={understandTab === 'tafsir'}
+                      onPress={() => setUnderstandTab('tafsir')}
+                    />
+                    <Chip
+                      label={shared.understandTajweed}
+                      selected={understandTab === 'tajweed'}
+                      onPress={() => setUnderstandTab('tajweed')}
                     />
                   </View>
-                </>
-              ) : tafsir ? (
-                <Text style={styles.tafsirText}>{tafsir.text}</Text>
+                  {understandTab === 'translation' ? (
+                    <>
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        style={styles.translationChips}
+                      >
+                        {QURAN_TRANSLATIONS.map((t) => (
+                          <Chip
+                            key={t.id}
+                            label={`${t.language} · ${t.translator}`}
+                            selected={translationId === t.id}
+                            onPress={() => onTranslationPick(t.id)}
+                          />
+                        ))}
+                      </ScrollView>
+                      {translitByGlobal.get(a.number) ? (
+                        <Text style={styles.translit}>
+                          {translitByGlobal.get(a.number)}
+                        </Text>
+                      ) : null}
+                      {urduByGlobal.get(a.number) ? (
+                        <Text style={styles.urduText}>{urduByGlobal.get(a.number)}</Text>
+                      ) : null}
+                      {translationByGlobal.get(a.number) ? (
+                        <Text
+                          style={
+                            pickedTranslation.rtl ? styles.urduText : styles.english
+                          }
+                        >
+                          {translationByGlobal.get(a.number)}
+                        </Text>
+                      ) : null}
+                      <Text style={styles.autoNote}>
+                        {pickedTranslation.language} — {pickedTranslation.translator}{' '}
+                        (AlQuran Cloud)
+                      </Text>
+                      {translationLoading ? (
+                        <Text style={styles.audioLoading}>{s.translationLoading}</Text>
+                      ) : null}
+                      {translationFailed ? (
+                        <Text style={T.error}>{s.translationFailed}</Text>
+                      ) : null}
+                    </>
+                  ) : null}
+                  {understandTab === 'tafsir' ? (
+                    <>
+                      <Text style={styles.tafsirTitle}>
+                        {s.tafsirTitle} — Surah {a.surah.englishName} · Ayah{' '}
+                        {a.numberInSurah}
+                      </Text>
+                      {tafsir ? (
+                        <Text style={styles.tafsirSource}>
+                          {s.tafsirSource(tafsir.edition.name, tafsir.edition.source)}
+                        </Text>
+                      ) : null}
+                      {tafsirLoading ? (
+                        <ActivityIndicator
+                          color={C.teal500}
+                          size="small"
+                          style={styles.tafsirLoader}
+                        />
+                      ) : tafsirError ? (
+                        <>
+                          <Text style={T.error}>{tafsirError}</Text>
+                          <View style={styles.tafsirBtnRow}>
+                            <PillButton
+                              label={shared.retry}
+                              small
+                              variant="primary"
+                              onPress={() => openTafsir(a)}
+                            />
+                          </View>
+                        </>
+                      ) : tafsir ? (
+                        <Text style={styles.tafsirText}>{tafsir.text}</Text>
+                      ) : null}
+                    </>
+                  ) : null}
+                  {understandTab === 'tajweed' ? (
+                    <TajweedRulesList
+                      lang={lang}
+                      segments={tajweedByKey.get(
+                        `${a.surah.number}:${a.numberInSurah}`,
+                      )}
+                      tajweedOn={tajweedOn}
+                      tajweedFailed={tajweedFailed}
+                      dark={nightOn}
+                    />
+                  ) : null}
+                  <View style={styles.tafsirBtnRow}>
+                    <PillButton
+                      label={shared.understandClose}
+                      small
+                      variant="ghost"
+                      onPress={closeUnderstand}
+                    />
+                  </View>
+                </View>
               ) : null}
-              <View style={styles.tafsirBtnRow}>
-                <PillButton
-                  label={s.tafsirClose}
-                  small
-                  variant="ghost"
-                  onPress={() => closeTafsir()}
-                />
-              </View>
             </View>
-          ) : null}
+          ))}
 
           <PillButton
             label={shared.markRead}
@@ -1456,6 +1744,8 @@ export default function QuranBookScreen({
             Page {page} of {TOTAL_PAGES} · Surah {firstSeg?.surah.englishName ?? ''}
           </Text>
           <Text style={T.note}>Urdu text: {URDU_TEXT_NAME}</Text>
+            </>
+          )}
         </>
       ) : null}
     </ScrollView>
@@ -1554,6 +1844,89 @@ const styles = StyleSheet.create({
   surahName: { fontFamily: F.sans, fontSize: 16, fontWeight: '700', color: C.ink },
   surahSub: { fontFamily: F.sans, fontSize: 12, color: C.muted, marginTop: 2 },
   surahArabic: { fontFamily: F.arabic, fontSize: 20, color: C.teal900 },
+  /* ---- Mihrab mushaf header: back + surah + Audio/Translation/fullscreen ---- */
+  mihrabHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 14,
+  },
+  headBack: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  headBackGlyph: { fontSize: 26, lineHeight: 30, color: C.ink, textAlign: 'center' },
+  headTitle: {
+    flex: 1,
+    fontFamily: F.sans,
+    fontSize: 19,
+    fontWeight: '800',
+    color: C.ink,
+  },
+  headBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: C.white,
+    borderWidth: 1,
+    borderColor: C.line,
+    flexShrink: 0,
+  },
+  headBtnOn: { backgroundColor: C.teal700, borderColor: C.teal700 },
+  headBtnText: { fontFamily: F.sans, fontSize: 13, fontWeight: '700', color: C.teal700 },
+  headBtnTextOn: { color: C.white },
+  juzRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  juzLabel: {
+    fontFamily: F.sans,
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    color: C.bronze,
+  },
+  nightPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: C.white,
+    borderWidth: 1,
+    borderColor: C.bronze,
+  },
+  nightPillOn: { backgroundColor: C.navy, borderColor: C.navy },
+  nightPillText: { fontFamily: F.sans, fontSize: 13, fontWeight: '700', color: C.bronze },
+  nightPillTextOn: { color: C.white },
+  /* ---- "Understand" panel under one ayah ---- */
+  understandCard: {
+    backgroundColor: C.white,
+    borderRadius: S.radius,
+    borderWidth: 1,
+    borderColor: C.line,
+    padding: 14,
+    marginTop: 12,
+  },
+  understandTabs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  tajweedRuleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 6,
+  },
+  tajweedRuleLabel: { fontFamily: F.sans, fontSize: 13.5, color: C.ink, flex: 1 },
+  tajweedRuleWord: {
+    fontFamily: F.arabic,
+    fontSize: 20,
+    lineHeight: 30,
+    textAlign: 'right',
+    flexShrink: 0,
+  },
   /* ---- Reader ---- */
   readerHead: {
     flexDirection: 'row',

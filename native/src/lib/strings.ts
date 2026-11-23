@@ -524,6 +524,27 @@ const en = {
   reciterTitle: 'Reciter',
   reciterNote:
     'Applies from the next play. The Urdu tarjuma voice stays Shamshad Ali Khan.',
+  // ---- tilawah screen (Mihrab layout: player, page preview, start-from) ----
+  tilawahStartFrom: 'Start from',
+  tilawahOpenReader: 'Open in the reader',
+  tilawahChooseReciter: 'Choose reciter',
+  tilawahSearchReciters: 'Search reciters…',
+  tilawahPreview: 'Preview',
+  tilawahPreviewNote: 'Preview plays this page in that voice.',
+  tilawahNoReciters: 'No reciter matches that search.',
+  // ---- reader header (Mihrab mushaf page) ----
+  readerNight: 'Night',
+  readerFullscreen: 'Fullscreen',
+  readerExitFullscreen: 'Exit fullscreen',
+  readerAudio: 'Audio',
+  // ---- understand panel (translation / tafsir / tajweed under one ayah) ----
+  understandTitle: 'Understand',
+  understandTranslation: 'Translation',
+  understandTafsir: 'Tafsir',
+  understandTajweed: 'Tajweed',
+  understandNoTajweed: 'No tajweed rule in this ayah.',
+  understandTajweedOff: 'Turn tajweed colours on to see the rules in this ayah.',
+  understandClose: 'Close',
   // ---- tajweed colours (King Fahd Complex QPC V4 palette) ----
   tajweedTitle: 'Tajweed colours',
   tajweedLegend: 'Legend',
@@ -1390,6 +1411,27 @@ const hi: typeof en = {
   reciterTitle: 'Qari',
   reciterNote:
     'Agli baar play karne se lagega. Urdu tarjume ki awaaz Shamshad Ali Khan hi rahegi.',
+  // ---- tilawah screen (Mihrab layout: player, page preview, start-from) ----
+  tilawahStartFrom: 'Yahan se shuru karo',
+  tilawahOpenReader: 'Reader me kholo',
+  tilawahChooseReciter: 'Qari chuno',
+  tilawahSearchReciters: 'Qari dhoondho…',
+  tilawahPreview: 'Suno',
+  tilawahPreviewNote: 'Preview is page ko us awaaz me bajata hai.',
+  tilawahNoReciters: 'Is khoj se koi qari nahi mila.',
+  // ---- reader header (Mihrab mushaf page) ----
+  readerNight: 'Night',
+  readerFullscreen: 'Fullscreen',
+  readerExitFullscreen: 'Fullscreen band karo',
+  readerAudio: 'Audio',
+  // ---- understand panel (translation / tafsir / tajweed under one ayah) ----
+  understandTitle: 'Samjho',
+  understandTranslation: 'Tarjuma',
+  understandTafsir: 'Tafsir',
+  understandTajweed: 'Tajweed',
+  understandNoTajweed: 'Is aayat me koi tajweed rule nahi hai.',
+  understandTajweedOff: 'Is aayat ke rules dekhne ke liye tajweed colours on karo.',
+  understandClose: 'Band karo',
   // ---- tajweed colours (King Fahd Complex QPC V4 palette) ----
   tajweedTitle: 'Tajweed rang',
   tajweedLegend: 'Legend',

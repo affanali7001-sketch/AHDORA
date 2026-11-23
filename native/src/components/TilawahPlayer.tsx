@@ -22,11 +22,11 @@
  *      skip-forward, next-SURAH ">" chevron;
  *   7. one row of small pills: speed ("1×", cycles), "Sleep
  *      timer" (opens the sleep choices), repeat (cycles
- *      off → ayah → surah), cast (opens the reciter picker —
- *      there is no real cast target, so it opens the reciter
- *      choice instead of faking one), list (opens the surah list).
- * Mihrab palette: dark navy card, cream-white text, light-blue play
- * button and fills.
+ *      off → ayah → surah), reciter (opens the "Choose reciter"
+ *      sheet — search + preview in that voice), list (opens the
+ *      surah list). There is NO cast pill: no real casting
+ *      exists, so none is shown. Mihrab palette: dark navy card,
+ *      cream-white text, light-blue play button and fills.
  *
  * Everything here is real state from the global manager
  * (src/lib/quranAudio.ts): tilawat stays EveryAyah in the picked
@@ -45,13 +45,14 @@ import {
   ActivityIndicator,
   PanResponder,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { stringsFor, type AppLanguage } from '../lib/strings';
 import { C, F, S } from '../lib/theme';
-import { Chip, PillButton, Switch } from './ui';
+import { Chip, Input, PillButton, Switch } from './ui';
 import {
   QURAN_PLAYBACK_RATES,
   QURAN_RECITERS,
@@ -213,6 +214,8 @@ export default function TilawahPlayer({
   const [panel, setPanel] = useState<'none' | 'reciter' | 'sleep'>('none');
   const [surahNavBusy, setSurahNavBusy] = useState(false);
   const [navError, setNavError] = useState<string | null>(null);
+  const [reciterQuery, setReciterQuery] = useState('');
+  const [previewBusyId, setPreviewBusyId] = useState<string | null>(null);
 
   // Audio is live somewhere (this page or another) when a queue is
   // loaded. The scrubbers + labels follow the LIVE audio, not the
@@ -333,6 +336,26 @@ export default function TilawahPlayer({
     // chips there pick the timer.
     setPanel((p) => (p === 'sleep' ? 'none' : 'sleep'));
   }
+
+  /** Preview a reciter for real: switch the voice, then play THIS
+   * page in it — the listener hears that exact voice on the page
+   * in front of them. No sample file is faked. */
+  async function previewReciter(id: string): Promise<void> {
+    if (previewBusyId !== null) return;
+    setPreviewBusyId(id);
+    try {
+      await setQuranReciter(id);
+      await startQuranPage(page, audio.mode ?? 'tilawat');
+    } finally {
+      setPreviewBusyId(null);
+    }
+  }
+
+  const filteredReciters = QURAN_RECITERS.filter((r) => {
+    const q = reciterQuery.trim().toLowerCase();
+    if (!q) return true;
+    return r.name.toLowerCase().includes(q);
+  });
 
   const repeatLabel =
     audio.repeatMode === 'ayah'
@@ -497,8 +520,9 @@ export default function TilawahPlayer({
         </Pressable>
       </View>
 
-      {/* 7 — one quiet row of pills: speed, sleep, repeat, cast
-          (reciter), list. Each says its value and acts on a tap. */}
+      {/* 7 — one quiet row of pills: speed, sleep, repeat, reciter
+          (opens the "Choose reciter" sheet), list. No cast pill:
+          there is no real casting, so none is shown. */}
       <View style={styles.optionsRow}>
         <Pressable
           onPress={cycleRate}
@@ -536,7 +560,7 @@ export default function TilawahPlayer({
           accessibilityRole="button"
           accessibilityLabel={s.reciterTitle}
         >
-          <Text style={styles.pillText}>◉</Text>
+          <Text style={styles.pillText}>♪</Text>
         </Pressable>
         <Pressable
           onPress={onOpenList}
@@ -587,22 +611,83 @@ export default function TilawahPlayer({
         </View>
       ) : null}
 
-      {/* Reciter picker + the AHDORA controls the screenshot has no
-          room for: tilawat/tarjuma mode, auto-play, translation
-          text. Nothing was removed — they live one tap away. */}
+      {/* "Choose reciter" sheet (Mihrab layout): search + a row
+          per reciter — tap the row to pick it (applies from the
+          next play), tap Preview to hear THIS page in that voice
+          right now. No download button: offline reciter downloads
+          are not built, so none is shown. The AHDORA controls the
+          screenshot has no room for — tilawat/tarjuma mode,
+          auto-play, translation text — live below the list;
+          nothing was removed. */}
       {panel === 'reciter' ? (
         <View style={styles.panel}>
-          <Text style={styles.panelTitle}>{s.reciterTitle}</Text>
-          <View style={styles.chipRow}>
-            {QURAN_RECITERS.map((r) => (
-              <Chip
-                key={r.id}
-                label={r.name}
-                selected={audio.reciterId === r.id}
-                onPress={() => void setQuranReciter(r.id)}
-              />
-            ))}
+          <View style={styles.sheetHead}>
+            <Text style={styles.panelTitle}>{s.tilawahChooseReciter}</Text>
+            <Pressable
+              onPress={() => setPanel('none')}
+              style={styles.dismissBtn}
+              accessibilityRole="button"
+              accessibilityLabel={s.understandClose}
+              hitSlop={8}
+            >
+              <Text style={styles.dismissGlyph}>✕</Text>
+            </Pressable>
           </View>
+          <Input
+            value={reciterQuery}
+            onChangeText={setReciterQuery}
+            placeholder={s.tilawahSearchReciters}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Text style={styles.credit}>{s.tilawahPreviewNote}</Text>
+          <ScrollView
+            style={styles.reciterList}
+            showsVerticalScrollIndicator
+            nestedScrollEnabled
+          >
+            {filteredReciters.length === 0 ? (
+              <Text style={styles.credit}>{s.tilawahNoReciters}</Text>
+            ) : (
+              filteredReciters.map((r) => {
+                const selected = audio.reciterId === r.id;
+                const previewing = previewBusyId === r.id;
+                return (
+                  <View
+                    key={r.id}
+                    style={[styles.reciterRow, selected && styles.reciterRowOn]}
+                  >
+                    <Pressable
+                      onPress={() => void setQuranReciter(r.id)}
+                      style={styles.reciterMain}
+                      accessibilityRole="button"
+                      accessibilityLabel={r.name}
+                    >
+                      <Text style={styles.reciterRowName} numberOfLines={1}>
+                        {r.name}
+                      </Text>
+                      <Text style={styles.reciterRowMeta}>{r.bitrate} · EveryAyah</Text>
+                    </Pressable>
+                    {selected ? <Text style={styles.reciterCheck}>✓</Text> : null}
+                    <Pressable
+                      onPress={() => void previewReciter(r.id)}
+                      disabled={previewBusyId !== null}
+                      style={styles.previewBtn}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${s.tilawahPreview} ${r.name}`}
+                      hitSlop={6}
+                    >
+                      {previewing ? (
+                        <ActivityIndicator color={C.navy} size="small" />
+                      ) : (
+                        <Text style={styles.previewGlyph}>▶</Text>
+                      )}
+                    </Pressable>
+                  </View>
+                );
+              })
+            )}
+          </ScrollView>
           <Text style={styles.credit}>{s.reciterNote}</Text>
 
           <Text style={styles.panelTitle}>{s.tilawahTilawat} / {s.tilawahTarjuma}</Text>
@@ -830,6 +915,38 @@ const styles = StyleSheet.create({
     color: C.white,
     marginBottom: 8,
   },
+  /* "Choose reciter" sheet: search + rows. */
+  sheetHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  reciterList: { maxHeight: 300, marginTop: 8 },
+  reciterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 6,
+  },
+  reciterRowOn: { backgroundColor: 'rgba(135,165,217,0.28)' },
+  reciterMain: { flex: 1 },
+  reciterRowName: { fontFamily: F.sans, fontSize: 14.5, fontWeight: '700', color: C.white },
+  reciterRowMeta: { fontFamily: F.sans, fontSize: 12, color: C.navInactive, marginTop: 2 },
+  reciterCheck: { fontSize: 16, fontWeight: '800', color: C.skyBlue },
+  previewBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: C.skyBlue,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  previewGlyph: { fontSize: 14, color: C.navy, textAlign: 'center' },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   credit: {
     fontFamily: F.sans,
