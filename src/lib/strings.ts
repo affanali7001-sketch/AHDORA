@@ -682,7 +682,13 @@ const en = {
   sleepWarnTest: 'Send a test warning now',
   sleepWarnTestSent: 'Test warning sent — check the notification bar.',
   sleepWarnTestFailed: 'The test warning could not be sent — check notification permission.',
-  sleepWarnNote: 'Warnings are scheduled local notifications — Android may deliver them a few minutes late.',
+  sleepWarnNote:
+    'Warnings are scheduled with the phone’s alarm clock, so they arrive at the exact sleep time even when the phone is asleep.',
+  sleepExactT: 'Exact alarm is off',
+  sleepExactS:
+    'Without it, Android may delay the sleep warning or never deliver it while the phone sleeps. Turn it on so the warning arrives at your exact sleep time.',
+  sleepExactBtn: 'Allow exact alarms',
+  sleepExactOn: 'Exact alarm is on — the warning will arrive at your exact sleep time.',
   sleepBlockSyncFailed: 'Bedtime block saved on this phone, but the native blocker could not be updated — open App Block settings and save again.',
   sleepShield: 'Full App Block settings →',
   sleepNoActual: 'No real sleep data yet — it appears here once your phone’s health data is connected. Your schedule is never shown as real sleep.',
@@ -1575,7 +1581,13 @@ const hi: typeof en = {
   sleepWarnTest: 'Abhi ek test warning bhejo',
   sleepWarnTestSent: 'Test warning bhej di — notification bar me dekho.',
   sleepWarnTestFailed: 'Test warning nahi bheji ja saki — notification permission dekho.',
-  sleepWarnNote: 'Warning schedule ki hui local notification hai — Android use kuch minute late bhej sakta hai.',
+  sleepWarnNote:
+    'Warning phone ki alarm clock se schedule hoti hai, isliye phone ke sone par bhi exact sleep time par aati hai.',
+  sleepExactT: 'Exact alarm band hai',
+  sleepExactS:
+    'Iske bina Android sleep warning ko late kar sakta hai ya phone ke sone par bilkul nahi bhej sakta. Exact sleep time par warning ke liye ise on karo.',
+  sleepExactBtn: 'Exact alarm allow karo',
+  sleepExactOn: 'Exact alarm on hai — warning tumhare exact sleep time par aayegi.',
   sleepBlockSyncFailed: 'Bedtime block is phone par save ho gaya, lekin native blocker update nahi hua — App Block settings khol kar dobara save karo.',
   sleepShield: 'Poori App Block settings →',
   sleepNoActual: 'Abhi asal neend ka data nahi hai — phone ke health data se judne par yahan dikhega. Schedule ko kabhi asal neend nahi dikhaya jayega.',
