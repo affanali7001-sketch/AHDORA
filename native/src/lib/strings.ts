@@ -342,9 +342,17 @@ const en = {
   abSleepOff: 'Sleep blocking is OFF',
   abSleepWindow: 'Sleep window',
   abSleepWindowMissing: 'Set your sleep time in your profile (Sleep screen) first.',
+  abStudyTitle: 'Study time — block picked apps',
+  abStudySub:
+    'While a Focus session is running, the apps you pick below are blocked. The block lifts when the session ends, is paused, or is abandoned.',
+  abStudyOn: 'Study blocking is ON',
+  abStudyOff: 'Study blocking is OFF',
+  abStudyActive: 'A Focus session is running now — picked apps are blocked until it ends.',
   abPickTitle: 'Apps to block at sleep time',
   abPickSub: 'Tap an app to block or allow it at sleep time.',
   abPickEmpty: 'No apps found. Grant Usage Access above, then come back.',
+  abSelectAll: 'Select all apps',
+  abDeselectAll: 'Deselect all',
   abYoutube: 'YouTube allowed at sleep time',
   abYoutubeSub: 'When ON, YouTube stays open even during sleep blocking.',
   abSave: 'Save blocking settings',
@@ -682,7 +690,13 @@ const en = {
   sleepWarnTest: 'Send a test warning now',
   sleepWarnTestSent: 'Test warning sent — check the notification bar.',
   sleepWarnTestFailed: 'The test warning could not be sent — check notification permission.',
-  sleepWarnNote: 'Warnings are scheduled local notifications — Android may deliver them a few minutes late.',
+  sleepWarnNote:
+    'Warnings are scheduled with the phone’s alarm clock, so they arrive at the exact sleep time even when the phone is asleep.',
+  sleepExactT: 'Exact alarm is off',
+  sleepExactS:
+    'Without it, Android may delay the sleep warning or never deliver it while the phone sleeps. Turn it on so the warning arrives at your exact sleep time.',
+  sleepExactBtn: 'Allow exact alarms',
+  sleepExactOn: 'Exact alarm is on — the warning will arrive at your exact sleep time.',
   sleepBlockSyncFailed: 'Bedtime block saved on this phone, but the native blocker could not be updated — open App Block settings and save again.',
   sleepShield: 'Full App Block settings →',
   sleepNoActual: 'No real sleep data yet — it appears here once your phone’s health data is connected. Your schedule is never shown as real sleep.',
@@ -891,6 +905,12 @@ const en = {
   pfUninstallOn: 'Protection is ON — AHDORA is a device admin now. Uninstalling needs the admin switched off first.',
   pfUninstallOff: 'Protection is OFF — AHDORA can be uninstalled normally. Turn it on to add the extra step.',
   pfUninstallNeedApk: 'Needs the installed APK — this check is not available in Expo Go.',
+  pfUninstallFailed:
+    'The system activation screen could not be opened. Try again, or open Security settings and switch the device admin on there.',
+  pfUninstallNoReceiver:
+    'The device-admin part is missing from this build — install the latest APK again. If it still fails, tell us.',
+  pfUninstallRetry: 'Try again',
+  pfUninstallOpenSecurity: 'Open Security settings',
   // ---- lock screen + sleep warning notification (preview STR) ----
   lockTitle: 'It\'s prayer time',
   lockBody: 'All apps are blocked. Pray, then tap the button below — everything unlocks.',
@@ -1229,9 +1249,17 @@ const hi: typeof en = {
   abSleepOff: 'Sleep blocking OFF hai',
   abSleepWindow: 'Sone ka time',
   abSleepWindowMissing: 'Pehle apna sleep time profile me set karo (Sleep screen).',
+  abStudyTitle: 'Padhai ka time — block picked apps',
+  abStudySub:
+    'Jab Focus session chal rahi ho, neeche chuni hui apps block hongi. Session khatam, pause ya abandon hote hi block hat jayega.',
+  abStudyOn: 'Study blocking ON hai',
+  abStudyOff: 'Study blocking OFF hai',
+  abStudyActive: 'Abhi Focus session chal rahi hai — khatam hote hi apps khul jayenge.',
   abPickTitle: 'Sone ke time block karne wale apps',
   abPickSub: 'Kisi app par dabao to use block ya allow karo.',
   abPickEmpty: 'No apps found. Grant Usage Access above, then come back.',
+  abSelectAll: 'Saari apps select karo',
+  abDeselectAll: 'Sab deselect karo',
   abYoutube: 'Sone ke time YouTube allowed',
   abYoutubeSub: 'ON ho to YouTube sleep blocking me bhi khula rahega.',
   abSave: 'Blocking settings save karo',
@@ -1569,7 +1597,13 @@ const hi: typeof en = {
   sleepWarnTest: 'Abhi ek test warning bhejo',
   sleepWarnTestSent: 'Test warning bhej di — notification bar me dekho.',
   sleepWarnTestFailed: 'Test warning nahi bheji ja saki — notification permission dekho.',
-  sleepWarnNote: 'Warning schedule ki hui local notification hai — Android use kuch minute late bhej sakta hai.',
+  sleepWarnNote:
+    'Warning phone ki alarm clock se schedule hoti hai, isliye phone ke sone par bhi exact sleep time par aati hai.',
+  sleepExactT: 'Exact alarm band hai',
+  sleepExactS:
+    'Iske bina Android sleep warning ko late kar sakta hai ya phone ke sone par bilkul nahi bhej sakta. Exact sleep time par warning ke liye ise on karo.',
+  sleepExactBtn: 'Exact alarm allow karo',
+  sleepExactOn: 'Exact alarm on hai — warning tumhare exact sleep time par aayegi.',
   sleepBlockSyncFailed: 'Bedtime block is phone par save ho gaya, lekin native blocker update nahi hua — App Block settings khol kar dobara save karo.',
   sleepShield: 'Poori App Block settings →',
   sleepNoActual: 'Abhi asal neend ka data nahi hai — phone ke health data se judne par yahan dikhega. Schedule ko kabhi asal neend nahi dikhaya jayega.',
@@ -1778,6 +1812,12 @@ const hi: typeof en = {
   pfUninstallOn: 'Protection ON hai — AHDORA ab device admin hai. Uninstall karne se pehle admin off karna padega.',
   pfUninstallOff: 'Protection OFF hai — AHDORA normally uninstall ho sakti hai. Extra step ke liye on karo.',
   pfUninstallNeedApk: 'Iske liye installed APK chahiye — Expo Go me ye check nahi milega.',
+  pfUninstallFailed:
+    'System activation screen nahi khul saki. Dobara try karo, ya Security settings khol kar device admin wahan on karo.',
+  pfUninstallNoReceiver:
+    'Is build me device-admin wala hissa missing hai — latest APK dobara install karo. Phir bhi na ho to batao.',
+  pfUninstallRetry: 'Dobara try karo',
+  pfUninstallOpenSecurity: 'Security settings kholo',
   // ---- lock screen + sleep warning notification (preview STR) ----
   lockTitle: 'Namaz ka waqt hai',
   lockBody: 'Saari apps band hain. Namaz padh kar aao, phir neeche button dabao — sab unlock ho jayega.',
