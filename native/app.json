@@ -8,6 +8,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "package": "com.ahdora.app",
+      "versionCode": 2,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.SCHEDULE_EXACT_ALARM"
@@ -22,7 +23,7 @@
     "orientation": "portrait",
     "slug": "ahdora",
     "userInterfaceStyle": "light",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "web": {
       "favicon": "./assets/favicon.png"
     },
