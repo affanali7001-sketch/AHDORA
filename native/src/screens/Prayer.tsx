@@ -1,14 +1,10 @@
 /**
  * Prayer — rebuilt to the approved preview (§7): title + real
  * city · Asr method, ONE white card with 6 rows (Fajr, Sunrise,
- * Dhuhr, Asr, Maghrib, Isha). Sunrise is displayed with no status
- * button. Each prayer row has ONE small status pill that cycles on
- * tap: Not yet → Prayed → Missed → Qaza → Prayed. (The server
- * rejects a reset to "pending", so the cycle wraps from Qaza back
- * to Prayed — exactly as the preview hint describes.) The next
- * prayer row is highlighted peach with the "Agli" tag. The
- * "Namaz ke time badlo" button goes to Onboarding (per preview),
- * not to an inline editor.
+ * Dhuhr, Asr, Maghrib, Isha) — plus an OPTIONAL Tahajjud row at the
+ * bottom, shown only when the user set a Tahajjud time in
+ * onboarding/Profile (it has no status button: it is not one of
+ * the five prayers and is never counted or auto-marked).
  *
  * After the times load, today's system prayer alerts are refreshed
  * (fire-and-forget, only when the user switched them on in the
@@ -52,6 +48,7 @@ import {
   loadProfileWithCompletion,
   minutesUntil,
   minutesUntilTomorrow,
+  nextPrayerWithTahajjud,
   PRAYER_NAMES,
   savePrayerCalculationMethod,
   todayKey,
@@ -90,7 +87,7 @@ function statusToPill(status: SalahStatus): PrayerStatus {
   return 'not-yet';
 }
 
-type Row = { name: string; time: string; prayer: PrayerName | null };
+type Row = { name: string; time: string; prayer: PrayerName | null; optional?: boolean };
 
 /**
  * Source-line strings — kept local to this screen (strings.ts untouched).
@@ -193,12 +190,16 @@ export default function PrayerScreen({ lang, user, goTo }: ScreenProps) {
         }
         // Keep today's system prayer alerts scheduled whenever this
         // screen loads (fire-and-forget; the helpers never throw).
+        // Tahajjud alerts are on whenever a Tahajjud time is set —
+        // it has no per-prayer reminder toggle; clearing the time
+        // stops them.
         void (async () => {
           if (!(await isPrayerNotificationsEnabled())) return;
           const enabled: { [key: string]: boolean } = {};
           for (const prayer of PRAYER_NAMES) {
             enabled[prayer] = loaded.perPrayer[prayer]?.reminder ?? true;
           }
+          enabled.Tahajjud = Boolean(loaded.tahajjud?.time);
           await schedulePrayerNotifications(loaded, enabled);
         })();
       }
@@ -310,6 +311,11 @@ export default function PrayerScreen({ lang, user, goTo }: ScreenProps) {
         { name: 'Asr', time: times.perPrayer.Asr?.time ?? times.timings.Asr ?? '', prayer: 'Asr' },
         { name: 'Maghrib', time: times.perPrayer.Maghrib?.time ?? times.timings.Maghrib ?? '', prayer: 'Maghrib' },
         { name: 'Isha', time: times.perPrayer.Isha?.time ?? times.timings.Isha ?? '', prayer: 'Isha' },
+        // Optional Tahajjud: only when the user set a time. No status
+        // pill — it is not one of the five prayers.
+        ...(times.tahajjud?.time
+          ? [{ name: 'Tahajjud', time: times.tahajjud.time, prayer: null, optional: true } as Row]
+          : []),
       ]
     : [];
 
@@ -344,11 +350,11 @@ export default function PrayerScreen({ lang, user, goTo }: ScreenProps) {
   }
   const sourceLine = sourceParts.join(' · ');
 
-  // Next prayer + countdown (after Isha: tomorrow's Fajr).
-  const next =
-    times?.nextPrayer ??
-    (tomorrowFajr ? { name: 'Fajr' as const, time: tomorrowFajr } : null);
-  const isTomorrow = times?.nextPrayer == null && tomorrowFajr !== null;
+  // Next prayer + countdown. The effective next prayer includes an
+  // optional set Tahajjud (today, or tomorrow's when past Isha) —
+  // the server's nextPrayer alone never includes it.
+  const next = times ? nextPrayerWithTahajjud(times, tomorrowFajr, now) : null;
+  const isTomorrow = next?.isTomorrow ?? false;
   const countdownMins = next
     ? isTomorrow
       ? minutesUntilTomorrow(next.time, now)
@@ -372,6 +378,7 @@ export default function PrayerScreen({ lang, user, goTo }: ScreenProps) {
           <Text style={T.cardTitle}>
             {s.dashNextPrayer}
             {isTomorrow ? ` · ${s.tomorrowTag}` : ''}
+            {next.isTahajjud ? ` · ${s.tahajjudOptional}` : ''}
           </Text>
           <Text style={styles.countdownName}>
             {next.name} · {formatTime12h(next.time)}
@@ -386,7 +393,10 @@ export default function PrayerScreen({ lang, user, goTo }: ScreenProps) {
         <View>
           <Card>
             {rows.map((row, index) => {
-              const isNext = row.prayer !== null && times.nextPrayer?.name === row.prayer;
+              const isNext =
+                next !== null &&
+                ((row.prayer !== null && next.name === row.prayer && !next.isTahajjud) ||
+                  (row.optional === true && next.isTahajjud));
               const isLast = index === rows.length - 1;
               return (
                 <View
@@ -399,6 +409,7 @@ export default function PrayerScreen({ lang, user, goTo }: ScreenProps) {
                 >
                   <Text style={[styles.rowName, isNext && styles.rowNextText]}>
                     {row.name}
+                    {row.optional ? ` · ${s.tahajjudOptional}` : ''}
                     {isNext ? ` · ${s.nextTag}` : ''}
                   </Text>
                   <Text style={[styles.rowTime, isNext && styles.rowNextText]}>

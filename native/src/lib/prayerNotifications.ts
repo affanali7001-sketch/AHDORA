@@ -342,7 +342,8 @@ function timeToDate(hhmm: string, dayOffset: number): Date | null {
  * so scheduling today and tomorrow in one refresh can never cancel
  * the other day's ids. Prayers whose time has already passed on
  * that date are skipped; for tomorrow every prayer is still in the
- * future, so all 5 get scheduled. Silently does nothing when
+ * future, so all 5 get scheduled — plus an optional Tahajjud alert
+ * when the user set a Tahajjud time. Silently does nothing when
  * permission is not granted. Never throws.
  */
 async function scheduleDay(
@@ -379,6 +380,35 @@ async function scheduleDay(
         ids.push(id);
       } catch {
         // One prayer failing must not block the others.
+      }
+    }
+    // Optional Tahajjud: only when the user set a time and its alert
+    // is enabled. Same fixed time every day, so tomorrow's alert is
+    // the same time with dayOffset 1. It is not one of the five
+    // prayers — it just shares the prayer channel.
+    if (enabled.Tahajjud) {
+      const tahajjudTime = times.tahajjud?.time ?? '';
+      const date = timeToDate(tahajjudTime, dayOffset);
+      if (date && date.getTime() > now.getTime()) {
+        try {
+          const id = await Notifications.scheduleNotificationAsync({
+            content: {
+              title: 'Tahajjud ka waqt ho gaya',
+              body: 'Tahajjud ka waqt hai — padh lijiye.',
+              data: { type: 'prayer', prayer: 'Tahajjud' },
+              sound: 'default',
+              color: TEAL,
+            },
+            trigger: {
+              type: Notifications.SchedulableTriggerInputTypes.DATE,
+              date,
+              channelId: CHANNEL_ID,
+            },
+          });
+          ids.push(id);
+        } catch {
+          // One alert failing must not block the others.
+        }
       }
     }
   } catch {
@@ -451,12 +481,14 @@ export async function refreshPrayerNotifications(): Promise<RefreshResult> {
     for (const prayer of PRAYER_NAMES) {
       enabledToday[prayer] = today.perPrayer[prayer]?.reminder ?? true;
     }
+    enabledToday.Tahajjud = Boolean(today.tahajjud?.time);
     await scheduleDay(today, enabledToday, 0, ids);
     if (tomorrow) {
       const enabledTomorrow: { [key: string]: boolean } = {};
       for (const prayer of PRAYER_NAMES) {
         enabledTomorrow[prayer] = tomorrow.perPrayer[prayer]?.reminder ?? true;
       }
+      enabledTomorrow.Tahajjud = Boolean(tomorrow.tahajjud?.time);
       await scheduleDay(tomorrow, enabledTomorrow, 1, ids);
     }
     await storeIds(ids);

@@ -34,8 +34,10 @@ import {
   formatTime12h,
   isValidTime,
   loadProfileWithCompletion,
+  PRAYER_NAMES,
   saveProfileComplete,
   saveProfilePartial,
+  type PrayerName,
   type ProfileForm,
 } from '../lib/apiCore';
 
@@ -54,6 +56,15 @@ const CLASSES = Array.from({ length: 12 }, (_, i) => ({
 }));
 
 const STUDY_HOURS = ['1', '2', '3', '4+'];
+
+/** Step-5 input hints (samples only — never saved as the user's time). */
+const PRAYER_PLACEHOLDERS: Record<PrayerName, string> = {
+  Fajr: '05:32',
+  Dhuhr: '12:30',
+  Asr: '15:45',
+  Maghrib: '17:47',
+  Isha: '19:30',
+};
 
 export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOnboarding }: ScreenProps) {
   const s = stringsFor(lang);
@@ -139,7 +150,7 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
     });
   };
 
-  const updatePrayerTime = (prayer: 'Fajr' | 'Maghrib', value: string) => {
+  const updatePrayerTime = (prayer: PrayerName, value: string) => {
     setForm((prev) => ({
       ...prev,
       prayerSettings: {
@@ -153,6 +164,18 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
       if (!(key in prev)) return prev;
       const next = { ...prev };
       delete next[key];
+      return next;
+    });
+  };
+
+  /** Optional Tahajjud time — '' means unset, never a guessed time. */
+  const updateTahajjudTime = (value: string) => {
+    setForm((prev) => ({ ...prev, tahajjudTime: value }));
+    setError('');
+    setFieldErrors((prev) => {
+      if (!('prayer:Tahajjud' in prev)) return prev;
+      const next = { ...prev };
+      delete next['prayer:Tahajjud'];
       return next;
     });
   };
@@ -193,10 +216,16 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
     } else if (targetStep === 3) {
       if (!form.dailyStudyTarget.trim()) fields.dailyStudyTarget = s.obRequired;
     } else if (targetStep === 5) {
-      for (const prayer of ['Fajr', 'Maghrib'] as const) {
+      // Every prayer can carry its own time (empty = use the
+      // calculated time). Tahajjud is optional: empty is fine, a
+      // filled value must still be a real HH:mm time.
+      for (const prayer of PRAYER_NAMES) {
         if (!isValidTime(form.prayerSettings[prayer].timeOverride)) {
           fields[`prayer:${prayer}`] = s.obInvalidTime;
         }
+      }
+      if (!isValidTime(form.tahajjudTime)) {
+        fields['prayer:Tahajjud'] = s.obInvalidTime;
       }
     } else if (targetStep === 6) {
       if (form.sleepStartTime && !isValidTime(form.sleepStartTime)) fields.sleepStartTime = s.obInvalidTime;
@@ -281,6 +310,17 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
         : '—'
       : semesterLabel;
 
+  // Review: only the prayer times the user actually set are listed
+  // (blank = calculated time, so nothing is shown for those).
+  const customTimes = [
+    ...PRAYER_NAMES.filter((p) => form.prayerSettings[p].timeOverride.trim()).map(
+      (p) => `${p} ${formatTime12h(form.prayerSettings[p].timeOverride)}`,
+    ),
+    ...(form.tahajjudTime.trim()
+      ? [`Tahajjud ${formatTime12h(form.tahajjudTime)}`]
+      : []),
+  ];
+
   const reviewLines = [
     `${form.name || '—'} · ${form.city || '—'}${form.state ? `, ${form.state}` : ''}`,
     `${form.course || '—'} · ${eduLabel}`,
@@ -290,6 +330,9 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
     `Asr: ${form.asrMethod || '—'} · Sleep ${
       form.sleepStartTime ? formatTime12h(form.sleepStartTime) : '?'
     } – ${form.sleepEndTime ? formatTime12h(form.sleepEndTime) : '?'}`,
+    ...(customTimes.length > 0
+      ? [`${lang === 'hi' ? 'Apne time' : 'My times'}: ${customTimes.join(' · ')}`]
+      : []),
   ].join('\n');
 
   return (
@@ -473,24 +516,31 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
 
       {step === 5 && (
         <View>
-          <Field label="Fajr">
+          {/* All five prayers are editable — blank means "use the
+              calculated time". Placeholders are samples, never saved. */}
+          {PRAYER_NAMES.map((prayer) => (
+            <View key={prayer}>
+              <Field label={prayer}>
+                <TimePickerField
+                  value={form.prayerSettings[prayer].timeOverride}
+                  onChange={(v) => updatePrayerTime(prayer, v)}
+                  placeholder={PRAYER_PLACEHOLDERS[prayer]}
+                  editable={!busy}
+                />
+              </Field>
+              {fieldError(`prayer:${prayer}`)}
+            </View>
+          ))}
+          <Field label={s.obTahajjud}>
             <TimePickerField
-              value={form.prayerSettings.Fajr.timeOverride}
-              onChange={(v) => updatePrayerTime('Fajr', v)}
-              placeholder="05:32"
+              value={form.tahajjudTime}
+              onChange={updateTahajjudTime}
+              placeholder="03:30"
               editable={!busy}
             />
           </Field>
-          {fieldError('prayer:Fajr')}
-          <Field label="Maghrib">
-            <TimePickerField
-              value={form.prayerSettings.Maghrib.timeOverride}
-              onChange={(v) => updatePrayerTime('Maghrib', v)}
-              placeholder="17:47"
-              editable={!busy}
-            />
-          </Field>
-          {fieldError('prayer:Maghrib')}
+          {fieldError('prayer:Tahajjud')}
+          <Text style={[T.note, { textAlign: 'left', marginTop: 2 }]}>{s.obTahajjudNote}</Text>
         </View>
       )}
 

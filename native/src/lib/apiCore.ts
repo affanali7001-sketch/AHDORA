@@ -28,6 +28,13 @@ export type PrayerTimesResponse = {
     { time: string; deadline: string; reminder: boolean; source: 'manual' | 'calculated' | 'unavailable' }
   >;
   nextPrayer: { name: PrayerName; time: string } | null;
+  /**
+   * Optional Tahajjud ({ time } when the user set one, null when
+   * unset). NOT one of the five prayers: it has no status, no
+   * deadline, and never appears in nextPrayer. Optional in the type
+   * so responses from before this shipped still parse.
+   */
+  tahajjud?: { time: string } | null;
 };
 
 export type PrayerSetting = {
@@ -174,6 +181,94 @@ export async function fetchTomorrowFajr(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+export type EffectiveNextPrayer = {
+  name: string;
+  time: string;
+  isTomorrow: boolean;
+  isTahajjud: boolean;
+};
+
+/**
+ * Effective next prayer for the Prayer screen's countdown: the
+ * server's nextPrayer (one of the five, today), today's Tahajjud
+ * when it is still ahead, tomorrow's Tahajjud, or tomorrow's Fajr —
+ * whichever is soonest. Tahajjud is optional: when unset it is
+ * simply not a candidate, and nothing is invented in its place.
+ * The server's nextPrayer never includes Tahajjud, so the
+ * Dashboard/Home cards that read it directly are unchanged.
+ */
+export function nextPrayerWithTahajjud(
+  times: PrayerTimesResponse,
+  tomorrowFajr: string | null,
+  now = new Date(),
+): EffectiveNextPrayer | null {
+  type Candidate = {
+    name: string;
+    time: string;
+    mins: number;
+    isTomorrow: boolean;
+    isTahajjud: boolean;
+  };
+  const candidates: Candidate[] = [];
+  const serverNext = times.nextPrayer;
+  if (serverNext) {
+    const mins = minutesUntil(serverNext.time, now);
+    if (mins !== null && mins > 0) {
+      candidates.push({
+        name: serverNext.name,
+        time: serverNext.time,
+        mins,
+        isTomorrow: false,
+        isTahajjud: false,
+      });
+    }
+  }
+  const tahajjud = (times.tahajjud?.time ?? '').trim();
+  if (/^([01]\d|2[0-3]):([0-5]\d)$/.test(tahajjud)) {
+    const todayMins = minutesUntil(tahajjud, now);
+    if (todayMins !== null && todayMins > 0) {
+      candidates.push({
+        name: 'Tahajjud',
+        time: tahajjud,
+        mins: todayMins,
+        isTomorrow: false,
+        isTahajjud: true,
+      });
+    }
+    const tomorrowMins = minutesUntilTomorrow(tahajjud, now);
+    if (tomorrowMins !== null && tomorrowMins > 0) {
+      candidates.push({
+        name: 'Tahajjud',
+        time: tahajjud,
+        mins: tomorrowMins,
+        isTomorrow: true,
+        isTahajjud: true,
+      });
+    }
+  }
+  if (tomorrowFajr) {
+    const mins = minutesUntilTomorrow(tomorrowFajr, now);
+    if (mins !== null && mins > 0) {
+      candidates.push({
+        name: 'Fajr',
+        time: tomorrowFajr,
+        mins,
+        isTomorrow: true,
+        isTahajjud: false,
+      });
+    }
+  }
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => a.mins - b.mins);
+  const best = candidates[0];
+  return {
+    name: best.name,
+    time: best.time,
+    isTomorrow: best.isTomorrow,
+    isTahajjud: best.isTahajjud,
+  };
 }
 
 export function monthKey(date: Date): string {
@@ -370,6 +465,8 @@ export type ProfileForm = {
   calculationMethod: string;
   asrMethod: string;
   prayerSettings: PrayerSettings;
+  /** Optional Tahajjud time (HH:mm). '' = unset: never shown, never assumed. */
+  tahajjudTime: string;
   sleepStartTime: string;
   sleepEndTime: string;
   sleepReminder: boolean;
@@ -402,6 +499,7 @@ export const emptyProfileForm = (name = ''): ProfileForm => ({
   calculationMethod: 'University of Islamic Sciences, Karachi',
   asrMethod: 'Hanafi',
   prayerSettings: emptyPrayerSettings(),
+  tahajjudTime: '',
   sleepStartTime: '22:00',
   sleepEndTime: '04:00',
   sleepReminder: true,
@@ -433,6 +531,7 @@ type SavedProfileRaw = {
   prayerCalculationMethod?: string;
   asrMethod?: '' | 'standard' | 'hanafi';
   prayerSettings?: Partial<Record<PrayerName, Partial<PrayerSetting>>>;
+  tahajjudTime?: string;
   sleepStartTime?: string;
   sleepEndTime?: string;
   sleepTime?: string;
@@ -489,6 +588,7 @@ export function profileFromApi(saved: SavedProfileRaw, name: string): ProfileFor
     calculationMethod: canonicalPrayerMethod(saved.prayerCalculationMethod),
     asrMethod: saved.asrMethod === 'standard' ? 'Shafi' : 'Hanafi',
     prayerSettings,
+    tahajjudTime: saved.tahajjudTime ?? '',
     sleepStartTime,
     sleepEndTime,
     sleepReminder: saved.sleepReminder ?? true,
@@ -532,6 +632,7 @@ function profileToApi(form: ProfileForm): Record<string, unknown> {
     prayerCalculationMethod: form.calculationMethod,
     asrMethod: form.asrMethod.toLowerCase() === 'hanafi' ? 'hanafi' : 'standard',
     prayerSettings: form.prayerSettings,
+    tahajjudTime: form.tahajjudTime,
     sleepTime: sleepStartTime,
     sleepStartTime,
     sleepEndTime,
