@@ -21,6 +21,18 @@
  * When the target is reached, a completion banner offers to keep
  * counting past the target or reset; the session is recorded once,
  * when the real count first hits the target.
+ *
+ * Layout note (Tasbih Urdu overlap fix): the Arabic dhikr label and
+ * the big count live in two separate reserved blocks that can never
+ * share pixels. Amiri's ink is taller than its own ascent (the dagger
+ * alif / shadda stacks reach 44dp above the baseline at 30pt, and its
+ * natural line height is 54dp), so a tight lineHeight made the label
+ * paint outside its box and wrapped lines overlap each other. The
+ * label block below gives the Arabic a 64dp line (room for the full
+ * 59dp ink height on every line) plus 12dp of top padding for the
+ * diacritics that still rise above the line box, and the count is
+ * single-line with adjustsFontSizeToFit so 3–6 digit counts shrink
+ * instead of running into the bead column.
  */
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -254,9 +266,23 @@ export default function TasbeehScreen({ lang, user, goTo, goBack }: ScreenProps)
         accessibilityLabel={s.tasTapAnywhere}
       >
         <View style={styles.countCol}>
-          <Text style={styles.arabic}>{dhikr.arabic}</Text>
-          <Text style={styles.dhikrName}>{dhikr.display}</Text>
-          <Text style={styles.count}>{count}</Text>
+          {/* The dhikr label owns its own block (see the layout note at
+              the top of this file): the Arabic line + the Latin name,
+              with reserved space above and below, so the label can
+              never touch the big count — at any screen size, system
+              font size, or dhikr selection. */}
+          <View style={styles.labelBlock}>
+            <Text style={styles.arabic}>{dhikr.arabic}</Text>
+            <Text style={styles.dhikrName}>{dhikr.display}</Text>
+          </View>
+          <Text
+            style={styles.count}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.5}
+          >
+            {count}
+          </Text>
           <Text style={styles.outOf}>
             {s.tasOutOf} {target}
           </Text>
@@ -389,15 +415,41 @@ const styles = StyleSheet.create({
   },
   counter: { flex: 1, flexDirection: 'row', paddingHorizontal: 20, paddingTop: 8 },
   countCol: { flex: 1, justifyContent: 'center', paddingRight: 8 },
-  arabic: { fontFamily: F.arabic, fontSize: 30, color: '#FFFFFF', lineHeight: 44 },
-  dhikrName: { fontFamily: F.sans, fontSize: 34, fontWeight: '800', color: '#FFFFFF', marginTop: 6 },
+  /**
+   * The dhikr label's own reserved block. paddingTop absorbs the
+   * ~5dp by which Amiri's tallest diacritics rise above the Arabic
+   * line box, so the ink never paints over the target row above;
+   * marginBottom is the one and only gap between the label and the
+   * count (the count itself has no top margin).
+   */
+  labelBlock: { paddingTop: 12, marginBottom: 10 },
+  /**
+   * lineHeight 64 is deliberate, not decorative: Amiri's natural
+   * line height at 30pt is 54dp and its ink spans 59dp (44 above
+   * the baseline + 15 below), so the old 44dp line squeezed the
+   * glyphs outside their box and wrapped lines overlapped each
+   * other. 64dp contains the full ink height on every line, with
+   * room to spare — at any system font size, because fontSize and
+   * lineHeight scale together.
+   */
+  arabic: { fontFamily: F.arabic, fontSize: 30, color: '#FFFFFF', lineHeight: 64 },
+  dhikrName: {
+    fontFamily: F.sans,
+    fontSize: 34,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginTop: 6,
+    // 44dp covers Plus Jakarta Sans 800's natural 43.2dp line at
+    // 34pt, so a wrapped name (e.g. "La ilaha illallah" on a narrow
+    // screen) can never overlap its own second line either.
+    lineHeight: 44,
+  },
   count: {
     fontFamily: F.sans,
     fontSize: 110,
     fontWeight: '200',
     lineHeight: 122,
     color: '#FFFFFF',
-    marginTop: 10,
   },
   outOf: { fontFamily: F.sans, fontSize: 18, color: '#888888', marginTop: 2 },
   status: { fontFamily: F.sans, fontSize: 14, color: '#888888', marginTop: 10, minHeight: 20 },
