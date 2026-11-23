@@ -28,6 +28,12 @@
     },
     "plugins": [
       "expo-asset",
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": true
+        }
+      ],
       "./plugins/withBundleInDebug",
       "./plugins/withAhdoraBlock",
       "./plugins/withAhdoraAdmin",

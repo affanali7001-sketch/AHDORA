@@ -69,9 +69,24 @@
  * All recording calls (recordListened / recordRead) are wrapped in
  * try/catch — they need login and must never break playback.
  * No exported function ever throws.
+ *
+ * Background playback (2026-11-24): audio keeps playing after the
+ * app is minimised or the screen locks ONLY when all three hold:
+ * (1) the app.json expo-audio plugin has enableBackgroundPlayback
+ * (it adds the Android media-playback foreground service +
+ * FOREGROUND_SERVICE / FOREGROUND_SERVICE_MEDIA_PLAYBACK, and the
+ * iOS audio background mode); (2) the runtime audio mode sets
+ * shouldPlayInBackground + interruptionMode 'doNotMix'
+ * (ensureAudioMode, once, on first play); (3) every player calls
+ * setActiveForLockScreen(true, metadata) — without lock-screen
+ * controls Android stops background audio after ~3 minutes (an OS
+ * limit). The lock-screen controls also let the user pause/resume
+ * from the notification / lock screen. None of this is faked: it
+ * is expo-audio's own background path, and it needs the real APK
+ * (a prebuild) to take effect — Expo Go has no such service.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import {
   fetchMushafPage,
   recordListened,
@@ -635,6 +650,41 @@ function pageTitle(md: 'tilawat' | 'urdu', pg: number, m: MushafPage | null): st
   return surah ? `${kind} · Page ${pg} · ${surah}` : `${kind} · Page ${pg}`;
 }
 
+/** True after the runtime audio mode was set once (see ensureAudioMode). */
+let audioModeReady = false;
+
+/**
+ * Runtime audio mode for background playback (see the header note).
+ * Runs once, lazily, on the first play — never throws, never blocks
+ * playback. 'doNotMix' is required for lock-screen controls and is
+ * also the right behaviour for a Quran app (no other audio mixes
+ * with tilawat).
+ */
+async function ensureAudioMode(): Promise<void> {
+  if (audioModeReady) return;
+  audioModeReady = true;
+  try {
+    await setAudioModeAsync({
+      playsInSilentMode: true,
+      shouldPlayInBackground: true,
+      interruptionMode: 'doNotMix',
+    });
+  } catch {
+    /* Foreground playback still works; background may stop. */
+  }
+}
+
+/** Lock-screen / notification metadata for the current queue:
+ * the queue title, and the voice (reciter for tilawat, Shamshad
+ * Ali Khan for the Urdu tarjuma). */
+function lockScreenMeta(): { title: string; artist: string } {
+  const artist =
+    mode === 'urdu'
+      ? 'Shamshad Ali Khan · Tarjuma'
+      : reciterFor(reciterId).name;
+  return { title: title || 'Quran audio', artist };
+}
+
 function removePlayer(): void {
   const p = player;
   player = null;
@@ -647,6 +697,13 @@ function removePlayer(): void {
       p.pause();
     } catch {
       /* Already paused or gone — ignore. */
+    }
+    // Release the lock-screen controls for this player, so the
+    // notification does not linger after playback stops.
+    try {
+      p.setActiveForLockScreen(false);
+    } catch {
+      /* Already gone — ignore. */
     }
     try {
       p.remove();
@@ -688,6 +745,9 @@ async function playAt(index: number, gen: number): Promise<void> {
   duration = 0;
   busy = true;
   emit(true);
+  // Background mode first: the mode must be set before the player
+  // is created, or the OS may still kill playback on minimise.
+  await ensureAudioMode();
   removePlayer();
 
   const tryLoad = (uri: string): AudioPlayer => {
@@ -697,6 +757,14 @@ async function playAt(index: number, gen: number): Promise<void> {
       p.setPlaybackRate(playbackRate);
     } catch {
       /* Rate stays 1x for this player — never break playback. */
+    }
+    // Lock-screen controls (Android): without these the OS stops
+    // background audio after ~3 minutes. The notification also
+    // lets the user pause/resume from the lock screen.
+    try {
+      p.setActiveForLockScreen(true, lockScreenMeta());
+    } catch {
+      /* Lock-screen controls are a bonus, never a blocker. */
     }
     let retried = false;
     p.addListener('playbackStatusUpdate', (status) => {
