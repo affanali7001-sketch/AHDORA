@@ -22,19 +22,38 @@
  * Aladhan failed and the times are the user's own manual times, the
  * method is NOT shown as the producer and the server's own notice is
  * shown instead. No accuracy claims anywhere.
+ *
+ * MIHRAB-STYLE ADDITIONS (2026-11-23):
+ * - Hijri date under the title, from the same /api/prayer/times
+ *   response (`hijri`: day-month-year + month name + year) — reused,
+ *   never invented.
+ * - Next-prayer countdown card (Mihrab-style: big name + time left,
+ *   ticking every 30 s); after Isha it counts to tomorrow's Fajr,
+ *   like Dashboard/Home already do.
+ * - Calculation-method picker: the five methods the server actually
+ *   maps (see src/lib/prayerMethods.ts). Changing it saves to the
+ *   profile and re-fetches today's times. The source stays AlAdhan.
+ * - Adhan sound: on/off + a voice picker (3 real AlAdhan CDN voices)
+ *   with in-app preview; the adhan plays when a prayer alert arrives
+ *   while the app is open (see src/lib/adhanAudio.ts for the honest
+ *   closed-app limit). A Journal button opens the prayer journal.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
 import { stringsFor } from '../lib/strings';
 import { C, F, L, T } from '../lib/theme';
-import { Card, EmptyState, PillButton, StatusPill, type PrayerStatus } from '../components/ui';
+import { Card, EmptyState, PillButton, StatusPill, Switch, type PrayerStatus } from '../components/ui';
 import {
   fetchPrayerTimes,
   fetchSalahDay,
+  fetchTomorrowFajr,
   formatTime12h,
   loadProfileWithCompletion,
+  minutesUntil,
+  minutesUntilTomorrow,
   PRAYER_NAMES,
+  savePrayerCalculationMethod,
   todayKey,
   updateSalahStatus,
   type PrayerName,
@@ -42,6 +61,17 @@ import {
   type PrayerTimesResponse,
   type SalahStatus,
 } from '../lib/apiCore';
+import { canonicalPrayerMethod, DEFAULT_PRAYER_METHOD, PRAYER_METHODS } from '../lib/prayerMethods';
+import {
+  ADHAN_VOICES,
+  getAdhanPrefs,
+  getAdhanPreviewState,
+  playAdhanPreview,
+  setAdhanEnabled,
+  setAdhanVoiceId,
+  subscribeAdhanPreview,
+  type AdhanPrefs,
+} from '../lib/adhanAudio';
 import {
   isPrayerNotificationsEnabled,
   schedulePrayerNotifications,
@@ -84,6 +114,31 @@ const SOURCE_STRINGS = {
   },
 } as const;
 
+/** "24-06-1447" + month name + year → "24 Jumādá al-ākhirah 1447 AH". */
+function formatHijri(hijri: PrayerTimesResponse['hijri']): string {
+  if (!hijri || !hijri.date || !hijri.month || !hijri.year) return '';
+  const day = hijri.date.split('-')[0] ?? '';
+  if (!day) return '';
+  return `${day} ${hijri.month} ${hijri.year} AH`;
+}
+
+/** "1 ghanta 12 minute baaki" / "1 hour 12 min left" from minutes. */
+function formatCountdown(
+  mins: number,
+  s: ReturnType<typeof stringsFor>,
+): string {
+  if (mins <= 0) return s.countdownNow;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h > 0) {
+    return s.countdownHM
+      .replace('{h}', String(h))
+      .replace('{s}', h > 1 ? 's' : '')
+      .replace('{m}', String(m));
+  }
+  return s.countdownM.replace('{m}', String(m));
+}
+
 export default function PrayerScreen({ lang, user, goTo }: ScreenProps) {
   const s = stringsFor(lang);
   const today = todayKey();
@@ -93,6 +148,27 @@ export default function PrayerScreen({ lang, user, goTo }: ScreenProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState<PrayerName | null>(null);
+  // Countdown clock (ticks every 30 s) + tomorrow's Fajr for the
+  // after-Isha case (server returns nextPrayer null then).
+  const [now, setNow] = useState(() => new Date());
+  const [tomorrowFajr, setTomorrowFajr] = useState<string | null>(null);
+  // Calculation method: the saved value, coerced to the offered list
+  // (an old 'Muslim World League (MWL)' / long ISNA string maps to
+  // its canonical server key — see prayerMethods.ts).
+  const [method, setMethod] = useState(DEFAULT_PRAYER_METHOD);
+  const [onboardingState, setOnboardingState] = useState({
+    completed: false,
+    skipped: false,
+    step: 0,
+  });
+  const [methodSaving, setMethodSaving] = useState(false);
+  const [methodNote, setMethodNote] = useState('');
+  // Adhan sound prefs (device-level) + preview Play/Stop state.
+  const [adhanPrefs, setAdhanPrefs] = useState<AdhanPrefs>({
+    enabled: false,
+    voiceId: ADHAN_VOICES[0].id,
+  });
+  const [adhanPreview, setAdhanPreview] = useState(getAdhanPreviewState());
 
   const load = useCallback(() => {
     let active = true;
@@ -107,6 +183,14 @@ export default function PrayerScreen({ lang, user, goTo }: ScreenProps) {
       if (timesResult.status === 'fulfilled') {
         const loaded = timesResult.value;
         setTimes(loaded);
+        // After Isha the next real prayer is tomorrow's Fajr.
+        if (loaded.nextPrayer === null) {
+          void fetchTomorrowFajr().then((fajr) => {
+            if (active) setTomorrowFajr(fajr);
+          });
+        } else {
+          setTomorrowFajr(null);
+        }
         // Keep today's system prayer alerts scheduled whenever this
         // screen loads (fire-and-forget; the helpers never throw).
         void (async () => {
@@ -119,11 +203,19 @@ export default function PrayerScreen({ lang, user, goTo }: ScreenProps) {
         })();
       }
       if (dayResult.status === 'fulfilled') setDay(dayResult.value);
-      if (
-        profileResult.status === 'fulfilled' &&
-        profileResult.value.profile?.asrMethod
-      ) {
-        setAsrMethod(profileResult.value.profile.asrMethod);
+      if (profileResult.status === 'fulfilled') {
+        const saved = profileResult.value.profile;
+        if (saved?.asrMethod) {
+          setAsrMethod(saved.asrMethod);
+        }
+        if (saved) {
+          setMethod(canonicalPrayerMethod(saved.calculationMethod));
+        }
+        setOnboardingState({
+          completed: profileResult.value.onboardingCompleted,
+          skipped: profileResult.value.onboardingSkipped,
+          step: profileResult.value.onboardingStep,
+        });
       }
       if (timesResult.status === 'rejected' && dayResult.status === 'rejected') {
         setError(s.loadFailed);
@@ -140,6 +232,49 @@ export default function PrayerScreen({ lang, user, goTo }: ScreenProps) {
   }, [s.loadFailed, today, user?.name]);
 
   useEffect(load, [load]);
+
+  // Countdown clock: re-render every 30 s so the time-left text
+  // stays live without re-fetching the times.
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Adhan prefs (device-level) + preview Play/Stop state.
+  useEffect(() => {
+    void getAdhanPrefs().then(setAdhanPrefs);
+    return subscribeAdhanPreview(setAdhanPreview);
+  }, []);
+
+  async function changeMethod(next: string) {
+    if (methodSaving || next === method) return;
+    const prev = method;
+    setMethod(next);
+    setMethodNote('');
+    setMethodSaving(true);
+    try {
+      await savePrayerCalculationMethod(next, onboardingState);
+      setMethodNote(s.methodSaved);
+      // Times depend on the method — re-fetch (the server cache is
+      // keyed per method, so the new times come straight away).
+      load();
+    } catch {
+      setMethod(prev);
+      setMethodNote(s.methodSaveFailed);
+    } finally {
+      setMethodSaving(false);
+    }
+  }
+
+  async function toggleAdhan(value: boolean) {
+    setAdhanPrefs((cur) => ({ ...cur, enabled: value }));
+    await setAdhanEnabled(value);
+  }
+
+  async function pickAdhanVoice(id: string) {
+    setAdhanPrefs((cur) => ({ ...cur, voiceId: id }));
+    await setAdhanVoiceId(id);
+  }
 
   async function cycleStatus(prayer: PrayerName) {
     if (saving) return;
@@ -209,10 +344,41 @@ export default function PrayerScreen({ lang, user, goTo }: ScreenProps) {
   }
   const sourceLine = sourceParts.join(' · ');
 
+  // Next prayer + countdown (after Isha: tomorrow's Fajr).
+  const next =
+    times?.nextPrayer ??
+    (tomorrowFajr ? { name: 'Fajr' as const, time: tomorrowFajr } : null);
+  const isTomorrow = times?.nextPrayer == null && tomorrowFajr !== null;
+  const countdownMins = next
+    ? isTomorrow
+      ? minutesUntilTomorrow(next.time, now)
+      : minutesUntil(next.time, now)
+    : null;
+  const hijriLine = times ? formatHijri(times.hijri) : '';
+
   return (
     <ScrollView contentContainerStyle={L.scroll} showsVerticalScrollIndicator={false}>
       <Text style={T.title}>{s.namazTitle}</Text>
       <Text style={[T.sub, { marginBottom: 14 }]}>{sub}</Text>
+
+      {hijriLine ? (
+        <Text style={[T.note, { marginBottom: 12, textAlign: 'left' }]}>
+          {s.hijriLabel}: {hijriLine}
+        </Text>
+      ) : null}
+
+      {times && next && countdownMins !== null ? (
+        <Card>
+          <Text style={T.cardTitle}>
+            {s.dashNextPrayer}
+            {isTomorrow ? ` · ${s.tomorrowTag}` : ''}
+          </Text>
+          <Text style={styles.countdownName}>
+            {next.name} · {formatTime12h(next.time)}
+          </Text>
+          <Text style={styles.countdownMins}>{formatCountdown(countdownMins, s)}</Text>
+        </Card>
+      ) : null}
 
       {loading ? (
         <ActivityIndicator color={C.teal} style={{ marginVertical: 24 }} />
@@ -281,10 +447,89 @@ export default function PrayerScreen({ lang, user, goTo }: ScreenProps) {
             block
             onPress={() => goTo('salahCalendar')}
           />
+          <PillButton
+            label={s.journalOpen}
+            variant="ghost"
+            block
+            onPress={() => goTo('prayerJournal')}
+          />
         </View>
       ) : (
         <EmptyState title={s.namazTitle} body={s.loadFailed} />
       )}
+
+      {!loading ? (
+        <View>
+          <Card>
+            <Text style={T.cardTitle}>{s.methodTitle}</Text>
+            <Text style={[T.cardBody, { marginTop: 6 }]}>{s.methodSub}</Text>
+            {PRAYER_METHODS.map((m) => {
+              const selected = method === m.value;
+              return (
+                <Pressable
+                  key={m.value}
+                  onPress={() => void changeMethod(m.value)}
+                  disabled={methodSaving}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  style={[styles.methodRow, selected && styles.methodRowSelected]}
+                >
+                  <Text style={[styles.methodDot, selected && styles.methodDotSelected]}>
+                    {selected ? '●' : '○'}
+                  </Text>
+                  <Text style={styles.methodLabel}>{m.label}</Text>
+                </Pressable>
+              );
+            })}
+            <Text style={[T.note, { marginTop: 8, textAlign: 'left' }]}>{s.methodNote}</Text>
+            {methodSaving ? (
+              <ActivityIndicator color={C.teal} style={{ marginTop: 8 }} />
+            ) : null}
+            {methodNote ? <Text style={T.note}>{methodNote}</Text> : null}
+          </Card>
+
+          <Card>
+            <View style={styles.adhanHead}>
+              <View style={{ flex: 1 }}>
+                <Text style={T.cardTitle}>{s.adhanTitle}</Text>
+                <Text style={[T.cardBody, { marginTop: 6 }]}>{s.adhanSub}</Text>
+              </View>
+              <Switch value={adhanPrefs.enabled} onValueChange={(v) => void toggleAdhan(v)} />
+            </View>
+            {adhanPrefs.enabled ? (
+              <View style={{ marginTop: 10 }}>
+                <Text style={styles.voiceLabel}>{s.adhanVoiceT}</Text>
+                {ADHAN_VOICES.map((voice) => {
+                  const selected = adhanPrefs.voiceId === voice.id;
+                  const playing = adhanPreview.playing && adhanPreview.voiceId === voice.id;
+                  return (
+                    <View key={voice.id} style={styles.voiceRow}>
+                      <Pressable
+                        onPress={() => void pickAdhanVoice(voice.id)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
+                        style={styles.voiceNameWrap}
+                      >
+                        <Text style={[styles.voiceName, selected && styles.voiceNameSelected]}>
+                          {selected ? '● ' : '○ '}
+                          {voice.name}
+                        </Text>
+                      </Pressable>
+                      <PillButton
+                        label={playing ? s.adhanStop : s.adhanPlay}
+                        small
+                        variant={playing ? 'peach' : 'ghost'}
+                        onPress={() => playAdhanPreview(voice.id)}
+                      />
+                    </View>
+                  );
+                })}
+              </View>
+            ) : null}
+            <Text style={[T.note, { marginTop: 8, textAlign: 'left' }]}>{s.adhanNote}</Text>
+          </Card>
+        </View>
+      ) : null}
 
       {error ? <Text style={T.error}>{error}</Text> : null}
     </ScrollView>
@@ -330,4 +575,73 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
+  countdownName: {
+    fontFamily: F.sans,
+    fontSize: 22,
+    fontWeight: '800',
+    color: C.ink,
+    marginTop: 8,
+  },
+  countdownMins: {
+    fontFamily: F.sans,
+    fontSize: 17,
+    fontWeight: '700',
+    color: C.teal700,
+    marginTop: 4,
+  },
+  methodRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: C.line,
+  },
+  methodRowSelected: {
+    backgroundColor: C.peach,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+  },
+  methodDot: {
+    fontFamily: F.sans,
+    fontSize: 15,
+    color: C.muted,
+  },
+  methodDotSelected: { color: C.teal700 },
+  methodLabel: {
+    flex: 1,
+    fontFamily: F.sans,
+    fontSize: 14.5,
+    fontWeight: '700',
+    color: C.ink,
+  },
+  adhanHead: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  voiceLabel: {
+    fontFamily: F.sans,
+    fontSize: 13.5,
+    fontWeight: '800',
+    color: C.ink,
+    marginBottom: 4,
+  },
+  voiceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: C.line,
+  },
+  voiceNameWrap: { flex: 1 },
+  voiceName: {
+    fontFamily: F.sans,
+    fontSize: 14.5,
+    fontWeight: '600',
+    color: C.ink,
+  },
+  voiceNameSelected: { color: C.teal700, fontWeight: '800' },
 });

@@ -5,6 +5,7 @@
  * All data is live from the server; nothing here is fabricated.
  */
 import { apiFetch } from './api';
+import { canonicalPrayerMethod } from './prayerMethods';
 
 export type PrayerName = 'Fajr' | 'Dhuhr' | 'Asr' | 'Maghrib' | 'Isha';
 export const PRAYER_NAMES: PrayerName[] = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
@@ -130,6 +131,18 @@ export function tomorrowKey(): string {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+/**
+ * Minutes from now until an HH:mm time today (null when unparsable).
+ * Shared by Dashboard (which had its own local copy) and Prayer.
+ */
+export function minutesUntil(timeHHmm: string, now = new Date()): number | null {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(timeHHmm.trim());
+  if (!match) return null;
+  const target = new Date(now);
+  target.setHours(Number(match[1]), Number(match[2]), 0, 0);
+  return Math.round((target.getTime() - now.getTime()) / 60000);
 }
 
 /**
@@ -473,8 +486,7 @@ export function profileFromApi(saved: SavedProfileRaw, name: string): ProfileFor
     state: saved.state ?? '',
     city: saved.city ?? '',
     timezone: saved.timezone ?? 'Asia/Kolkata',
-    calculationMethod:
-      saved.prayerCalculationMethod || 'University of Islamic Sciences, Karachi',
+    calculationMethod: canonicalPrayerMethod(saved.prayerCalculationMethod),
     asrMethod: saved.asrMethod === 'standard' ? 'Shafi' : 'Hanafi',
     prayerSettings,
     sleepStartTime,
@@ -565,8 +577,7 @@ export async function loadProfileWithCompletion(
 }
 
 /** Complete save: POST /api/profile with onboardingCompleted: true, step 8. */
-export async function saveProfileComplete(form: ProfileForm): Promise<void> {
-  await requestJson('/api/profile', {
+export async function saveProfileComplete(form: ProfileForm): Promise<void> {  await requestJson('/api/profile', {
     method: 'POST',
     body: JSON.stringify({
       ...profileToApi(form),
@@ -591,6 +602,35 @@ export async function saveProfilePartial(form: ProfileForm, step: number): Promi
       onboardingCompleted: false,
       onboardingSkipped: true,
       onboardingStep: resumeStep,
+    }),
+  });
+}
+
+/**
+ * Change ONLY the prayer calculation method, from the Prayer screen.
+ *
+ * The server's POST /api/profile is a partial upsert ($set of the
+ * fields sent), so sending just the method leaves every other saved
+ * value untouched — except the onboarding flags, which the server's
+ * applyOnboardingTransitions rewrites whenever they are absent
+ * (it clears onboardingSkipped). The current flags are therefore
+ * passed straight through, so a completed user stays completed and
+ * a skipped user stays skipped with the same resume step. The
+ * method itself must be one of PRAYER_METHODS (see
+ * src/lib/prayerMethods.ts) — any other name would silently compute
+ * Karachi on the server.
+ */
+export async function savePrayerCalculationMethod(
+  method: string,
+  onboarding: { completed: boolean; skipped: boolean; step: number },
+): Promise<void> {
+  await requestJson('/api/profile', {
+    method: 'POST',
+    body: JSON.stringify({
+      prayerCalculationMethod: method,
+      onboardingCompleted: onboarding.completed,
+      onboardingSkipped: onboarding.skipped,
+      onboardingStep: Math.min(8, Math.max(0, Math.floor(onboarding.step) || 0)),
     }),
   });
 }

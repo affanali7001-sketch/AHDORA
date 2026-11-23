@@ -20,6 +20,7 @@ export type ScreenId =
   | 'home'
   | 'dashboard'
   | 'prayer'
+  | 'prayerJournal'
   | 'salahCalendar'
   | 'islamic-calendar'
   | 'search'

@@ -23,6 +23,13 @@
  *   delivery, NOT 'alarmClock'.
  * - Tapping a notification just opens the app; tap-to-a-specific-
  *   screen navigation is NOT wired (App.tsx is out of scope here).
+ * - ADHAN: when a prayer alert arrives while the app is running, or
+ *   the user taps one, the adhan voice picked on the Prayer screen
+ *   plays (see src/lib/adhanAudio.ts) — only when adhan sound is
+ *   switched on. When the app is closed the alert still arrives,
+ *   with the phone's default sound: a remote adhan file cannot be a
+ *   notification sound and no audio file can be bundled through the
+ *   text-only push.
  * - A notification channel ('ahdora-prayer') is created on Android
  *   before the permission prompt, as the SDK 58 docs require for
  *   Android 13+: the prompt does not appear until at least one
@@ -42,6 +49,7 @@ import {
   type PrayerName,
   type PrayerTimesResponse,
 } from './apiCore';
+import { playAdhanForAlert } from './adhanAudio';
 
 const CHANNEL_ID = 'ahdora-prayer';
 const IDS_KEY = '@ahdora/notif/prayerIds';
@@ -57,6 +65,7 @@ export type RefreshResult = {
 };
 
 let handlerSet = false;
+let adhanListenersSet = false;
 
 /**
  * Foreground handler: when the app is open and an alert fires, still
@@ -74,6 +83,37 @@ function ensureHandler(): void {
       shouldShowList: true,
     }),
   });
+  ensureAdhanListeners();
+}
+
+/**
+ * Adhan on alert: when a prayer notification arrives while the app
+ * is running (foreground) or the user taps one, play the adhan voice
+ * the user picked in the Prayer screen — but ONLY when adhan sound
+ * is switched on (playAdhanForAlert no-ops otherwise). A notification
+ * that arrives while the app is fully closed cannot trigger code,
+ * so it arrives with the phone's default sound instead; the Prayer
+ * screen says exactly that. Registered once, alongside the handler.
+ */
+function ensureAdhanListeners(): void {
+  if (adhanListenersSet) return;
+  adhanListenersSet = true;
+  try {
+    Notifications.addNotificationReceivedListener((notification) => {
+      const data = notification.request.content.data as { type?: unknown } | undefined;
+      if (data?.type === 'prayer') {
+        void playAdhanForAlert();
+      }
+    });
+    Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data as { type?: unknown } | undefined;
+      if (data?.type === 'prayer') {
+        void playAdhanForAlert();
+      }
+    });
+  } catch {
+    // Listeners failing must never break notifications themselves.
+  }
 }
 
 /** Create the Android channel (no-op on other platforms / on failure). */

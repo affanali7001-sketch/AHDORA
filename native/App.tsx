@@ -52,6 +52,7 @@ import OnboardingScreen from './src/screens/Onboarding';
 import HomeScreen from './src/screens/Home';
 import DashboardScreen from './src/screens/Dashboard';
 import PrayerScreen from './src/screens/Prayer';
+import PrayerJournalScreen from './src/screens/PrayerJournal';
 import SalahCalendarScreen from './src/screens/SalahCalendar';
 import QuranBookScreen, { QuranReaderScreen } from './src/screens/QuranBook';
 import ParaBookScreen from './src/screens/ParaBook';
@@ -358,6 +359,8 @@ function renderScreen(screen: ScreenId, props: ScreenProps) {
       return <DashboardScreen {...props} />;
     case 'prayer':
       return <PrayerScreen {...props} />;
+    case 'prayerJournal':
+      return <PrayerJournalScreen {...props} />;
     case 'salahCalendar':
       return <SalahCalendarScreen {...props} />;
     case 'quran':

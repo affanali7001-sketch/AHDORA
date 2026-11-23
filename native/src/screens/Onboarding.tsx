@@ -28,6 +28,7 @@ import { Card, Chip, Field, Input, PillButton, ProgressBar } from '../components
 import TimePickerField from '../components/TimePickerField';
 import TutorialVideo from '../components/TutorialVideo';
 import { HOW_TO_USE_VIDEO_URL, SIGNUP_VIDEO_URL } from '../lib/videos';
+import { PRAYER_METHODS } from '../lib/prayerMethods';
 import {
   emptyProfileForm,
   formatTime12h,
@@ -37,12 +38,6 @@ import {
   saveProfilePartial,
   type ProfileForm,
 } from '../lib/apiCore';
-
-const METHODS = [
-  'University of Islamic Sciences, Karachi',
-  'Muslim World League (MWL)',
-  'Islamic Society of North America (ISNA)',
-];
 
 const ORDINALS = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th'];
 
@@ -443,12 +438,12 @@ export default function OnboardingScreen({ lang, user, onOnboardingDone, freshOn
       {step === 4 && (
         <View>
           <Text style={styles.optionLabel}>{s.obMethod}</Text>
-          {METHODS.map((method) => (
+          {PRAYER_METHODS.map((m) => (
             <OptionRow
-              key={method}
-              label={method}
-              selected={form.calculationMethod === method}
-              onPress={() => update('calculationMethod', method)}
+              key={m.value}
+              label={m.label}
+              selected={form.calculationMethod === m.value}
+              onPress={() => update('calculationMethod', m.value)}
             />
           ))}
           <Text style={[styles.optionLabel, { marginTop: 14 }]}>Asr</Text>
