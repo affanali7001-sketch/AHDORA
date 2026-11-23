@@ -13,13 +13,14 @@
  *   3. reciter name as a tappable row ("Name >") — opens the
  *      reciter picker panel;
  *   4. thin seek bar WITH a round handle (the current ayah —
- *      drag it to seek inside the ayah), time "elapsed / total"
- *      right-aligned under it;
- *   5. "Ayah X of Y" label + a thin progress bar under it
- *      (progress through the surah's ayahs — display only);
- *   6. transport, five in this order: prev-SURAH "<" chevron,
+ *      drag it to seek inside the ayah), "Ayah X of Y" on the
+ *      left of the time row and "elapsed / total" right-aligned;
+ *   5. transport, five in this order: prev-SURAH "<" chevron,
  *      prev-ayah skip-back, BIG round central play/pause, next-ayah
  *      skip-forward, next-SURAH ">" chevron;
+ *   6. mode row, ON the card (not buried in a panel): Tilawat /
+ *      Tarjuma (Urdu voice, Shamshad Ali Khan) / Auto-play —
+ *      tapping a mode plays THIS page in that voice at once;
  *   7. one row of small pills: speed ("1×", cycles), "Sleep
  *      timer" (opens the sleep choices), repeat (cycles
  *      off → ayah → surah), reciter (opens the "Choose reciter"
@@ -27,6 +28,13 @@
  *      surah list). There is NO cast pill: no real casting
  *      exists, so none is shown. Mihrab palette: dark navy card,
  *      cream-white text, light-blue play button and fills.
+ *
+ * The card is deliberately COMPACT (small type, 56px play button,
+ * tight margins) so the mushaf page and the Para text under it
+ * stay readable while it plays. The reciter panel still holds the
+ * full reciter list, the auto-play switch, the translation-text
+ * switch and the ±10s skips — the mode row on the card is the
+ * same controls, surfaced where the user looks first.
  *
  * Everything here is real state from the global manager
  * (src/lib/quranAudio.ts): tilawat stays EveryAyah in the picked
@@ -259,27 +267,6 @@ export default function TilawahPlayer({
     }
     return `Page ${page}`;
   })();
-  const surahPct = (() => {
-    if (
-      audioActive &&
-      audio.playingSurahAyahs &&
-      audio.playingAyahInSurah &&
-      audio.playingSurahAyahs > 0
-    ) {
-      return Math.min(
-        1,
-        Math.max(0, (audio.playingAyahInSurah - 1 + ayahPct) / audio.playingSurahAyahs),
-      );
-    }
-    if (audioActive && audio.queueLength > 0) {
-      return Math.min(
-        1,
-        Math.max(0, (audio.queueIndex + ayahPct) / audio.queueLength),
-      );
-    }
-    return 0;
-  })();
-
   function onPlayPause(): void {
     if (audioActive) {
       // Play is resume/pause for whatever is loaded — the label
@@ -414,7 +401,10 @@ export default function TilawahPlayer({
         <Text style={styles.reciterChevron}>›</Text>
       </Pressable>
 
-      {/* 4 — ayah seek bar (drag it) + elapsed / total on the right. */}
+      {/* 4 — ayah seek bar (drag it) + elapsed / total on the right.
+          The left of the time row names the ayah ("Ayah X of Y") —
+          the separate label row + surah progress bar are gone, so
+          the card stays short enough to read the book under it. */}
       <Scrubber
         ratio={ayahPct}
         onSeekRatio={(r) => {
@@ -423,8 +413,8 @@ export default function TilawahPlayer({
         label={s.tilawahSeekAyah}
       />
       <View style={styles.timeRow}>
-        <Text style={styles.timeText}>
-          {audio.busy && audioActive ? s.audioLoading : ''}
+        <Text style={styles.timeText} numberOfLines={1}>
+          {audio.busy && audioActive ? s.audioLoading : ayahOfLabel}
         </Text>
         <Text style={styles.timeText}>
           {duration > 0 ? `${fmtTime(time)} / ${fmtTime(duration)}` : `Page ${page}`}
@@ -432,12 +422,6 @@ export default function TilawahPlayer({
       </View>
       {audio.error ? <Text style={styles.error}>{audio.error}</Text> : null}
       {navError ? <Text style={styles.error}>{navError}</Text> : null}
-
-      {/* 5 — "Ayah X of Y" + thin surah-progress bar under it. */}
-      <Text style={styles.ayahOf}>{ayahOfLabel}</Text>
-      <View style={styles.progressTrack}>
-        <View style={[styles.progressFill, { width: `${surahPct * 100}%` }]} />
-      </View>
 
       {/* 6 — transport: prev surah, prev ayah, big play, next ayah,
           next surah. Left-to-right in every language, as media
@@ -518,6 +502,33 @@ export default function TilawahPlayer({
             ›
           </Text>
         </Pressable>
+      </View>
+
+      {/* Mode — ON the card, not buried in the reciter panel:
+          Tilawat or the Urdu tarjuma voice for THIS page, plus the
+          auto-play switch (tilawat → tarjuma → next page). The
+          tarjuma option used to live two taps deep (reciter row →
+          panel), so users never found it while tilawat auto-played
+          on. Tapping a mode plays this page in that voice at once. */}
+      <View style={styles.modeRow}>
+        <PillButton
+          label={s.tilawahTilawat}
+          small
+          variant={audio.mode === 'tilawat' && onThisPage ? 'primary' : 'ghost'}
+          onPress={() => onMode('tilawat')}
+        />
+        <PillButton
+          label={s.tilawahTarjuma}
+          small
+          variant={audio.mode === 'urdu' && onThisPage ? 'primary' : 'ghost'}
+          onPress={() => onMode('urdu')}
+        />
+        <PillButton
+          label={s.autoPlay}
+          small
+          variant={audio.autoPlay ? 'primary' : 'ghost'}
+          onPress={() => setQuranAutoPlay(!audio.autoPlay)}
+        />
       </View>
 
       {/* 7 — one quiet row of pills: speed, sleep, repeat, reciter
@@ -690,7 +701,10 @@ export default function TilawahPlayer({
           </ScrollView>
           <Text style={styles.credit}>{s.reciterNote}</Text>
 
-          <Text style={styles.panelTitle}>{s.tilawahTilawat} / {s.tilawahTarjuma}</Text>
+          {/* The mode + auto-play controls live on the card now
+              (see the mode row above the pills) — they are repeated
+              here for the panel's full-control view, and the
+              translation-text switch and ±10s skips stay here. */}
           <View style={styles.modeRow}>
             <PillButton
               label={s.tilawahTilawat}
@@ -749,10 +763,10 @@ export default function TilawahPlayer({
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    marginTop: 16,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: 12,
     shadowColor: C.teal950,
     shadowOpacity: 0.3,
     shadowRadius: 14,
@@ -767,64 +781,64 @@ const styles = StyleSheet.create({
   },
   topLabel: {
     fontFamily: F.sans,
-    fontSize: 13,
+    fontSize: 12,
     color: C.navInactive,
     flexShrink: 1,
   },
   dismissBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     backgroundColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dismissGlyph: { fontSize: 13, color: C.navInactive, textAlign: 'center' },
+  dismissGlyph: { fontSize: 12, color: C.navInactive, textAlign: 'center' },
   /* 2 — surah names. */
   namesRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
     justifyContent: 'space-between',
     gap: 12,
-    marginTop: 8,
+    marginTop: 4,
   },
   surahName: {
     fontFamily: F.sans,
-    fontSize: 26,
+    fontSize: 20,
     fontWeight: '800',
     color: C.white,
     flexShrink: 1,
   },
-  surahArabic: { fontFamily: F.arabic, fontSize: 24, color: C.white, flexShrink: 0 },
+  surahArabic: { fontFamily: F.arabic, fontSize: 18, color: C.white, flexShrink: 0 },
   /* 3 — reciter row: a choice, not a card. */
   reciterLine: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     alignSelf: 'flex-start',
-    marginTop: 6,
+    marginTop: 2,
   },
-  reciterName: { fontFamily: F.sans, fontSize: 14, color: C.skyBlue },
-  reciterChevron: { fontSize: 16, color: C.skyBlue },
+  reciterName: { fontFamily: F.sans, fontSize: 12.5, color: C.skyBlue },
+  reciterChevron: { fontSize: 14, color: C.skyBlue },
   /* 4 — ayah seek bar (draggable, thumb) + time. */
-  scrubTouch: { height: 28, justifyContent: 'center', marginTop: 8 },
+  scrubTouch: { height: 24, justifyContent: 'center', marginTop: 4 },
   scrubTrack: {
-    height: 5,
-    borderRadius: 2.5,
+    height: 4,
+    borderRadius: 2,
     backgroundColor: 'rgba(255,255,255,0.22)',
     overflow: 'hidden',
   },
-  scrubFill: { height: 5, borderRadius: 2.5, backgroundColor: C.skyBlue },
+  scrubFill: { height: 4, borderRadius: 2, backgroundColor: C.skyBlue },
   scrubThumb: {
     position: 'absolute',
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     backgroundColor: C.skyBlue,
-    marginLeft: -6,
+    marginLeft: -5,
   },
-  timeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  timeText: { fontFamily: F.sans, fontSize: 12.5, color: C.navInactive },
+  timeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  timeText: { fontFamily: F.sans, fontSize: 11.5, color: C.navInactive, flexShrink: 1 },
   error: {
     fontFamily: F.sans,
     fontSize: 13,
@@ -832,21 +846,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
   },
-  /* 5 — "Ayah X of Y" + thin surah progress. */
-  ayahOf: {
-    fontFamily: F.sans,
-    fontSize: 13,
-    color: C.navInactive,
-    marginTop: 10,
-  },
-  progressTrack: {
-    height: 3,
-    borderRadius: 1.5,
-    backgroundColor: 'rgba(255,255,255,0.22)',
-    overflow: 'hidden',
-    marginTop: 6,
-  },
-  progressFill: { height: 3, borderRadius: 1.5, backgroundColor: C.skyBlue },
   /* 6 — transport. Not mirrored: previous on the left, next on the
      right, in every language — media transport keeps its
      left-to-right order on both platforms. */
@@ -854,24 +853,33 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 24,
-    marginTop: 14,
-    marginBottom: 4,
+    gap: 16,
+    marginTop: 10,
+    marginBottom: 2,
   },
   transportBtn: { padding: 8, minWidth: 40, alignItems: 'center' },
   /* The surah step: a chevron at the transport's ends, quiet by size. */
-  surahStepGlyph: { fontSize: 28, color: C.white, lineHeight: 32 },
-  ayahStepGlyph: { fontSize: 22, color: C.white, textAlign: 'center' },
+  surahStepGlyph: { fontSize: 24, color: C.white, lineHeight: 28 },
+  ayahStepGlyph: { fontSize: 19, color: C.white, textAlign: 'center' },
   glyphDim: { color: 'rgba(255,255,255,0.35)' },
   playBtn: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: C.skyBlue,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  playGlyph: { fontSize: 26, color: C.navy, textAlign: 'center' },
+  playGlyph: { fontSize: 20, color: C.navy, textAlign: 'center' },
+  /* Mode row — Tilawat / Tarjuma / Auto-play, on the card. */
+  modeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+    marginTop: 10,
+  },
   /* 7 — one quiet row of pills. Painted only when on. */
   optionsRow: {
     flexDirection: 'row',
@@ -879,34 +887,34 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     flexWrap: 'wrap',
-    marginTop: 12,
+    marginTop: 8,
   },
   pill: {
-    minHeight: 34,
-    minWidth: 44,
-    paddingHorizontal: 12,
+    minHeight: 30,
+    minWidth: 40,
+    paddingHorizontal: 10,
     borderRadius: 999,
     backgroundColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   pillOn: { backgroundColor: C.skyBlue },
-  pillText: { fontFamily: F.sans, fontSize: 13, fontWeight: '700', color: C.white },
+  pillText: { fontFamily: F.sans, fontSize: 12.5, fontWeight: '700', color: C.white },
   pillTextOn: { color: C.navy },
   sleepStatus: {
     fontFamily: F.sans,
     fontSize: 12.5,
     color: C.skyBlue,
     textAlign: 'center',
-    marginTop: 8,
+    marginTop: 6,
   },
-  followWrap: { marginTop: 12 },
+  followWrap: { marginTop: 8 },
   /* Expandable panels (sleep choices / reciter + extra controls). */
   panel: {
-    marginTop: 14,
+    marginTop: 10,
     backgroundColor: 'rgba(255,255,255,0.07)',
     borderRadius: S.radius,
-    padding: 12,
+    padding: 10,
   },
   panelTitle: {
     fontFamily: F.sans,
@@ -921,7 +929,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  reciterList: { maxHeight: 300, marginTop: 8 },
+  reciterList: { maxHeight: 220, marginTop: 8 },
   reciterRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -956,7 +964,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
     lineHeight: 18,
   },
-  modeRow: { flexDirection: 'row', gap: 10, justifyContent: 'center' },
+  /* (modeRow is defined once, above — the card and the panel
+     share it.) */
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
