@@ -270,10 +270,18 @@ if (isProduction) {
   const webDist = fileURLToPath(new URL('../../dist', import.meta.url));
   const spaCsp = [
     "default-src 'self'",
-    "script-src 'self'",
+    // The landing page (ahdora.me) is a static storefront with inline
+    // JS for the Hinglish/English toggle and the copy button, so inline
+    // scripts are allowed here. The API itself keeps the strict global
+    // helmet policy (default-src 'none'); this policy only covers the
+    // website pages served from dist/.
+    "script-src 'self' 'unsafe-inline'",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
     "img-src 'self' data:",
+    // Tutorial video streams from Google Drive (uc URL redirects to
+    // drive.usercontent.google.com).
+    "media-src 'self' https://drive.google.com https://drive.usercontent.google.com",
     "connect-src 'self' ws: wss:",
     "base-uri 'none'",
     "frame-ancestors 'none'",
