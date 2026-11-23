@@ -28,12 +28,13 @@ import type { ScreenProps } from '../lib/nav';
 import { stringsFor } from '../lib/strings';
 import { C, L, T } from '../lib/theme';
 import { Card, PillButton, Switch, TealHead } from '../components/ui';
-import { getProfile } from '../lib/apiSocial';
+import { getProfile, loadCachedProfile } from '../lib/apiSocial';
 import { formatTime12h } from '../lib/apiCore';
 import {
   canScheduleExactAlarms,
   isAppBlockAvailable,
   loadAppBlockConfig,
+  normalizeHHmm,
   openExactAlarmSettings,
   saveAppBlockConfig,
   syncScheduleFromServer,
@@ -98,6 +99,10 @@ export default function SleepScreen({ lang, goTo }: ScreenProps) {
   const [syncMsg, setSyncMsg] = useState('');
   const [testMsg, setTestMsg] = useState('');
   const [testBusy, setTestBusy] = useState(false);
+  /** True when the schedule shown came from a saved local copy
+      (cached profile / native blocker config) because the server
+      fetch failed — the note under the error says so honestly. */
+  const [scheduleCached, setScheduleCached] = useState(false);
 
   const applyWarnings = useCallback(
     async (start: string | null, warn: boolean, block: boolean) => {
@@ -112,37 +117,77 @@ export default function SleepScreen({ lang, goTo }: ScreenProps) {
     setLoading(true);
     setError('');
     setSyncMsg('');
-    try {
-      const [{ profile }, blockRaw, warnRaw, perm, exact] = await Promise.all([
-        getProfile(),
-        AsyncStorage.getItem(SLEEP_BLOCK_KEY),
-        AsyncStorage.getItem(SLEEP_WARN_KEY),
-        getNotificationPermissionStatus(),
-        canScheduleExactAlarms(),
-      ]);
-      const start =
+    setScheduleCached(false);
+    // Local, on-device state FIRST — the switches and permission
+    // rows never depend on the server, so a failing profile fetch
+    // cannot blank them. (2026-11-23, Run #48: one failed
+    // getProfile() in the shared Promise.all left this whole
+    // screen an empty error card.)
+    const [blockRaw, warnRaw, perm, exact] = await Promise.all([
+      AsyncStorage.getItem(SLEEP_BLOCK_KEY),
+      AsyncStorage.getItem(SLEEP_WARN_KEY),
+      getNotificationPermissionStatus(),
+      canScheduleExactAlarms(),
+    ]);
+    const block = blockRaw === 'true';
+    const warn = warnRaw !== 'false';
+    setBlockApps(block);
+    setWarnFirst(warn);
+    setPermStatus(perm);
+    setExactAlarm(exact);
+    // The schedule itself: server first, then the locally saved
+    // copies — the cached profile, then the native blocker's own
+    // saved sleep window (the service enforces that window, so it
+    // is the most honest local copy). Only when NOTHING has a
+    // schedule does the screen fall back to the error card.
+    let start: string | null = null;
+    let end: string | null = null;
+    let fromCache = false;
+    const profileTimes = (profile: { sleepStartTime?: unknown; sleepTime?: unknown; sleepEndTime?: unknown } | null) => ({
+      start:
         typeof profile?.sleepStartTime === 'string'
           ? profile.sleepStartTime
           : typeof profile?.sleepTime === 'string'
             ? profile.sleepTime
-            : null;
-      const end = typeof profile?.sleepEndTime === 'string' ? profile.sleepEndTime : null;
-      const block = blockRaw === 'true';
-      const warn = warnRaw !== 'false';
-      setSleepStart(start);
-      setSleepEnd(end);
-      setBlockApps(block);
-      setWarnFirst(warn);
-      setPermStatus(perm);
-      setExactAlarm(exact);
-      // Push the saved sleep window to the native blocker every time
-      // this screen opens, so a sleep time changed in Onboarding or
-      // Profile reaches the service without a visit to App Block.
-      // (No-op in Expo Go; a failure here never blocks the screen.)
+            : null,
+      end: typeof profile?.sleepEndTime === 'string' ? profile.sleepEndTime : null,
+    });
+    try {
+      const { profile } = await getProfile();
+      const t = profileTimes(profile);
+      start = t.start;
+      end = t.end;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : s.errorGeneric);
+      const cached = await loadCachedProfile();
+      if (cached?.profile) {
+        const t = profileTimes(cached.profile);
+        start = t.start;
+        end = t.end;
+        fromCache = start !== null && end !== null;
+      }
+      if (!start || !end) {
+        const cfg = await loadAppBlockConfig();
+        if (cfg?.sleep_start && cfg?.sleep_end) {
+          start = normalizeHHmm(cfg.sleep_start);
+          end = normalizeHHmm(cfg.sleep_end);
+          fromCache = start !== null && end !== null;
+        }
+      }
+    }
+    setSleepStart(start);
+    setSleepEnd(end);
+    setScheduleCached(fromCache);
+    // Push the saved sleep window to the native blocker every time
+    // this screen opens, so a sleep time changed in Onboarding or
+    // Profile reaches the service without a visit to App Block.
+    // Best-effort: a failure here never blocks the screen (and
+    // never overwrites the main error above).
+    try {
       await syncScheduleFromServer();
       await applyWarnings(start, warn, block);
     } catch (e) {
-      setError(e instanceof Error ? e.message : s.errorGeneric);
+      setSyncMsg(e instanceof Error ? e.message : s.errorGeneric);
     } finally {
       setLoading(false);
     }
@@ -267,6 +312,9 @@ export default function SleepScreen({ lang, goTo }: ScreenProps) {
       ) : (
         <View>
           {error ? <Text style={T.error}>{error}</Text> : null}
+          {scheduleCached ? (
+            <Text style={[T.cardBody, { marginTop: 6 }]}>{s.sleepCachedNote}</Text>
+          ) : null}
 
           {/* Dark-teal header card: real schedule */}
           <TealHead style={{ marginTop: 14 }}>

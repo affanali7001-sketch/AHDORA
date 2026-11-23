@@ -4,7 +4,7 @@
  * (same CSRF + manual cookie jar as the verified login client).
  * All data is live from the server; nothing here is fabricated.
  */
-import { apiFetch } from './api';
+import { apiFetch, serverErrorMessage } from './api';
 import { canonicalPrayerMethod } from './prayerMethods';
 
 export type PrayerName = 'Fajr' | 'Dhuhr' | 'Asr' | 'Maghrib' | 'Isha';
@@ -319,7 +319,7 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
     const base =
       typeof data.error === 'string' && data.error.length > 0
         ? data.error
-        : 'Request failed. Please try again.';
+        : serverErrorMessage(response.status);
     throw new Error(
       detailMessages.length > 0 && !detailMessages.every((message) => base.includes(message))
         ? `${base} ${detailMessages.join(' ')}`

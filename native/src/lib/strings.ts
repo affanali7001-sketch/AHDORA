@@ -703,6 +703,7 @@ const en = {
   sleepPhoneNote: 'Bedtime block is sent to the phone’s blocker straight away; the warning is a real scheduled notification.',
   sleepNotSet: 'Sleep time is not set yet — set it from Onboarding.',
   sleepSetBtn: 'Set sleep time',
+  sleepCachedNote: 'Showing the saved schedule — the refresh failed, so this may not be the latest.',
   // ---- app block (preview STR) ----
   blockTitle: 'App Block',
   blockSub: 'Everything is optional and in your control. What\'s off never runs.',
@@ -896,6 +897,7 @@ const en = {
   pfDelete: 'Deleting your account happens from here — with a data export option first.',
   pfDeleteOpen: 'Delete account permanently',
   pfResetSent: 'Reset link sent — check your email.',
+  pfCachedNote: 'Showing the last saved details — the refresh failed, so these may not be the latest.',
   pfExportBtn: 'Export my data',
   pfDeleteBtn: 'Delete my account',
   pfDeleteHint: 'To delete your account, type your password to confirm. This deletes all your data and cannot be undone.',
@@ -1610,6 +1612,7 @@ const hi: typeof en = {
   sleepPhoneNote: 'Bedtime block turant phone ke blocker ko bhej diya jata hai; warning ek asal scheduled notification hai.',
   sleepNotSet: 'Sone ka time abhi set nahi hai — Onboarding se set karo.',
   sleepSetBtn: 'Sleep time set karo',
+  sleepCachedNote: 'Saved schedule dikh raha hai — refresh fail ho gaya, isliye ye latest ho, zaroori nahi.',
   // ---- app block (preview STR) ----
   blockTitle: 'App Block',
   blockSub: 'Sab kuch optional aur tumhare control me. Jo off hai, wo kabhi nahi chalega.',
@@ -1803,6 +1806,7 @@ const hi: typeof en = {
   pfDelete: 'Account delete karna ho to yahan se hoga — pehle data export ka option milega.',
   pfDeleteOpen: 'Account permanently delete karo',
   pfResetSent: 'Reset link bhej diya — apna email check karo.',
+  pfCachedNote: 'Pichhli saved details dikh rahi hain — refresh fail ho gaya, isliye ye latest ho, zaroori nahi.',
   pfExportBtn: 'Mera data export karo',
   pfDeleteBtn: 'Mera account delete karo',
   pfDeleteHint: 'Account delete karne ke liye confirm karne ke liye apna password likho. Isse tumhara saara data delete ho jayega aur wapas nahi aayega.',

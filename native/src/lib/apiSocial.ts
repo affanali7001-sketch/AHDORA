@@ -8,7 +8,8 @@
  * here invents an endpoint. Every function throws an Error carrying
  * the server's message (or the network message) on failure.
  */
-import { apiFetch } from './api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { apiFetch, serverErrorMessage } from './api';
 
 async function parseJson<T>(response: Response): Promise<T> {
   return (await response.json().catch(() => ({}))) as T;
@@ -32,7 +33,10 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   const data = await parseJson<T>(response);
   if (!response.ok) {
-    throw new Error(errorMessage(data, 'Request failed. Please try again.'));
+    // No error text from the server (e.g. a Heroku 500 with an HTML
+    // body) now reports the real HTTP status instead of the bare
+    // "Request failed. Please try again." that hid the cause.
+    throw new Error(errorMessage(data, serverErrorMessage(response.status)));
   }
   return data;
 }
@@ -493,10 +497,59 @@ export async function getProfile(): Promise<{
   profile: ProfileData | null;
   onboarding: { status: string; step: number; completed: boolean; skipped: boolean };
 }> {
-  return call<{
+  const result = await call<{
     profile: ProfileData | null;
     onboarding: { status: string; step: number; completed: boolean; skipped: boolean };
   }>('/api/profile');
+  // Cache the last good copy on the device: when the server call
+  // fails (slow network / transient 500 — the intermittent
+  // "Request failed" on Run #48), the Profile and Sleep screens
+  // show this saved copy with a "refresh failed" note instead of
+  // a blank error screen. A cache write never breaks the call.
+  void cacheProfile(result).catch(() => undefined);
+  return result;
+}
+
+/** Last successfully fetched profile, for the offline fallback. */
+const PROFILE_CACHE_KEY = '@ahdora/profile/cache';
+
+async function cacheProfile(result: {
+  profile: ProfileData | null;
+  onboarding: { status: string; step: number; completed: boolean; skipped: boolean };
+}): Promise<void> {
+  try {
+    await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(result));
+  } catch {
+    // Cache is best-effort only.
+  }
+}
+
+/**
+ * The saved profile copy, or null when nothing was ever fetched
+ * successfully. Callers show it with a "refresh failed" note —
+ * never as if it were fresh server data.
+ */
+export async function loadCachedProfile(): Promise<{
+  profile: ProfileData | null;
+  onboarding: { status: string; step: number; completed: boolean; skipped: boolean };
+} | null> {
+  try {
+    const raw = await AsyncStorage.getItem(PROFILE_CACHE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const p = parsed as {
+      profile?: unknown;
+      onboarding?: { status: string; step: number; completed: boolean; skipped: boolean };
+    };
+    if (!p.onboarding || typeof p.onboarding !== 'object') return null;
+    return {
+      profile: (p.profile ?? null) as ProfileData | null,
+      onboarding: p.onboarding,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function salahCalendar(

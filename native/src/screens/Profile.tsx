@@ -39,6 +39,7 @@ import { HOW_TO_USE_VIDEO_URL } from '../lib/videos';
 import { getNotificationPermissionDetail } from '../lib/prayerNotifications';
 import {
   getProfile,
+  loadCachedProfile,
   rewardsSummary,
   type ProfileData,
   type RewardsSummary,
@@ -92,6 +93,9 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [profile, setProfile] = useState<ProfileData | null>(null);
+  /** True when the profile shown is the last saved copy because the
+      server refresh failed — the note under the error says so. */
+  const [profileCached, setProfileCached] = useState(false);
   const [rewards, setRewards] = useState<RewardsSummary | null>(null);
   const [uninstall, setUninstall] = useState(false);
   // False in Expo Go / on iOS, where the native admin module does
@@ -162,9 +166,14 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
     }
     // The server data is independent: a failure here blanks only
     // the profile/rewards rows, never the Settings toggles above.
+    // And even those rows fall back to the last saved profile copy
+    // (2026-11-23, Run #48: the intermittent "Request failed" left
+    // the subtitle blank) — shown with a "refresh failed" note,
+    // never as if it were fresh server data.
     try {
       const [prof, rw] = await Promise.all([getProfile(), rewardsSummary()]);
       setProfile(prof.profile);
+      setProfileCached(false);
       setRewards(rw);
       // The switch shows the REAL Device Admin state, never a saved
       // flag: true only while AHDORA is an active device admin.
@@ -173,6 +182,11 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
       // value left on the phone from an older build is inert.)
       if (first) setError('');
     } catch (e) {
+      const cached = await loadCachedProfile();
+      if (cached?.profile) {
+        setProfile(cached.profile);
+        setProfileCached(true);
+      }
       if (first) setError(e instanceof Error ? e.message : s.errorGeneric);
     } finally {
       if (first) {
@@ -359,6 +373,11 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
       ) : (
         <View>
           {error ? <Text style={T.error}>{error}</Text> : null}
+          {profileCached ? (
+            <Text style={[styles.honestNote, th.dark && styles.mutedDark]}>
+              {s.pfCachedNote}
+            </Text>
+          ) : null}
 
           <PillButton label={s.pfEdit} variant="peach" block onPress={() => goTo('onboarding')} />
           <PillButton label={s.pfNamazEdit} variant="ghost" block onPress={() => goTo('prayer')} />

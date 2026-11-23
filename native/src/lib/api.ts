@@ -27,6 +27,39 @@ export const API_BASE = 'https://ahdora-f85f76ceea58.herokuapp.com';
 export const NETWORK_ERROR_MESSAGE =
   'Connection slow ya unavailable hai. Apna internet check karke dobara try karo.';
 
+/**
+ * Honest message when the server answers with an error status but no
+ * error text (e.g. a Heroku/Atlas 500 with an HTML body, which parses
+ * to {} and used to surface as the bare "Request failed. Please try
+ * again."). The HTTP status is included so the user can report what
+ * actually happened instead of a mystery failure.
+ */
+export function serverErrorMessage(status: number): string {
+  return `Server error (HTTP ${status}) — dobara try karo.`;
+}
+
+/**
+ * How long one request may run before it is treated as stalled.
+ * The user's phone is often on slow mobile data — without a timeout
+ * a stalled fetch hung the screen with a spinner forever. 20s is
+ * generous for this API (healthy calls take ~1s) but still fails
+ * fast enough to retry and to tell the user.
+ */
+const REQUEST_TIMEOUT_MS = 20000;
+/** Pause between the first attempt and the single retry. */
+const RETRY_DELAY_MS = 800;
+
+/** Only safe (idempotent) requests are retried — a mutation is never
+ *  sent twice, so a double-submit cannot happen. */
+function isRetryableMethod(init?: RequestInit): boolean {
+  const method = (init?.method ?? 'GET').toUpperCase();
+  return method === 'GET' || method === 'HEAD';
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export type AuthUser = {
   id: string;
   name: string;
@@ -199,16 +232,53 @@ async function doRequest(path: string, init: RequestInit): Promise<Response> {
     const token = await loadSessionToken();
     if (token) headers['Authorization'] = `Bearer ${token}`;
   }
-  let response: Response;
-  try {
-    response = await fetch(resolveUrl(path), { ...init, headers });
-  } catch (error) {
-    // fetch only rejects on a transport failure — say so plainly
-    // instead of leaking the raw "Failed to fetch" / TypeError.
-    if (error instanceof TypeError || error instanceof Error) {
+  // 2026-11-23 (Run #48): the "Request failed" error came SOMETIMES
+  // on the phone — a stalled request on slow mobile data, or a
+  // transient Heroku/Atlas 500. Two defences, both here so every
+  // screen benefits: (1) a real timeout, so a stalled request fails
+  // fast instead of spinning forever; (2) ONE retry for safe (GET)
+  // requests, on a transport failure or a 5xx. Mutations are never
+  // retried — a double-submit would be worse than the error.
+  const attempts = isRetryableMethod(init) ? 2 : 1;
+  let response: Response | null = null;
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        const res = await fetch(resolveUrl(path), {
+          ...init,
+          headers,
+          signal: controller.signal,
+        });
+        // Transient server error — retry once, then return whatever
+        // the server finally says so the caller can report the status.
+        if (res.status >= 500 && attempt + 1 < attempts) {
+          await sleep(RETRY_DELAY_MS);
+          continue;
+        }
+        response = res;
+        break;
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 < attempts) {
+        await sleep(RETRY_DELAY_MS);
+        continue;
+      }
+    }
+  }
+  if (!response) {
+    // fetch only rejects on a transport failure (offline, timeout,
+    // aborted) — say so plainly instead of leaking the raw
+    // "Failed to fetch" / TypeError / AbortError.
+    if (lastError instanceof Error) {
       throw new Error(NETWORK_ERROR_MESSAGE);
     }
-    throw error;
+    throw lastError;
   }
   // Persist any cookies the response set (session + CSRF).
   storeCookies(response.headers);
@@ -323,7 +393,7 @@ export async function login(email: string, password: string): Promise<AuthUser> 
     const message =
       typeof data.error === 'string' && data.error.length > 0
         ? data.error
-        : 'Request failed. Please try again.';
+        : serverErrorMessage(response.status);
     throw new Error(message);
   }
   // The server returns the session token in the body (the native app
@@ -369,7 +439,7 @@ export async function signup(
     const message =
       typeof data.error === 'string' && data.error.length > 0
         ? data.error
-        : 'Request failed. Please try again.';
+        : serverErrorMessage(response.status);
     throw new Error(message);
   }
   // Persist the session token (same reason as login above).
@@ -404,7 +474,7 @@ export async function changePassword(
     const message =
       typeof data.error === 'string' && data.error.length > 0
         ? data.error
-        : 'Request failed. Please try again.';
+        : serverErrorMessage(response.status);
     throw new Error(message);
   }
   // Persist the rotated session token (same reason as login above).
