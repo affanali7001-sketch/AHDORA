@@ -8,9 +8,10 @@
  *
  * After a successful signup the notification-permission prompt is
  * shown (in-app explanation, then the system dialog) — but only when
- * the OS permission is still undecided and this user has never been
- * asked before (see src/lib/notificationPrompt.ts). It never blocks
- * signup and is never re-asked.
+ * the OS dialog can still be shown and this user has never been
+ * asked before (see src/lib/notificationPrompt.ts). When permission
+ * is blocked so the dialog cannot appear again, the Settings card
+ * is shown instead. It never blocks signup and is never re-asked.
  */
 import { useRef, useState } from 'react';
 import {
@@ -28,6 +29,8 @@ import type { ScreenProps } from '../lib/nav';
 import { signup, type AuthUser } from '../lib/api';
 import {
   allowNotificationsAfterAuth,
+  isNotificationPermissionBlocked,
+  openNotificationSettingsAfterAuth,
   shouldAskNotificationPermission,
   skipNotificationsAfterAuth,
 } from '../lib/notificationPrompt';
@@ -48,10 +51,14 @@ export default function SignupScreen({ lang, goTo, onLoginSuccess }: ScreenProps
   const [notice, setNotice] = useState<string | null>(null);
   // Post-signup notification prompt — same rule as Login: the new
   // user is held here until they answer (allow / not now), only
-  // when the OS permission is still undecided and this user has
+  // when the OS dialog can still be shown and this user has
   // never been asked before (see src/lib/notificationPrompt.ts).
   const [pendingUser, setPendingUser] = useState<AuthUser | null>(null);
   const [showNotifPrompt, setShowNotifPrompt] = useState(false);
+  // Blocked state: permission denied and the OS dialog will not
+  // appear again — show the Settings card (open Settings / not
+  // now) instead of the ask card, once per user.
+  const [showNotifBlocked, setShowNotifBlocked] = useState(false);
   const [promptBusy, setPromptBusy] = useState(false);
   // When the keyboard opens over the password fields, scroll the
   // form so the focused field stays visible (the user reported the
@@ -93,11 +100,17 @@ export default function SignupScreen({ lang, goTo, onLoginSuccess }: ScreenProps
       setConfirmPassword('');
       if (result.notice) setNotice(result.notice);
       // Ask for notification permission right after signup — but
-      // only when it has not been decided/asked before. Otherwise
-      // go straight in; the prompt must never block or repeat.
+      // only when the OS dialog can still be shown and this user has
+      // not been asked / denied before. When permission is blocked
+      // (the dialog will not appear again), show the Settings card
+      // instead. Otherwise go straight in; the prompt must never
+      // block or repeat.
       if (await shouldAskNotificationPermission(result.user.id)) {
         setPendingUser(result.user);
         setShowNotifPrompt(true);
+      } else if (await isNotificationPermissionBlocked(result.user.id)) {
+        setPendingUser(result.user);
+        setShowNotifBlocked(true);
       } else {
         onLoginSuccess(result.user);
       }
@@ -120,6 +133,14 @@ export default function SignupScreen({ lang, goTo, onLoginSuccess }: ScreenProps
     if (!pendingUser || promptBusy) return;
     setPromptBusy(true);
     await skipNotificationsAfterAuth(pendingUser.id);
+    setPromptBusy(false);
+    onLoginSuccess(pendingUser);
+  }
+
+  async function openNotifSettings() {
+    if (!pendingUser || promptBusy) return;
+    setPromptBusy(true);
+    await openNotificationSettingsAfterAuth(pendingUser.id);
     setPromptBusy(false);
     onLoginSuccess(pendingUser);
   }
@@ -152,6 +173,29 @@ export default function SignupScreen({ lang, goTo, onLoginSuccess }: ScreenProps
             <PillButton
               label={s.notifPromptAllow}
               onPress={() => void allowNotifications()}
+              disabled={promptBusy}
+              busy={promptBusy}
+              block
+            />
+          </View>
+          <View style={{ marginTop: 10 }}>
+            <PillButton
+              label={s.notifPromptLater}
+              variant="ghost"
+              onPress={() => void skipNotifications()}
+              disabled={promptBusy}
+              block
+            />
+          </View>
+        </Card>
+      ) : showNotifBlocked && pendingUser ? (
+        <Card>
+          <Text style={T.cardTitle}>{s.notifBlockedT}</Text>
+          <Text style={[T.cardBody, { marginTop: 6 }]}>{s.notifBlockedB}</Text>
+          <View style={{ marginTop: 14 }}>
+            <PillButton
+              label={s.notifBlockedOpen}
+              onPress={() => void openNotifSettings()}
               disabled={promptBusy}
               busy={promptBusy}
               block

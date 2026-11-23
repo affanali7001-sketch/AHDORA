@@ -35,6 +35,7 @@ import { C, L, T } from '../lib/theme';
 import { Card, Input, PillButton, SegmentedControl, Switch } from '../components/ui';
 import TutorialVideo from '../components/TutorialVideo';
 import { HOW_TO_USE_VIDEO_URL } from '../lib/videos';
+import { getNotificationPermissionDetail } from '../lib/prayerNotifications';
 import {
   getProfile,
   rewardsSummary,
@@ -95,6 +96,10 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
   const [rewards, setRewards] = useState<RewardsSummary | null>(null);
   const [uninstall, setUninstall] = useState(false);
   const [minimal, setMinimal] = useState(false);
+  // Live notification-permission state for the Notifications row:
+  // when permission is missing the row says so honestly, so the
+  // user knows tapping it is the way to turn alerts on.
+  const [notifPermOff, setNotifPermOff] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [resetNote, setResetNote] = useState('');
   const [resetBusy, setResetBusy] = useState(false);
@@ -114,16 +119,18 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
     setLoading(true);
     setError('');
     try {
-      const [prof, rw, stored, minimalStored] = await Promise.all([
+      const [prof, rw, stored, minimalStored, permDetail] = await Promise.all([
         getProfile(),
         rewardsSummary(),
         AsyncStorage.getItem(UNINSTALL_KEY),
         loadMinimal(uid),
+        getNotificationPermissionDetail(),
       ]);
       setProfile(prof.profile);
       setRewards(rw);
       if (stored !== null) setUninstall(stored === 'true');
       setMinimal(minimalStored);
+      setNotifPermOff(permDetail.status !== 'granted');
     } catch (e) {
       setError(e instanceof Error ? e.message : s.errorGeneric);
     } finally {
@@ -330,7 +337,9 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
             <View style={[styles.row, th.dark && styles.rowDark]}>
               <View style={styles.rowText}>
                 <Text style={[styles.rowLabel, th.dark && styles.textDark]}>{s.pfNotifT}</Text>
-                <Text style={[styles.rowSub, th.dark && styles.mutedDark]}>{s.pfNotifS}</Text>
+                <Text style={[styles.rowSub, th.dark && styles.mutedDark]}>
+                  {notifPermOff ? s.ntPermOff : s.pfNotifS}
+                </Text>
               </View>
               <PillButton label={s.pfOpen} small variant="ghost" onPress={() => goTo('notifications')} />
             </View>

@@ -53,7 +53,7 @@
  * problem can never break a screen.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import {
   fetchPrayerTimes,
@@ -68,6 +68,16 @@ import { playAdhanForAlert } from './adhanAudio';
 const CHANNEL_ID = 'ahdora-prayer';
 const IDS_KEY = '@ahdora/notif/prayerIds';
 const ENABLED_KEY = '@ahdora/notif/prayerEnabled';
+/**
+ * Device-level record that the OS notification dialog was shown and
+ * the user said no (set by requestNotificationPermission below, from
+ * ANY screen — login card, Notifications, Sleep). Permission is
+ * per-device, not per-account, so this is deliberately NOT per-uid:
+ * a denial on this phone means "do not ask again" for every account
+ * on it. Cleared when permission is ever granted. It never blocks the
+ * Settings path — only the re-ask.
+ */
+const OS_DENIED_KEY = '@ahdora/notif/osDenied';
 /** Sleep-setting flags, owned by the Sleep screen (same keys it reads). */
 export const SLEEP_BLOCK_KEY = '@ahdora/sleep/blockApps';
 export const SLEEP_WARN_KEY = '@ahdora/sleep/warn5min';
@@ -172,7 +182,20 @@ async function storeIds(ids: string[]): Promise<void> {
   }
 }
 
-/** Current system permission status. Never throws. */
+/**
+ * Current system permission status. Never throws.
+ *
+ * WARNING — do NOT gate a "should we ask?" check on 'undetermined':
+ * on Android 13+ a user who was NEVER asked reads 'denied' here, not
+ * 'undetermined'. expo-notifications' native module reports DENIED
+ * whenever notifications are switched off at system level
+ * (NotificationManagerCompat.areNotificationsEnabled() is false until
+ * POST_NOTIFICATIONS is granted), and 'undetermined' is only reachable
+ * on iOS. The askable state on Android is status 'denied' WITH
+ * canAskAgain true — see getNotificationPermissionDetail below.
+ * (This wrong gate is exactly why the post-login prompt never appeared
+ * before 2026-11-23: see src/lib/notificationPrompt.ts.)
+ */
 export async function getNotificationPermissionStatus(): Promise<PermissionStatus> {
   ensureHandler();
   try {
@@ -184,17 +207,90 @@ export async function getNotificationPermissionStatus(): Promise<PermissionStatu
 }
 
 /**
+ * Full permission detail: status plus whether the OS dialog can still
+ * be shown (canAskAgain). This is the only correct "should we ask?"
+ * input — see the warning on getNotificationPermissionStatus. Never
+ * throws; on error it fails closed (canAskAgain false) so an unknown
+ * state never triggers a prompt.
+ */
+export async function getNotificationPermissionDetail(): Promise<{
+  status: PermissionStatus;
+  canAskAgain: boolean;
+}> {
+  ensureHandler();
+  try {
+    const res = await Notifications.getPermissionsAsync();
+    return {
+      status:
+        res.status === 'granted' || res.status === 'denied'
+          ? res.status
+          : 'undetermined',
+      canAskAgain: res.canAskAgain !== false,
+    };
+  } catch {
+    return { status: 'undetermined', canAskAgain: false };
+  }
+}
+
+/** True when the OS dialog was shown before and the user denied it (any screen). Never throws. */
+export async function hasOsDeniedNotificationPermission(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(OS_DENIED_KEY)) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+async function setOsDeniedNotificationPermission(value: boolean): Promise<void> {
+  try {
+    await AsyncStorage.setItem(OS_DENIED_KEY, value ? 'true' : 'false');
+  } catch {
+    // Best effort; the worst case is asking once more next login.
+  }
+}
+
+/**
+ * Open the app's page in system Settings (where notifications can be
+ * switched on by hand). Returns true only when the Settings page was
+ * actually opened. Never throws. No new dependency — react-native
+ * Linking, a core API.
+ */
+export async function openAppNotificationSettings(): Promise<boolean> {
+  try {
+    await Linking.openSettings();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Ask the OS for notification permission. Creates the Android channel
  * first (SDK 58 docs: the Android 13 prompt does not appear until a
  * channel exists). Returns true only when permission is granted.
  * Never throws.
+ *
+ * Blocked (permanently denied, or switched off in system Settings):
+ * the OS will NOT show the dialog again, so calling
+ * requestPermissionsAsync would silently return denied and leave the
+ * caller with a dead button. Route to system Settings instead —
+ * real work, no re-ask. The OS answer itself is recorded (any
+ * screen): a denial means the post-login prompt must never re-ask on
+ * this phone, and a grant clears a stale denial.
  */
 export async function requestNotificationPermission(): Promise<boolean> {
   ensureHandler();
   try {
+    const detail = await getNotificationPermissionDetail();
+    if (detail.status !== 'granted' && !detail.canAskAgain) {
+      await openAppNotificationSettings();
+      return false;
+    }
     await ensureChannel();
     const { status } = await Notifications.requestPermissionsAsync();
-    return status === 'granted';
+    const granted = status === 'granted';
+    await setOsDeniedNotificationPermission(!granted);
+    return granted;
   } catch {
     return false;
   }

@@ -204,6 +204,10 @@ const en = {
   notifPromptB: 'Allow notifications to get prayer times, reminders and missed-prayer alerts on time.',
   notifPromptAllow: 'Allow notifications',
   notifPromptLater: 'Not now',
+  notifBlockedT: 'Notifications are switched off',
+  notifBlockedB:
+    'Permission was denied before, so the app cannot ask again. Turn notifications on in Settings to get prayer alerts.',
+  notifBlockedOpen: 'Open Settings',
   // ---- salah calendar ----
   calTitle: 'Salah Calendar',
   calSub: 'Your monthly prayer record, saved in your account.',
@@ -1060,6 +1064,10 @@ const hi: typeof en = {
   notifPromptB: 'Notification allow karo to namaz ke time, reminder aur missed namaz ke alert time par milenge.',
   notifPromptAllow: 'Notification allow karo',
   notifPromptLater: 'Abhi nahi',
+  notifBlockedT: 'Notification band hai',
+  notifBlockedB:
+    'Permission pehle mana kar di gayi thi, isliye app dobara nahi pooch sakta. Namaz ke alert ke liye Settings me jaake notification on karo.',
+  notifBlockedOpen: 'Settings kholo',
   // ---- salah calendar ----
   calTitle: 'Salah Calendar',
   calSub: 'Tumhare mahine ka namaz record, tumhare account me saved.',
