@@ -406,6 +406,17 @@ export async function createSubject(name: string): Promise<StudySubject> {
   return data.subject;
 }
 
+/**
+ * Delete a subject for real (server-side, per-user). The server
+ * unlinks the subject's tasks (subjectId -> null) instead of
+ * deleting them — the tasks stay, just unassigned.
+ */
+export async function deleteSubject(id: string): Promise<void> {
+  await call(`/api/study/subjects/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
 export async function listTasks(): Promise<StudyTask[]> {
   const data = await call<{ tasks: StudyTask[] }>('/api/study/tasks');
   return data.tasks ?? [];

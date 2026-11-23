@@ -14,6 +14,7 @@ import { C, L, T } from '../lib/theme';
 import { Card, Chip, Input, PillButton } from '../components/ui';
 import {
   createSubject,
+  deleteSubject,
   discoverPeople,
   listFriends,
   listSubjects,
@@ -52,6 +53,10 @@ export default function StudyScreen({ lang, goTo }: ScreenProps) {
   const [newSubject, setNewSubject] = useState('');
   const [busy, setBusy] = useState(false);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+  /** Subject whose remove confirmation is showing (tap the chosen
+      subject again to reveal it — see onSubjectChip). */
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -139,6 +144,49 @@ export default function StudyScreen({ lang, goTo }: ScreenProps) {
     }
   }
 
+  /**
+   * Tapping a subject chip selects it (tasks filter to it). Tapping
+   * the ALREADY-selected chip again reveals the remove option for
+   * that subject — a confirm row with Remove / Cancel. Deleting
+   * always takes two deliberate taps plus the explicit question,
+   * so one accidental tap can never remove a subject.
+   */
+  function onSubjectChip(sub: StudySubject) {
+    if (selectedId === sub.id) {
+      setConfirmDeleteId((prev) => (prev === sub.id ? null : sub.id));
+      return;
+    }
+    setSelectedId(sub.id);
+    setConfirmDeleteId(null);
+  }
+
+  /** Real server-side delete (DELETE /api/study/subjects/:id). The
+      server unlinks the subject's tasks instead of deleting them,
+      so the tasks stay, just unassigned. */
+  async function removeSubject() {
+    const id = confirmDeleteId;
+    if (!id || deletingId) return;
+    setDeletingId(id);
+    setError('');
+    try {
+      await deleteSubject(id);
+      const rest = subjects.filter((sub) => sub.id !== id);
+      setSubjects(rest);
+      // The deleted subject was selected: fall back to the first
+      // remaining subject (or none when it was the last one).
+      if (selectedId === id) setSelectedId(rest.length > 0 ? rest[0].id : null);
+      setConfirmDeleteId(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : s.errorGeneric);
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  const confirmDeleteSubject = confirmDeleteId
+    ? subjects.find((sub) => sub.id === confirmDeleteId) ?? null
+    : null;
+
   const subjectName = (id: string | null) =>
     subjects.find((sub) => sub.id === id)?.name ?? null;
   const visibleTasks = selectedId ? tasks.filter((t) => t.subjectId === selectedId) : tasks;
@@ -160,14 +208,15 @@ export default function StudyScreen({ lang, goTo }: ScreenProps) {
         <View>
           {error ? <Text style={T.error}>{error}</Text> : null}
 
-          {/* Subject chips */}
+          {/* Subject chips — tap to select; tap the selected one
+              again and the remove option appears below. */}
           <View style={styles.chips}>
             {subjects.map((sub) => (
               <Chip
                 key={sub.id}
                 label={sub.name}
                 selected={selectedId === sub.id}
-                onPress={() => setSelectedId(sub.id)}
+                onPress={() => onSubjectChip(sub)}
               />
             ))}
             <Chip
@@ -176,6 +225,30 @@ export default function StudyScreen({ lang, goTo }: ScreenProps) {
               onPress={() => setAddingSubject((v) => !v)}
             />
           </View>
+          {confirmDeleteSubject ? (
+            <View style={styles.removeRow}>
+              <Text style={styles.removeText}>
+                {s.studyRemoveQ.replace('{name}', confirmDeleteSubject.name)}
+              </Text>
+              <View style={styles.removeBtns}>
+                <PillButton
+                  label={s.studyRemove}
+                  small
+                  onPress={() => void removeSubject()}
+                  busy={deletingId === confirmDeleteSubject.id}
+                  disabled={deletingId !== null}
+                  style={{ backgroundColor: C.red }}
+                />
+                <PillButton
+                  label={s.cancel}
+                  small
+                  variant="ghost"
+                  onPress={() => setConfirmDeleteId(null)}
+                  disabled={deletingId !== null}
+                />
+              </View>
+            </View>
+          ) : null}
           {addingSubject ? (
             <View style={styles.addRow}>
               <Input
@@ -327,6 +400,16 @@ export default function StudyScreen({ lang, goTo }: ScreenProps) {
 
 const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 14 },
+  removeRow: {
+    marginTop: 10,
+    backgroundColor: C.white,
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 14,
+    padding: 12,
+  },
+  removeText: { fontFamily: 'PlusJakartaSans', fontSize: 13.5, color: C.ink, lineHeight: 19 },
+  removeBtns: { flexDirection: 'row', gap: 8, marginTop: 10 },
   addRow: { flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 4, marginBottom: 8 },
   note: { fontSize: 13, color: C.muted, marginTop: 4, lineHeight: 18 },
   taskRow: {

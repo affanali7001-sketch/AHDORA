@@ -658,6 +658,8 @@ const en = {
   studyNoSubjects: 'No subjects yet — add your first one.',
   studyAddNamePh: 'Subject name, e.g. Mathematics',
   studyAddCancel: 'Cancel',
+  studyRemoveQ: 'Remove "{name}"? Its tasks will stay, but become unassigned.',
+  studyRemove: 'Remove',
   // ---- focus (preview STR) ----
   focusTitle: 'Focus',
   focusSub: 'A real countdown timer — start it, and the session saves to history.',
@@ -1567,6 +1569,8 @@ const hi: typeof en = {
   studyNoSubjects: 'Abhi koi subject nahi hai — apna pehla subject jodo.',
   studyAddNamePh: 'Subject ka naam, jaise Mathematics',
   studyAddCancel: 'Cancel',
+  studyRemoveQ: '"{name}" hata dein? Uske tasks rahenge, par bina subject ke ho jayenge.',
+  studyRemove: 'Hatao',
   // ---- focus (preview STR) ----
   focusTitle: 'Focus',
   focusSub: 'Asal countdown timer — shuru karo, session history me save hoga.',
