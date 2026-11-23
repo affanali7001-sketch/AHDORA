@@ -1,30 +1,35 @@
 /**
- * Tasbeeh — dhikr counter with a USER-SELECTABLE target.
- * Rebuilt to the approved preview (§14): dhikr dropdown, target
- * chips 33 / 100 (default) / 500 / 1000, custom-number input,
- * 230px SVG ring with a gradient core, remaining/complete message,
- * ghost Reset button. The count only ever moves by the user's own
- * taps — nothing is faked or auto-filled.
+ * Tasbeeh — rebuilt to Mihrab's Tasbih counter design (screenshots,
+ * re-implemented from scratch in AHDORA's own code).
  *
- * Upgrades: Salawat added to the dropdown; each dhikr has its own
- * sensible default target (33 for the three short tasbih, 100 for
- * La ilaha illallah / Astaghfirullah / Salawat). Light haptic on
- * every tap (guarded — the screen works fine without haptics).
- * The running count and every completed session are saved per user,
- * per day, per dhikr in AsyncStorage (see src/lib/tasbih.ts), so a
- * count survives an app restart, and a small "Today's total" line
- * shows the real taps today across all dhikrs. Reset clears only
- * the current counter — completed sessions stay in today's total.
+ * Full-screen black counter: the dhikr in big white text, a HUGE count
+ * with "out of N" below it, and a vertical string of flower beads on
+ * the right — counted beads are lit in the user's design colour,
+ * upcoming beads are dimmed, and more light up as the count rises.
+ * Tap anywhere in the counter area to count (haptics on every tap).
+ * An "Exit" pill at the bottom goes back.
+ *
+ * Everything from the old screen is kept: the same 6 dhikr with the
+ * same default targets (33/33/33/100/100/100), user-pickable target
+ * (33 / 100 / 500 / 1000 or a custom number), the running count and
+ * completed sessions saved per user / per day / per dhikr in
+ * AsyncStorage (see src/lib/tasbih.ts), and the real "Today's total".
+ * The count only ever moves by the user's own taps.
+ *
+ * The beads follow the user's design from "Design your tasbih"
+ * (src/lib/tasbihDesign.ts) — golden flower beads by default.
+ * When the target is reached, a completion banner offers to keep
+ * counting past the target or reset; the session is recorded once,
+ * when the real count first hits the target.
  */
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Svg, Circle } from 'react-native-svg';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
 import type { ScreenProps } from '../lib/nav';
-import type { AppLanguage } from '../lib/strings';
-import { C, F, L, S, T } from '../lib/theme';
-import { Chip, Field, Input, PillButton } from '../components/ui';
+import { stringsFor } from '../lib/strings';
+import { F } from '../lib/theme';
+import TasbihBead from '../components/TasbihBead';
 import {
   loadRunningCount,
   loadTodayTotal,
@@ -32,69 +37,26 @@ import {
   saveRunningCount,
   todayDateKey,
 } from '../lib/tasbih';
-
-const STRINGS: Record<
-  AppLanguage,
-  {
-    title: string;
-    subtitle: string;
-    dhikr: string;
-    customTarget: string;
-    customPlaceholder: string;
-    remaining: (n: number) => string;
-    complete: string;
-    tapToCount: string;
-    reset: string;
-    targetWord: string;
-    todayTotal: (n: number) => string;
-  }
-> = {
-  en: {
-    title: 'Tasbeeh',
-    subtitle: 'Choose the target yourself — you decide how many times to count.',
-    dhikr: 'Choose a tasbeeh',
-    customTarget: 'Or type your own number',
-    customPlaceholder: 'e.g. 250',
-    remaining: (n) => `${n} more to go`,
-    complete: 'MashaAllah! Target complete 🎉',
-    tapToCount: 'Tap to count',
-    reset: 'Reset',
-    targetWord: 'target',
-    todayTotal: (n) => `Today's total: ${n}`,
-  },
-  hi: {
-    title: 'Tasbeeh',
-    subtitle: 'Target khud chuno — kitni baar ginna hai, tum decide karo.',
-    dhikr: 'Tasbeeh chuno',
-    customTarget: 'Ya apna number likho',
-    customPlaceholder: 'e.g. 250',
-    remaining: (n) => `${n} aur baaki`,
-    complete: 'MashAllah! Target pura ho gaya 🎉',
-    tapToCount: 'Ginne ke liye dabao',
-    reset: 'Reset karo',
-    targetWord: 'target',
-    todayTotal: (n) => `Aaj ka kul: ${n}`,
-  },
-};
+import { DEFAULT_DESIGN, loadDesign, type TasbihDesign } from '../lib/tasbihDesign';
 
 const DHIKRS = [
-  { name: 'SubhanAllah', arabic: 'سُبْحَانَ ٱللَّٰهِ', defaultTarget: 33 },
-  { name: 'Alhamdulillah', arabic: 'ٱلْحَمْدُ لِلَّٰهِ', defaultTarget: 33 },
-  { name: 'Allahu Akbar', arabic: 'ٱللَّٰهُ أَكْبَرُ', defaultTarget: 33 },
-  { name: 'La ilaha illallah', arabic: 'لَا إِلَٰهَ إِلَّا ٱللَّٰهُ', defaultTarget: 100 },
-  { name: 'Astaghfirullah', arabic: 'أَسْتَغْفِرُ ٱللَّٰهَ', defaultTarget: 100 },
-  { name: 'Salawat', arabic: 'اللَّهُمَّ صَلِّ عَلَىٰ مُحَمَّدٍ', defaultTarget: 100 },
+  { name: 'SubhanAllah', display: 'Subhan Allah', arabic: 'سُبْحَانَ ٱللَّٰهِ', defaultTarget: 33 },
+  { name: 'Alhamdulillah', display: 'Alhamdulillah', arabic: 'ٱلْحَمْدُ لِلَّٰهِ', defaultTarget: 33 },
+  { name: 'Allahu Akbar', display: 'Allahu Akbar', arabic: 'ٱللَّٰهُ أَكْبَرُ', defaultTarget: 33 },
+  { name: 'La ilaha illallah', display: 'La ilaha illallah', arabic: 'لَا إِلَٰهَ إِلَّا ٱللَّٰهُ', defaultTarget: 100 },
+  { name: 'Astaghfirullah', display: 'Astaghfirullah', arabic: 'أَسْتَغْفِرُ ٱللَّٰهَ', defaultTarget: 100 },
+  { name: 'Salawat', display: 'Salawat', arabic: 'اللَّهُمَّ صَلِّ عَلَىٰ مُحَمَّدٍ', defaultTarget: 100 },
 ] as const;
 
 const DHIKR_NAMES = DHIKRS.map((d) => d.name);
-
 const PRESET_TARGETS = [33, 100, 500, 1000] as const;
-const RING_CIRCUMFERENCE = 653.4; // 2 * PI * 104 (preview §14)
+/** Beads on the string — 9 fits a phone screen (3 top + 6 below, as in the screenshot). */
+const BEAD_COUNT = 9;
+const BEAD_SIZE = 36;
 
 /**
  * Light tap feedback. Guarded twice (missing function + thrown
- * error) so the screen never crashes on a device without haptics —
- * the ring still shows every tap.
+ * error) so the screen never crashes on a device without haptics.
  */
 function tapHaptic(): void {
   try {
@@ -105,15 +67,26 @@ function tapHaptic(): void {
   }
 }
 
-export default function TasbeehScreen({ lang, user }: ScreenProps) {
-  const s = STRINGS[lang];
+function completeHaptic(): void {
+  try {
+    if (typeof Haptics.notificationAsync !== 'function') return;
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+  } catch {
+    // Haptics unavailable — the banner carries the moment.
+  }
+}
+
+export default function TasbeehScreen({ lang, user, goTo, goBack }: ScreenProps) {
+  const s = stringsFor(lang);
   const uid = user?.id ?? 'anon';
   const [dhikrIndex, setDhikrIndex] = useState(0);
-  const [dhikrOpen, setDhikrOpen] = useState(false);
   const [target, setTarget] = useState<number>(DHIKRS[0].defaultTarget);
   const [count, setCount] = useState(0);
   const [customText, setCustomText] = useState(String(DHIKRS[0].defaultTarget));
   const [todayTotal, setTodayTotal] = useState(0);
+  const [design, setDesign] = useState<TasbihDesign>(DEFAULT_DESIGN);
+  /** True once the user chose "Keep counting" past the target. */
+  const [continued, setContinued] = useState(false);
   /** Synchronous mirror of `count` — taps read it, restores write it. */
   const countRef = useRef(0);
   /** Bumps on every restore so a stale load can't overwrite a newer dhikr. */
@@ -123,13 +96,16 @@ export default function TasbeehScreen({ lang, user }: ScreenProps) {
   const complete = count > 0 && count >= target;
   const remaining = Math.max(0, target - count);
   const dateKey = todayDateKey();
+  /** Beads lit so far — real progress, one bead per 1/9th of the target. */
+  const litBeads = complete ? BEAD_COUNT : Math.floor(progress * BEAD_COUNT);
 
   async function refreshTodayTotal(): Promise<void> {
     setTodayTotal(await loadTodayTotal(uid, dateKey, DHIKR_NAMES));
   }
 
   // First visit: restore today's saved count for the opening dhikr
-  // (0 when nothing was counted yet) and the real today's total.
+  // (0 when nothing was counted yet), the real today's total, and
+  // the user's bead design.
   useEffect(() => {
     const token = ++loadToken.current;
     void (async () => {
@@ -139,6 +115,7 @@ export default function TasbeehScreen({ lang, user }: ScreenProps) {
         setCount(saved);
       }
       setTodayTotal(await loadTodayTotal(uid, dateKey, DHIKR_NAMES));
+      setDesign(await loadDesign(uid));
     })();
   }, [uid, dateKey]);
 
@@ -146,6 +123,7 @@ export default function TasbeehScreen({ lang, user }: ScreenProps) {
     setTarget(next);
     countRef.current = 0;
     setCount(0);
+    setContinued(false);
     setCustomText(String(next));
     // A new target starts a fresh counter — the old running count is
     // discarded, completed sessions stay in today's total.
@@ -157,8 +135,8 @@ export default function TasbeehScreen({ lang, user }: ScreenProps) {
   function applyCustomTarget(): void {
     const n = Number(customText.trim());
     if (!Number.isInteger(n) || n < 1 || n > 100000) {
-      // No error UI in the preview: an invalid number is ignored and
-      // the field goes back to the current target.
+      // An invalid number is ignored and the field goes back to the
+      // current target.
       setCustomText(String(target));
       return;
     }
@@ -168,11 +146,11 @@ export default function TasbeehScreen({ lang, user }: ScreenProps) {
   function selectDhikr(i: number): void {
     const d = DHIKRS[i];
     setDhikrIndex(i);
-    setDhikrOpen(false);
     // Each dhikr opens on its own default target, and restores the
     // count already saved for it today (0 when none).
     setTarget(d.defaultTarget);
     setCustomText(String(d.defaultTarget));
+    setContinued(false);
     const token = ++loadToken.current;
     void (async () => {
       const saved = await loadRunningCount(uid, dateKey, d.name);
@@ -191,6 +169,8 @@ export default function TasbeehScreen({ lang, user }: ScreenProps) {
     await saveRunningCount(uid, dateKey, DHIKRS[dhikrIndex].name, next);
     if (next === target) {
       // Target reached: this run is a completed session now.
+      completeHaptic();
+      setContinued(false);
       await recordCompletedSession(uid, dateKey, DHIKRS[dhikrIndex].name, next);
     }
     await refreshTodayTotal();
@@ -201,6 +181,7 @@ export default function TasbeehScreen({ lang, user }: ScreenProps) {
     // today's total.
     countRef.current = 0;
     setCount(0);
+    setContinued(false);
     await saveRunningCount(uid, dateKey, DHIKRS[dhikrIndex].name, 0);
     await refreshTodayTotal();
   }
@@ -208,201 +189,286 @@ export default function TasbeehScreen({ lang, user }: ScreenProps) {
   const dhikr = DHIKRS[dhikrIndex];
 
   return (
-    <ScrollView style={styles.scroll} contentContainerStyle={L.scroll}>
-      <Text style={T.title}>{s.title}</Text>
-      <Text style={T.sub}>{s.subtitle}</Text>
+    <View style={styles.root}>
+      <StatusBar style="light" />
 
-      <Field label={s.dhikr}>
+      {/* Header: title + Design button. */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>{s.tasTitle}</Text>
         <Pressable
-          onPress={() => setDhikrOpen((o) => !o)}
-          style={styles.dropdown}
+          onPress={() => goTo('tasbihDesign')}
+          style={styles.designBtn}
           accessibilityRole="button"
-          accessibilityState={{ expanded: dhikrOpen }}
+          accessibilityLabel={s.tasDesignTitle}
         >
-          <View style={styles.dropdownSelected}>
-            <Text style={styles.dropdownName}>{dhikr.name}</Text>
-            <Text style={styles.dropdownArabic}>{dhikr.arabic}</Text>
-          </View>
-          <Text style={styles.dropdownCaret}>{dhikrOpen ? '▴' : '▾'}</Text>
+          <Text style={styles.designBtnText}>{s.tasDesignOpen}</Text>
         </Pressable>
-        {dhikrOpen
-          ? DHIKRS.map((d, i) => (
-              <Pressable
-                key={d.name}
-                onPress={() => selectDhikr(i)}
-                style={[styles.option, i === dhikrIndex && styles.optionOn]}
-                accessibilityRole="button"
-              >
-                <Text style={[styles.optionName, i === dhikrIndex && styles.optionNameOn]}>
-                  {d.name}
-                </Text>
-                <Text style={styles.optionArabic}>{d.arabic}</Text>
-              </Pressable>
-            ))
-          : null}
-      </Field>
-
-      <View style={styles.chipRow}>
-        {PRESET_TARGETS.map((t) => (
-          <Chip
-            key={t}
-            label={String(t)}
-            selected={target === t}
-            onPress={() => applyTarget(t)}
-          />
-        ))}
       </View>
 
-      <Field label={s.customTarget}>
-        <Input
+      {/* Dhikr picker — horizontal chips, same 6 dhikr as before. */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+        {DHIKRS.map((d, i) => (
+          <Pressable
+            key={d.name}
+            onPress={() => selectDhikr(i)}
+            style={[styles.chip, i === dhikrIndex && styles.chipOn]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: i === dhikrIndex }}
+          >
+            <Text style={[styles.chipText, i === dhikrIndex && styles.chipTextOn]}>{d.display}</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+
+      {/* Target picker — presets + custom number. */}
+      <View style={styles.targetRow}>
+        {PRESET_TARGETS.map((t) => (
+          <Pressable
+            key={t}
+            onPress={() => applyTarget(t)}
+            style={[styles.chip, target === t && styles.chipOn]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: target === t }}
+          >
+            <Text style={[styles.chipText, target === t && styles.chipTextOn]}>{t}</Text>
+          </Pressable>
+        ))}
+        <TextInput
           value={customText}
           onChangeText={setCustomText}
-          placeholder={s.customPlaceholder}
+          placeholder={s.tasCustom}
+          placeholderTextColor="#666666"
           keyboardType="number-pad"
           onSubmitEditing={applyCustomTarget}
           onBlur={applyCustomTarget}
+          style={styles.customInput}
+          accessibilityLabel={s.tasCustom}
         />
-      </Field>
-
-      <View style={styles.ringWrap}>
-        <Svg width={230} height={230} viewBox="0 0 230 230">
-          <Circle
-            cx={115}
-            cy={115}
-            r={104}
-            fill="none"
-            stroke={C.teal100}
-            strokeWidth={10}
-          />
-          <Circle
-            cx={115}
-            cy={115}
-            r={104}
-            fill="none"
-            stroke={C.teal500}
-            strokeWidth={10}
-            strokeLinecap="round"
-            strokeDasharray={RING_CIRCUMFERENCE}
-            strokeDashoffset={RING_CIRCUMFERENCE * (1 - progress)}
-            transform="rotate(-90 115 115)"
-          />
-        </Svg>
-        <Pressable
-          onPress={() => void handleTap()}
-          style={styles.core}
-          accessibilityRole="button"
-          accessibilityLabel={s.tapToCount}
-        >
-          <LinearGradient
-            colors={[C.teal700, C.teal900]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0.9, y: 1 }}
-            style={styles.coreGradient}
-          >
-            <Text style={styles.count}>{count}</Text>
-            <Text style={styles.of}>
-              {s.targetWord} {target}
-            </Text>
-            <Text style={styles.tap}>{s.tapToCount}</Text>
-          </LinearGradient>
-        </Pressable>
       </View>
 
-      <Text style={styles.message}>
-        {complete ? s.complete : s.remaining(remaining)}
-      </Text>
+      {/* Counter area — the whole area is the tap target. */}
+      <Pressable
+        onPress={() => void handleTap()}
+        style={styles.counter}
+        accessibilityRole="button"
+        accessibilityLabel={s.tasTapAnywhere}
+      >
+        <View style={styles.countCol}>
+          <Text style={styles.arabic}>{dhikr.arabic}</Text>
+          <Text style={styles.dhikrName}>{dhikr.display}</Text>
+          <Text style={styles.count}>{count}</Text>
+          <Text style={styles.outOf}>
+            {s.tasOutOf} {target}
+          </Text>
+          <Text style={styles.status}>
+            {complete ? '' : `${remaining} ${s.tasMoreToGo}`}
+          </Text>
+          <Text style={styles.todayTotal}>
+            {s.tasTodayTotal}: {todayTotal}
+          </Text>
+          <Pressable
+            onPress={() => void handleReset()}
+            accessibilityRole="button"
+            accessibilityLabel={s.tasReset}
+            hitSlop={8}
+          >
+            <Text style={styles.resetText}>{s.tasReset}</Text>
+          </Pressable>
 
-      <Text style={styles.todayTotal}>{s.todayTotal(todayTotal)}</Text>
+          {complete && !continued ? (
+            <View style={styles.completeBox}>
+              <Text style={styles.completeText}>{s.tasComplete}</Text>
+              <View style={styles.completeRow}>
+                <Pressable
+                  onPress={() => setContinued(true)}
+                  style={styles.continueBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel={s.tasContinue}
+                >
+                  <Text style={styles.continueBtnText}>{s.tasContinue}</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => void handleReset()}
+                  style={styles.completeResetBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel={s.tasReset}
+                >
+                  <Text style={styles.completeResetText}>{s.tasReset}</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+        </View>
 
-      <PillButton label={s.reset} variant="ghost" block onPress={() => void handleReset()} />
-    </ScrollView>
+        {/* Bead string — a real misbaha: beads on a thread, lit as you count. */}
+        <View style={styles.stringCol} pointerEvents="none">
+          <View style={styles.thread} />
+          <View style={styles.beads}>
+            {Array.from({ length: BEAD_COUNT }, (_, i) => (
+              <TasbihBead
+                key={i}
+                size={BEAD_SIZE}
+                shape={design.shape}
+                color={design.color}
+                effect={design.effect}
+                lit={i < litBeads}
+                showAllah
+              />
+            ))}
+          </View>
+        </View>
+      </Pressable>
+
+      {/* Bottom: tap hint + Exit pill. */}
+      <Text style={styles.hint}>{s.tasTapAnywhere}</Text>
+      <Pressable
+        onPress={goBack}
+        style={styles.exitBtn}
+        accessibilityRole="button"
+        accessibilityLabel={s.tasExit}
+      >
+        <Text style={styles.exitText}>{s.tasExit}</Text>
+      </Pressable>
+    </View>
   );
 }
 
+const GOLD = '#E9A93B';
+
 const styles = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: C.ice },
-  dropdown: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: C.white,
-    borderWidth: 1.5,
-    borderColor: C.line,
-    borderRadius: S.radiusSm,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    minHeight: 50,
-  },
-  dropdownSelected: { flex: 1 },
-  dropdownName: { fontFamily: F.sans, fontSize: 15, fontWeight: '700', color: C.ink },
-  dropdownArabic: { fontFamily: F.arabic, fontSize: 16, color: C.teal700, marginTop: 2 },
-  dropdownCaret: { fontSize: 16, color: C.muted, marginLeft: 8 },
-  option: {
+  root: { flex: 1, backgroundColor: '#000000' },
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: C.white,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  headerTitle: { fontFamily: F.sans, fontSize: 20, fontWeight: '800', color: '#FFFFFF' },
+  designBtn: {
     borderWidth: 1,
-    borderColor: C.line,
-    borderRadius: S.radiusSm,
+    borderColor: '#555555',
+    borderRadius: 999,
     paddingHorizontal: 16,
-    paddingVertical: 11,
-    marginTop: 6,
+    paddingVertical: 7,
   },
-  optionOn: { borderColor: C.teal700, backgroundColor: C.teal100 },
-  optionName: { fontFamily: F.sans, fontSize: 14, fontWeight: '700', color: C.ink },
-  optionNameOn: { color: C.teal900 },
-  optionArabic: { fontFamily: F.arabic, fontSize: 17, color: C.teal700 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 16 },
-  ringWrap: {
-    position: 'relative',
-    width: 230,
-    height: 230,
-    alignSelf: 'center',
-    marginTop: 18,
-    marginBottom: 6,
+  designBtnText: { fontFamily: F.sans, fontSize: 13, fontWeight: '700', color: '#FFFFFF' },
+  chipRow: { paddingHorizontal: 16, paddingVertical: 6, gap: 8, alignItems: 'center' },
+  chip: {
+    backgroundColor: '#161616',
+    borderWidth: 1.5,
+    borderColor: '#333333',
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
-  core: {
-    position: 'absolute',
-    left: 26,
-    top: 26,
-    width: 178,
-    height: 178,
-    borderRadius: 89,
-    overflow: 'hidden',
-    shadowColor: C.teal950,
-    shadowOpacity: 0.35,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 6,
-  },
-  coreGradient: {
-    flex: 1,
+  chipOn: { borderColor: GOLD, backgroundColor: '#241D08' },
+  chipText: { fontFamily: F.sans, fontSize: 13.5, fontWeight: '700', color: '#999999' },
+  chipTextOn: { color: '#FFFFFF' },
+  targetRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    gap: 8,
   },
+  customInput: {
+    backgroundColor: '#161616',
+    borderWidth: 1.5,
+    borderColor: '#333333',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    minWidth: 84,
+    textAlign: 'center',
+    fontFamily: F.sans,
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  counter: { flex: 1, flexDirection: 'row', paddingHorizontal: 20, paddingTop: 8 },
+  countCol: { flex: 1, justifyContent: 'center', paddingRight: 8 },
+  arabic: { fontFamily: F.arabic, fontSize: 30, color: '#FFFFFF', lineHeight: 44 },
+  dhikrName: { fontFamily: F.sans, fontSize: 34, fontWeight: '800', color: '#FFFFFF', marginTop: 6 },
   count: {
     fontFamily: F.sans,
-    fontSize: 44,
-    fontWeight: '800',
-    lineHeight: 48,
-    color: C.white,
+    fontSize: 110,
+    fontWeight: '200',
+    lineHeight: 122,
+    color: '#FFFFFF',
+    marginTop: 10,
   },
-  of: { fontFamily: F.sans, fontSize: 12.5, color: C.navInactive, fontWeight: '700' },
-  tap: { fontFamily: F.sans, fontSize: 12.5, color: C.navInactive, marginTop: 2 },
-  message: {
-    fontFamily: F.sans,
-    fontSize: 14,
-    color: C.muted,
-    textAlign: 'center',
-    minHeight: 22,
-    marginTop: 8,
-    marginBottom: 6,
-  },
-  todayTotal: {
+  outOf: { fontFamily: F.sans, fontSize: 18, color: '#888888', marginTop: 2 },
+  status: { fontFamily: F.sans, fontSize: 14, color: '#888888', marginTop: 10, minHeight: 20 },
+  todayTotal: { fontFamily: F.sans, fontSize: 13, color: '#777777', marginTop: 4 },
+  resetText: {
     fontFamily: F.sans,
     fontSize: 13,
-    color: C.muted,
-    textAlign: 'center',
-    marginBottom: 12,
+    fontWeight: '700',
+    color: '#999999',
+    marginTop: 10,
+    textDecorationLine: 'underline',
   },
+  completeBox: {
+    marginTop: 18,
+    borderWidth: 1.5,
+    borderColor: GOLD,
+    borderRadius: 16,
+    backgroundColor: '#1A1503',
+    padding: 14,
+  },
+  completeText: { fontFamily: F.sans, fontSize: 15, fontWeight: '800', color: '#FFFFFF' },
+  completeRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  continueBtn: {
+    backgroundColor: GOLD,
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  continueBtnText: { fontFamily: F.sans, fontSize: 13.5, fontWeight: '800', color: '#241D08' },
+  completeResetBtn: {
+    borderWidth: 1,
+    borderColor: '#555555',
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  completeResetText: { fontFamily: F.sans, fontSize: 13.5, fontWeight: '700', color: '#FFFFFF' },
+  stringCol: {
+    width: 84,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  thread: {
+    position: 'absolute',
+    top: 6,
+    bottom: 6,
+    width: 2,
+    backgroundColor: '#2E2E2E',
+  },
+  beads: {
+    flex: 1,
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+  },
+  hint: {
+    fontFamily: F.sans,
+    fontSize: 12.5,
+    color: '#666666',
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  exitBtn: {
+    alignSelf: 'center',
+    borderWidth: 1,
+    borderColor: '#444444',
+    borderRadius: 999,
+    paddingHorizontal: 38,
+    paddingVertical: 11,
+    marginTop: 10,
+    marginBottom: 18,
+  },
+  exitText: { fontFamily: F.sans, fontSize: 15, fontWeight: '600', color: '#999999' },
 });

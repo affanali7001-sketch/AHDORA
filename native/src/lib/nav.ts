@@ -31,6 +31,7 @@ export type ScreenId =
   | 'lifeAyahs'
   | 'duas'
   | 'tasbeeh'
+  | 'tasbihDesign'
   | 'hifz'
   | 'khatmah'
   | 'qibla'

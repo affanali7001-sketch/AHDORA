@@ -59,6 +59,7 @@ import ParaBookScreen from './src/screens/ParaBook';
 import LifeAyahsScreen from './src/screens/LifeAyahs';
 import DuasScreen from './src/screens/Duas';
 import TasbeehScreen from './src/screens/Tasbeeh';
+import TasbihDesignScreen from './src/screens/TasbihDesign';
 import HifzScreen from './src/screens/Hifz';
 import KhatmahScreen from './src/screens/Khatmah';
 import QiblaScreen from './src/screens/Qibla';
@@ -261,12 +262,16 @@ export default function App() {
     freshOnboarding: onboardingFresh,
   };
 
-  const showPillNav = user !== null && screen !== 'onboarding' && !checkingOnboarding;
+  // The Tasbeeh counter is full-screen black (its own Exit pill is the
+  // way out), so the pill nav and the light back bar stay off it.
+  const showPillNav =
+    user !== null && screen !== 'onboarding' && screen !== 'tasbeeh' && !checkingOnboarding;
   // Back bar on every screen that is not a top-level pill screen and not
   // part of the auth/onboarding flow — only when there is somewhere to go.
   const showBackBar =
     user !== null &&
     screen !== 'onboarding' &&
+    screen !== 'tasbeeh' &&
     !PILL_NAV.includes(screen) &&
     history.length > 0;
 
@@ -377,6 +382,8 @@ function renderScreen(screen: ScreenId, props: ScreenProps) {
       return <DuasScreen {...props} />;
     case 'tasbeeh':
       return <TasbeehScreen {...props} />;
+    case 'tasbihDesign':
+      return <TasbihDesignScreen {...props} />;
     case 'hifz':
       return <HifzScreen {...props} />;
     case 'khatmah':
