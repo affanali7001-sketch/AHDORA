@@ -5,6 +5,12 @@
  * requires name 2–60 chars and password 12–128 chars, so the
  * form says so upfront and validates client-side. On success the
  * user is logged in immediately and routed to onboarding.
+ *
+ * After a successful signup the notification-permission prompt is
+ * shown (in-app explanation, then the system dialog) — but only when
+ * the OS permission is still undecided and this user has never been
+ * asked before (see src/lib/notificationPrompt.ts). It never blocks
+ * signup and is never re-asked.
  */
 import { useRef, useState } from 'react';
 import {
@@ -19,10 +25,15 @@ import {
 } from 'react-native';
 import type { ScrollViewInstance } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
-import { signup } from '../lib/api';
+import { signup, type AuthUser } from '../lib/api';
+import {
+  allowNotificationsAfterAuth,
+  shouldAskNotificationPermission,
+  skipNotificationsAfterAuth,
+} from '../lib/notificationPrompt';
 import { stringsFor } from '../lib/strings';
 import { C, L, T } from '../lib/theme';
-import { PillButton } from '../components/ui';
+import { Card, PillButton } from '../components/ui';
 
 export default function SignupScreen({ lang, goTo, onLoginSuccess }: ScreenProps) {
   const s = stringsFor(lang);
@@ -35,6 +46,13 @@ export default function SignupScreen({ lang, goTo, onLoginSuccess }: ScreenProps
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Post-signup notification prompt — same rule as Login: the new
+  // user is held here until they answer (allow / not now), only
+  // when the OS permission is still undecided and this user has
+  // never been asked before (see src/lib/notificationPrompt.ts).
+  const [pendingUser, setPendingUser] = useState<AuthUser | null>(null);
+  const [showNotifPrompt, setShowNotifPrompt] = useState(false);
+  const [promptBusy, setPromptBusy] = useState(false);
   // When the keyboard opens over the password fields, scroll the
   // form so the focused field stays visible (the user reported the
   // password field hiding behind the keyboard, 2026-11-22).
@@ -74,12 +92,36 @@ export default function SignupScreen({ lang, goTo, onLoginSuccess }: ScreenProps
       setPassword('');
       setConfirmPassword('');
       if (result.notice) setNotice(result.notice);
-      onLoginSuccess(result.user);
+      // Ask for notification permission right after signup — but
+      // only when it has not been decided/asked before. Otherwise
+      // go straight in; the prompt must never block or repeat.
+      if (await shouldAskNotificationPermission(result.user.id)) {
+        setPendingUser(result.user);
+        setShowNotifPrompt(true);
+      } else {
+        onLoginSuccess(result.user);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : s.requestFailed);
     } finally {
       setBusy(false);
     }
+  }
+
+  async function allowNotifications() {
+    if (!pendingUser || promptBusy) return;
+    setPromptBusy(true);
+    await allowNotificationsAfterAuth(pendingUser.id);
+    setPromptBusy(false);
+    onLoginSuccess(pendingUser);
+  }
+
+  async function skipNotifications() {
+    if (!pendingUser || promptBusy) return;
+    setPromptBusy(true);
+    await skipNotificationsAfterAuth(pendingUser.id);
+    setPromptBusy(false);
+    onLoginSuccess(pendingUser);
   }
 
   return (
@@ -102,7 +144,32 @@ export default function SignupScreen({ lang, goTo, onLoginSuccess }: ScreenProps
       <Text style={styles.title}>{s.signupTitle}</Text>
       <Text style={styles.sub}>{s.signupSub}</Text>
 
-      <Text style={T.label}>{s.fullName}</Text>
+      {showNotifPrompt && pendingUser ? (
+        <Card>
+          <Text style={T.cardTitle}>{s.notifPromptT}</Text>
+          <Text style={[T.cardBody, { marginTop: 6 }]}>{s.notifPromptB}</Text>
+          <View style={{ marginTop: 14 }}>
+            <PillButton
+              label={s.notifPromptAllow}
+              onPress={() => void allowNotifications()}
+              disabled={promptBusy}
+              busy={promptBusy}
+              block
+            />
+          </View>
+          <View style={{ marginTop: 10 }}>
+            <PillButton
+              label={s.notifPromptLater}
+              variant="ghost"
+              onPress={() => void skipNotifications()}
+              disabled={promptBusy}
+              block
+            />
+          </View>
+        </Card>
+      ) : (
+        <>
+          <Text style={T.label}>{s.fullName}</Text>
       <TextInput
         style={styles.input}
         value={name}
@@ -183,6 +250,8 @@ export default function SignupScreen({ lang, goTo, onLoginSuccess }: ScreenProps
       <Pressable onPress={() => goTo('login')} accessibilityRole="button">
         <Text style={styles.loginLink}>{s.alreadyHaveAccount}</Text>
       </Pressable>
+        </>
+      )}
     </ScrollView>
     </KeyboardAvoidingView>
   );

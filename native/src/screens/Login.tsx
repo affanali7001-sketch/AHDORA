@@ -8,6 +8,12 @@
  * server's own reply is shown verbatim — no fake "sent" claim. The
  * reset link itself goes to the user's email and opens the web app,
  * where the token is redeemed (POST /api/auth/reset-password).
+ *
+ * After a successful login the notification-permission prompt is
+ * shown (in-app explanation, then the system dialog) — but only when
+ * the OS permission is still undecided and this user has never been
+ * asked before (see src/lib/notificationPrompt.ts). It never blocks
+ * login and is never re-asked.
  */
 import { useRef, useState } from 'react';
 import {
@@ -22,7 +28,12 @@ import {
 } from 'react-native';
 import type { ScrollViewInstance } from 'react-native';
 import type { ScreenProps } from '../lib/nav';
-import { apiFetch, login } from '../lib/api';
+import { apiFetch, login, type AuthUser } from '../lib/api';
+import {
+  allowNotificationsAfterAuth,
+  shouldAskNotificationPermission,
+  skipNotificationsAfterAuth,
+} from '../lib/notificationPrompt';
 import { stringsFor } from '../lib/strings';
 import { C, F, L, T } from '../lib/theme';
 import { Card, Field, Input, PillButton, SegmentedControl } from '../components/ui';
@@ -38,6 +49,13 @@ export default function LoginScreen({ lang, goTo, onLoginSuccess }: ScreenProps)
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resetSent, setResetSent] = useState<string | null>(null);
+  // Post-login notification prompt: the signed-in user, held here
+  // until they answer the prompt (allow / not now) — only shown
+  // when the OS permission is still undecided and this user has
+  // never been asked before (see src/lib/notificationPrompt.ts).
+  const [pendingUser, setPendingUser] = useState<AuthUser | null>(null);
+  const [showNotifPrompt, setShowNotifPrompt] = useState(false);
+  const [promptBusy, setPromptBusy] = useState(false);
   // When the keyboard opens over the password field, scroll the form
   // so the field stays visible (same fix as Signup, 2026-11-22).
   const scrollRef = useRef<ScrollViewInstance | null>(null);
@@ -57,12 +75,36 @@ export default function LoginScreen({ lang, goTo, onLoginSuccess }: ScreenProps)
     try {
       const user = await login(cleanEmail, password);
       setPassword('');
-      onLoginSuccess(user);
+      // Ask for notification permission right after login — but only
+      // when it has not been decided/asked before. Otherwise go
+      // straight in; the prompt must never block or repeat.
+      if (await shouldAskNotificationPermission(user.id)) {
+        setPendingUser(user);
+        setShowNotifPrompt(true);
+      } else {
+        onLoginSuccess(user);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : s.requestFailed);
     } finally {
       setBusy(false);
     }
+  }
+
+  async function allowNotifications() {
+    if (!pendingUser || promptBusy) return;
+    setPromptBusy(true);
+    await allowNotificationsAfterAuth(pendingUser.id);
+    setPromptBusy(false);
+    onLoginSuccess(pendingUser);
+  }
+
+  async function skipNotifications() {
+    if (!pendingUser || promptBusy) return;
+    setPromptBusy(true);
+    await skipNotificationsAfterAuth(pendingUser.id);
+    setPromptBusy(false);
+    onLoginSuccess(pendingUser);
   }
 
   async function submitReset() {
@@ -125,7 +167,30 @@ export default function LoginScreen({ lang, goTo, onLoginSuccess }: ScreenProps)
       </Text>
       <Text style={styles.sub}>{mode === 'reset' ? s.resetSub : s.loginSub}</Text>
 
-      {mode === 'login' ? (
+      {showNotifPrompt && pendingUser ? (
+        <Card>
+          <Text style={T.cardTitle}>{s.notifPromptT}</Text>
+          <Text style={[T.cardBody, { marginTop: 6 }]}>{s.notifPromptB}</Text>
+          <View style={{ marginTop: 14 }}>
+            <PillButton
+              label={s.notifPromptAllow}
+              onPress={() => void allowNotifications()}
+              disabled={promptBusy}
+              busy={promptBusy}
+              block
+            />
+          </View>
+          <View style={{ marginTop: 10 }}>
+            <PillButton
+              label={s.notifPromptLater}
+              variant="ghost"
+              onPress={() => void skipNotifications()}
+              disabled={promptBusy}
+              block
+            />
+          </View>
+        </Card>
+      ) : mode === 'login' ? (
         <>
           <SegmentedControl
             options={[
