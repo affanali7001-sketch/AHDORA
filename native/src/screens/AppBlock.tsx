@@ -220,7 +220,12 @@ export default function AppBlockScreen({ lang, goTo }: ScreenProps) {
             a.packageName.toLowerCase().includes(q)
         )
       : apps;
-    return list.slice(0, 120);
+    // No cap: the list used to be sliced to 120, which silently cut
+    // off the tail of the alphabet on a phone with many apps — X /
+    // Twitter (and anything after it) could never appear, search or
+    // no search. The list is searchable and scrollable, so every
+    // installed app is reachable now.
+    return list;
   }, [apps, query]);
 
   function toggleBlocked(pkg: string) {

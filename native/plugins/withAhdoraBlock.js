@@ -11,6 +11,16 @@
  *     - android/app/src/main/java/com/ahdora/app/block/AhdoraBlockService.kt
  *     - android/app/src/main/res/xml/ahdora_block_service_config.xml
  *  4. The service description string (shown in Accessibility settings).
+ *  5. A <queries> entry for the MAIN / LAUNCHER intent (2026-11-23):
+ *     on Android 11+ an app only sees other packages it declares
+ *     in <queries> (or holds QUERY_ALL_PACKAGES for, which Play
+ *     restricts). The manifest already had a <queries> block, but
+ *     only for the https/BROWSABLE intent — so queryIntentActivities
+ *     for the launcher returned just the preinstalled apps and the
+ *     browsers, and user-installed apps like Instagram and X never
+ *     appeared in the picker at all. The launcher intent query is
+ *     the Google-blessed way to see every launchable app without
+ *     the broad permission.
  *
  * The JS bridge is an Expo inline module (app/AhdoraBlockModule.kt),
  * auto-discovered via expo.experiments.inlineModules — it shares the
@@ -45,11 +55,49 @@ function ensureUsesPermission(manifest, name) {
   manifest['uses-permission'] = perms;
 }
 
+/**
+ * Android 11+ package visibility: without a <queries> entry for the
+ * launcher intent, queryIntentActivities(ACTION_MAIN + LAUNCHER)
+ * returns only the preinstalled apps (and whatever other <queries>
+ * entries grant — here just the https browsers). User-installed
+ * apps like Instagram and X are invisible, so they can never be
+ * picked for blocking. This adds the MAIN / LAUNCHER intent to the
+ * manifest's <queries> (creating it when absent, and never
+ * duplicating it when prebuild runs again) — the narrow, Play-safe
+ * alternative to QUERY_ALL_PACKAGES.
+ */
+function ensureLauncherQueries(manifest) {
+  const queries = manifest.queries || [];
+  const first = queries[0] || { intent: [] };
+  if (!queries[0]) queries.push(first);
+  const intents = first.intent || [];
+  const already = intents.some((entry) => {
+    if (!entry || typeof entry !== 'object') return false;
+    const actions = entry.action || [];
+    const categories = entry.category || [];
+    return (
+      actions.some((a) => a && a.$ && a.$['android:name'] === 'android.intent.action.MAIN') &&
+      categories.some(
+        (c) => c && c.$ && c.$['android:name'] === 'android.intent.category.LAUNCHER'
+      )
+    );
+  });
+  if (!already) {
+    intents.push({
+      action: [{ $: { 'android:name': 'android.intent.action.MAIN' } }],
+      category: [{ $: { 'android:name': 'android.intent.category.LAUNCHER' } }],
+    });
+  }
+  first.intent = intents;
+  manifest.queries = queries;
+}
+
 function withAhdoraBlockManifest(config) {
   return withAndroidManifest(config, (config) => {
     const manifest = config.modResults.manifest;
     ensureUsesPermission(manifest, 'android.permission.PACKAGE_USAGE_STATS');
     ensureUsesPermission(manifest, 'android.permission.SYSTEM_ALERT_WINDOW');
+    ensureLauncherQueries(manifest);
 
     const app = manifest.application && manifest.application[0];
     if (!app) return config;

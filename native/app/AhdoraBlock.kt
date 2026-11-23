@@ -102,6 +102,11 @@ class AhdoraBlock : Module() {
       }
       val apps = pm.queryIntentActivities(mainIntent, 0)
       val out = JSONArray()
+      // One entry per package: queryIntentActivities returns one
+      // ResolveInfo per launcher ACTIVITY, and some apps declare
+      // several — without this the list had duplicates that inflated
+      // it and buried apps further down the alphabet.
+      val seen = mutableSetOf<String>()
       for (info in apps) {
         val activityInfo = info.activityInfo ?: continue
         val packageName = activityInfo.packageName ?: continue
@@ -114,6 +119,7 @@ class AhdoraBlock : Module() {
         // the user could never select the very apps he wanted to
         // block at sleep time.
         if (packageName in NEVER_BLOCKABLE) continue
+        if (!seen.add(packageName)) continue
         val appInfo = try {
           pm.getApplicationInfo(packageName, 0)
         } catch (e: PackageManager.NameNotFoundException) {
