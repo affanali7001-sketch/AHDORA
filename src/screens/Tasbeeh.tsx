@@ -22,17 +22,20 @@
  * counting past the target or reset; the session is recorded once,
  * when the real count first hits the target.
  *
- * Layout note (Tasbih Urdu overlap fix): the Arabic dhikr label and
- * the big count live in two separate reserved blocks that can never
- * share pixels. Amiri's ink is taller than its own ascent (the dagger
- * alif / shadda stacks reach 44dp above the baseline at 30pt, and its
- * natural line height is 54dp), so a tight lineHeight made the label
- * paint outside its box and wrapped lines overlap each other. The
- * label block below gives the Arabic a 64dp line (room for the full
- * 59dp ink height on every line) plus 12dp of top padding for the
- * diacritics that still rise above the line box, and the count is
- * single-line with adjustsFontSizeToFit so 3–6 digit counts shrink
- * instead of running into the bead column.
+ * Layout (Tasbih order, user's words): dhikr selection chips →
+ * dhikr text (Arabic, then English) → big count → number picker
+ * (33 / 100 / 500 / 1000 / custom) below the count. The Arabic
+ * label and the big count live in two separate reserved blocks
+ * that can never share pixels. Amiri's ink is taller than its own
+ * ascent (the dagger alif / shadda stacks reach 44dp above the
+ * baseline at 30pt, and its natural line height is 54dp), so a
+ * tight lineHeight made the label paint outside its box and
+ * wrapped lines overlap each other. The label block below gives
+ * the Arabic a 64dp line (room for the full 59dp ink height on
+ * every line) plus 12dp of top padding for the diacritics that
+ * still rise above the line box, and the count is single-line
+ * with adjustsFontSizeToFit so 3–6 digit counts shrink instead of
+ * running into the bead column.
  */
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -240,30 +243,17 @@ export default function TasbeehScreen({ lang, user, goTo, goBack }: ScreenProps)
         ))}
       </ScrollView>
 
-      {/* Target picker — presets + custom number. */}
-      <View style={styles.targetRow}>
-        {PRESET_TARGETS.map((t) => (
-          <Pressable
-            key={t}
-            onPress={() => applyTarget(t)}
-            style={[styles.chip, target === t && styles.chipOn]}
-            accessibilityRole="button"
-            accessibilityState={{ selected: target === t }}
-          >
-            <Text style={[styles.chipText, target === t && styles.chipTextOn]}>{t}</Text>
-          </Pressable>
-        ))}
-        <TextInput
-          value={customText}
-          onChangeText={setCustomText}
-          placeholder={s.tasCustom}
-          placeholderTextColor="#666666"
-          keyboardType="number-pad"
-          onSubmitEditing={applyCustomTarget}
-          onBlur={applyCustomTarget}
-          style={styles.customInput}
-          accessibilityLabel={s.tasCustom}
-        />
+      {/* The dhikr label lives HERE — directly below the selection
+          row, before the number picker and the count (user's order:
+          choose what to read → the dhikr text → the count). It used
+          to sit inside the counter, sandwiched between the target
+          row above and the big count below, where its tall Arabic
+          diacritics painted onto the number row ("number selection
+          ke sir par"). It now owns a block of its own with clear
+          space on both sides, so it can never touch either. */}
+      <View style={styles.labelBlock}>
+        <Text style={styles.arabic}>{dhikr.arabic}</Text>
+        <Text style={styles.dhikrName}>{dhikr.display}</Text>
       </View>
 
       {/* Counter area — the whole area is the tap target. */}
@@ -274,15 +264,6 @@ export default function TasbeehScreen({ lang, user, goTo, goBack }: ScreenProps)
         accessibilityLabel={s.tasTapAnywhere}
       >
         <View style={styles.countCol}>
-          {/* The dhikr label owns its own block (see the layout note at
-              the top of this file): the Arabic line + the Latin name,
-              with reserved space above and below, so the label can
-              never touch the big count — at any screen size, system
-              font size, or dhikr selection. */}
-          <View style={styles.labelBlock}>
-            <Text style={styles.arabic}>{dhikr.arabic}</Text>
-            <Text style={styles.dhikrName}>{dhikr.display}</Text>
-          </View>
           <Text
             style={styles.count}
             numberOfLines={1}
@@ -352,6 +333,33 @@ export default function TasbeehScreen({ lang, user, goTo, goBack }: ScreenProps)
           </View>
         </View>
       </Pressable>
+
+      {/* Target picker — presets + custom number. It sits BELOW the
+          count now, so it can never crowd the dhikr text above. */}
+      <View style={styles.targetRow}>
+        {PRESET_TARGETS.map((t) => (
+          <Pressable
+            key={t}
+            onPress={() => applyTarget(t)}
+            style={[styles.chip, target === t && styles.chipOn]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: target === t }}
+          >
+            <Text style={[styles.chipText, target === t && styles.chipTextOn]}>{t}</Text>
+          </Pressable>
+        ))}
+        <TextInput
+          value={customText}
+          onChangeText={setCustomText}
+          placeholder={s.tasCustom}
+          placeholderTextColor="#666666"
+          keyboardType="number-pad"
+          onSubmitEditing={applyCustomTarget}
+          onBlur={applyCustomTarget}
+          style={styles.customInput}
+          accessibilityLabel={s.tasCustom}
+        />
+      </View>
 
       {/* Bottom: tap hint + Exit pill. */}
       <Text style={styles.hint}>{s.tasTapAnywhere}</Text>
@@ -425,13 +433,16 @@ const styles = StyleSheet.create({
   counter: { flex: 1, flexDirection: 'row', paddingHorizontal: 20, paddingTop: 8 },
   countCol: { flex: 1, justifyContent: 'center', paddingRight: 8 },
   /**
-   * The dhikr label's own reserved block. paddingTop absorbs the
-   * ~5dp by which Amiri's tallest diacritics rise above the Arabic
-   * line box, so the ink never paints over the target row above;
-   * marginBottom is the one and only gap between the label and the
-   * count (the count itself has no top margin).
+   * The dhikr label's own reserved block, directly below the dhikr
+   * selection chips and above the count (user's order: selection →
+   * text → count). paddingTop absorbs the ~5dp by which Amiri's
+   * tallest diacritics rise above the Arabic line box, so the ink
+   * never paints over the chips above; marginBottom is the one and
+   * only gap between the label and the count below (the count
+   * itself has no top margin). The number picker sits below the
+   * count, so the label can never touch it either.
    */
-  labelBlock: { paddingTop: 12, marginBottom: 10 },
+  labelBlock: { paddingHorizontal: 20, paddingTop: 12, marginBottom: 10 },
   /**
    * lineHeight 64 is deliberate, not decorative: Amiri's natural
    * line height at 30pt is 54dp and its ink spans 59dp (44 above
