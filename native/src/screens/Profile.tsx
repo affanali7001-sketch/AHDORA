@@ -135,14 +135,35 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
       setLoading(true);
       setError('');
     }
+    // 2026-11-23 (Run #48): the uninstall toggle sat DEAD on the
+    // phone even though every permission was granted — because this
+    // load() awaited getProfile() in the same Promise.all as the
+    // Device Admin check. When the profile fetch failed (the
+    // intermittent "Request failed" — see Problem 2), the whole
+    // Promise.all rejected, setAdminAvailable() never ran, the
+    // switch stayed disabled and showed "Needs the installed APK"
+    // on a real APK. The toggle must NEVER depend on the server:
+    // the local, on-device checks run first, in their own block,
+    // so a failing network call cannot disable them.
     try {
-      const [prof, rw, adminActive, minimalStored, permDetail] = await Promise.all([
-        getProfile(),
-        rewardsSummary(),
+      const [adminActive, minimalStored, permDetail] = await Promise.all([
         isDeviceAdminActive(),
         loadMinimal(uid),
         getNotificationPermissionDetail(),
       ]);
+      setAdminAvailable(isDeviceAdminAvailable());
+      setUninstall(adminActive);
+      setMinimal(minimalStored);
+      setNotifPermOff(permDetail.status !== 'granted');
+    } catch {
+      // Even if a local check throws, report the module's real
+      // availability so the switch is not left disabled by default.
+      setAdminAvailable(isDeviceAdminAvailable());
+    }
+    // The server data is independent: a failure here blanks only
+    // the profile/rewards rows, never the Settings toggles above.
+    try {
+      const [prof, rw] = await Promise.all([getProfile(), rewardsSummary()]);
       setProfile(prof.profile);
       setRewards(rw);
       // The switch shows the REAL Device Admin state, never a saved
@@ -150,10 +171,7 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
       // (The old AsyncStorage flag '@ahdora/profile/uninstallProtection'
       // did nothing at all — it is no longer read or written. A stale
       // value left on the phone from an older build is inert.)
-      setAdminAvailable(isDeviceAdminAvailable());
-      setUninstall(adminActive);
-      setMinimal(minimalStored);
-      setNotifPermOff(permDetail.status !== 'granted');
+      if (first) setError('');
     } catch (e) {
       if (first) setError(e instanceof Error ? e.message : s.errorGeneric);
     } finally {
