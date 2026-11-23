@@ -58,6 +58,9 @@ const profileSchema = z.object({
     Isha: prayerSettingSchema.optional(),
   }).partial().optional(),
 
+  /** Optional Tahajjud time (HH:mm). Empty = unset. */
+  tahajjudTime: z.string().max(5).optional(),
+
   sleepTime: z.string().max(10).optional(),
   sleepStartTime: z.string().max(10).optional(),
   sleepEndTime: z.string().max(10).optional(),

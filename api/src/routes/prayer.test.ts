@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolvePerPrayerTimes } from './prayer.js';
+import { resolvePerPrayerTimes, tahajjudTimeOrNull } from './prayer.js';
 
 /**
  * P2/P6 regression tests: when Aladhan cannot resolve the saved city
@@ -67,5 +67,20 @@ describe('resolvePerPrayerTimes', () => {
     );
     expect(perPrayer.Fajr).toMatchObject({ time: '05:28', source: 'calculated' });
     expect(manualCount).toBe(0);
+  });
+});
+
+describe('tahajjudTimeOrNull (optional Tahajjud — unset means nothing, never a guess)', () => {
+  it('passes a valid HH:mm time through', () => {
+    expect(tahajjudTimeOrNull('03:30')).toBe('03:30');
+    expect(tahajjudTimeOrNull(' 03:30 ')).toBe('03:30');
+  });
+
+  it('returns null when unset, empty, or malformed', () => {
+    expect(tahajjudTimeOrNull('')).toBeNull();
+    expect(tahajjudTimeOrNull(undefined)).toBeNull();
+    expect(tahajjudTimeOrNull(null)).toBeNull();
+    expect(tahajjudTimeOrNull('25:99')).toBeNull();
+    expect(tahajjudTimeOrNull('3:30')).toBeNull();
   });
 });

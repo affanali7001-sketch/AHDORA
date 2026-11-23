@@ -143,4 +143,10 @@ describe('profileSchema onboarding fields', () => {
     expect(profileSchema.safeParse({ onboardingStep: -1 }).success).toBe(false);
     expect(profileSchema.safeParse({ onboardingStep: 2.5 }).success).toBe(false);
   });
+
+  it('accepts an optional Tahajjud time and an empty (unset) one', () => {
+    expect(profileSchema.safeParse({ tahajjudTime: '03:30' }).success).toBe(true);
+    expect(profileSchema.safeParse({ tahajjudTime: '' }).success).toBe(true);
+    expect(profileSchema.safeParse({ tahajjudTime: '03:30:00' }).success).toBe(false);
+  });
 });

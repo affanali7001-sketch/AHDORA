@@ -219,6 +219,18 @@ const profileSchema = new Schema({
     Isha: { type: prayerSettingSchema, default: () => ({}) },
   },
 
+  /**
+   * Optional Tahajjud time (HH:mm). Empty = unset: it is never shown,
+   * never assumed, and never counted as a prayer. It is a plain
+   * user-chosen time, not a calculated prayer time.
+   */
+  tahajjudTime: {
+    type: String,
+    trim: true,
+    maxlength: 5,
+    default: '',
+  },
+
   sleepTime: {
     type: String,
     default: '',

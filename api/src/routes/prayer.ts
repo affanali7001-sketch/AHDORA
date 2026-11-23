@@ -51,6 +51,17 @@ export type PrayerSettingInput = {
   reminder?: boolean;
 };
 
+/**
+ * Optional Tahajjud time (pure, tested): a valid HH:mm passes
+ * through, anything else — empty, unset, or malformed — is null,
+ * so an unset Tahajjud is never shown and never invented.
+ */
+export function tahajjudTimeOrNull(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return toMinutes(trimmed) !== null ? trimmed : null;
+}
+
 export type ResolvedPrayer = {
   time: string;
   deadline: string;
@@ -205,6 +216,11 @@ prayerRouter.get('/times', async (req, res, next) => {
       string,
       { timeOverride?: string; endTime?: string; reminder?: boolean } | undefined
     >;
+    // Optional Tahajjud: the user's own fixed time, or null when unset.
+    // It is NOT one of the five prayers — it never enters perPrayer,
+    // nextPrayer, deadlines, or auto-missed.
+    const tahajjud = tahajjudTimeOrNull(profile?.tahajjudTime);
+    const tahajjudField = tahajjud ? { time: tahajjud } : null;
 
     const url =
       `https://api.aladhan.com/v1/timingsByCity?city=${encodeURIComponent(city)}` +
@@ -314,6 +330,7 @@ prayerRouter.get('/times', async (req, res, next) => {
           },
           perPrayer: resolved.perPrayer,
           nextPrayer: nextPrayerFor(resolved.displayTimes),
+          tahajjud: tahajjudField,
         });
         return;
       }
@@ -365,6 +382,7 @@ prayerRouter.get('/times', async (req, res, next) => {
       },
       perPrayer,
       nextPrayer: nextPrayerFor(displayTimes),
+      tahajjud: tahajjudField,
     });
   } catch (error) {
     next(error);
