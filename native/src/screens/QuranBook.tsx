@@ -17,6 +17,14 @@
  * shows the real ayah count and the goal in ayahs, honestly
  * labelled. Page counts are never faked. Minutes are real time
  * spent in the reader this session. Nothing is invented.
+ *
+ * Tajweed colours (King Fahd Complex QPC V4 palette) come from the
+ * public quran.com API v4 `text_uthmani_tajweed` — see
+ * src/lib/tajweed.ts; the surah heading, ۝ ayah markers and the
+ * full Tilawah player (src/components/TilawahPlayer.tsx) follow the
+ * Mihrab-style presentation, rebuilt from scratch in AHDORA's own
+ * code. Audio is unchanged: EveryAyah tilawat + Shamshad Ali Khan
+ * Urdu tarjuma, tilawat → tarjuma → next-page chain intact.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -27,25 +35,26 @@ import {
   Text,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ScreenProps } from '../lib/nav';
 import { takeQuranPageTarget, takeQuranSurahTarget } from '../lib/navTarget';
 import { stringsFor, type AppLanguage } from '../lib/strings';
 import { C, F, L, S, T } from '../lib/theme';
+import { useAppTheme } from '../lib/appTheme';
 import { Chip, Field, Input, PillButton, Switch, TealHead } from '../components/ui';
+import TilawahPlayer from '../components/TilawahPlayer';
+import {
+  fetchTajweedSurah,
+  TAJWEED_FAMILIES,
+  tajweedColour,
+  type TajweedFamilyId,
+  type TajweedSegment,
+} from '../lib/tajweed';
 import {
   getQuranAudioState,
+  loadQuranPlaybackPrefs,
   loadQuranReciter,
-  nextQuranAyah,
-  prevQuranAyah,
-  QURAN_RECITERS,
-  reciterFor,
-  seekQuranBy,
-  setQuranAutoPlay,
-  setQuranReciter,
-  startQuranPage,
-  stopQuranAudio,
   subscribeQuranAudio,
-  toggleQuranAudio,
   type QuranAudioState,
 } from '../lib/quranAudio';
 import { fetchTafsir, type TafsirResult } from '../lib/tafsir';
@@ -69,13 +78,55 @@ import {
 } from '../lib/apiWorship';
 
 const TOTAL_PAGES = 604;
+const TAJWEED_TOGGLE_KEY = 'ahdora:quran:tajweed:on';
 const BISMILLAH = 'بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ';
 const ALQURAN_BASE = 'https://api.alquran.cloud/v1';
 /* Preview-mandated mushaf colours (preview §11, .mushaf / .mushaf-text /
  * .ayah.playing) — the only hex values outside the foundation tokens. */
 const MUSHAF_BG = '#FFFDF6';
 const MUSHAF_INK = '#1C1A15';
+const MUSHAF_BG_DARK = '#0A2E28';
+const MUSHAF_INK_DARK = '#F2EFE6';
 const PLAYING_BG = '#FFF4E6';
+
+/** Render tajweed segments as coloured spans (plain ink for rule null). */
+function TajweedSpans({ segments, dark }: { segments: TajweedSegment[]; dark: boolean }) {
+  return (
+    <>
+      {segments.map((sg, i) => (
+        <Text
+          key={i}
+          style={sg.rule ? { color: tajweedColour(sg.rule, dark) } : undefined}
+        >
+          {sg.text}
+        </Text>
+      ))}
+    </>
+  );
+}
+
+/** Shared-strings key for a tajweed family label. */
+function tajweedFamilyLabelKey(
+  family: TajweedFamilyId,
+):
+  | 'tajweedFamSilent'
+  | 'tajweedFamGhunnah'
+  | 'tajweedFamMadd'
+  | 'tajweedFamQalqalah'
+  | 'tajweedFamTafkheem' {
+  switch (family) {
+    case 'silent':
+      return 'tajweedFamSilent';
+    case 'ghunnah':
+      return 'tajweedFamGhunnah';
+    case 'madd':
+      return 'tajweedFamMadd';
+    case 'qalqalah':
+      return 'tajweedFamQalqalah';
+    case 'tafkheem':
+      return 'tajweedFamTafkheem';
+  }
+}
 
 const STRINGS: Record<
   AppLanguage,
@@ -228,10 +279,6 @@ const STRINGS: Record<
   },
 };
 
-function fmtTime(totalSeconds: number): string {
-  const s = Math.max(0, Math.floor(totalSeconds));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-}
 
 const ARABIC_INDIC = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
 function toArabicIndic(n: number): string {
@@ -314,9 +361,19 @@ export default function QuranBookScreen({
   const [audio, setAudio] = useState<QuranAudioState>(() => getQuranAudioState());
   useEffect(() => subscribeQuranAudio(setAudio), []);
 
-  // Restore the saved tilawat reciter once (defaults to Alafasy).
+  // Restore the saved tilawat reciter + playback prefs once
+  // (defaults: Alafasy, 1x, repeat off, tajweed colours on).
   useEffect(() => {
     void loadQuranReciter();
+    void loadQuranPlaybackPrefs();
+    void (async () => {
+      try {
+        const saved = await AsyncStorage.getItem(TAJWEED_TOGGLE_KEY);
+        if (saved === 'false') setTajweedOn(false);
+      } catch {
+        /* Default on — colours must never break the reader. */
+      }
+    })();
   }, []);
 
   // Tafsir panel: one ayah at a time, fetched on demand from
@@ -325,6 +382,22 @@ export default function QuranBookScreen({
   const [tafsir, setTafsir] = useState<TafsirResult | null>(null);
   const [tafsirLoading, setTafsirLoading] = useState(false);
   const [tafsirError, setTafsirError] = useState<string | null>(null);
+
+  // Tajweed colours (quran.com v4, cached per surah — see
+  // src/lib/tajweed.ts). Keyed `${surah}:${ayahInSurah}`. On by
+  // default; the toggle persists on this phone. A failed fetch
+  // falls back to the plain AlQuran Cloud text — never a blocker.
+  const th = useAppTheme();
+  const [tajweedOn, setTajweedOn] = useState(true);
+  const [tajweedByKey, setTajweedByKey] = useState<Map<string, TajweedSegment[]>>(
+    new Map(),
+  );
+  const [tajweedLoading, setTajweedLoading] = useState(false);
+  const [tajweedFailed, setTajweedFailed] = useState(false);
+  const [legendOpen, setLegendOpen] = useState(false);
+  // Translation (Urdu + English + transliteration) under each ayah:
+  // visible by default, hideable from the player and the list head.
+  const [showTranslation, setShowTranslation] = useState(true);
 
   const lastPageRef = useRef(1);
   const sessionOpenedRef = useRef(false);
@@ -408,6 +481,9 @@ export default function QuranBookScreen({
     setEnglishByGlobal(new Map());
     setTranslitByGlobal(new Map());
     setTarjumaFailed(false);
+    setTajweedByKey(new Map());
+    setTajweedFailed(false);
+    setTajweedLoading(false);
     try {
       const data = await fetchMushafPage(n);
       if (!mountedRef.current) return;
@@ -437,6 +513,28 @@ export default function QuranBookScreen({
         setTranslitByGlobal(new Map(trRes.value.map((a) => [a.number, a.text])));
       }
       if (!anyOk) setTarjumaFailed(true);
+      // Tajweed colours: one cached fetch per surah on this page
+      // (quran.com v4). Independent of the tarjuma — if it fails,
+      // the plain Arabic above stays complete.
+      const surahNumbers = [...new Set(data.ayahs.map((a) => a.surah.number))];
+      setTajweedLoading(true);
+      const tajweedResults = await Promise.allSettled(
+        surahNumbers.map((n) => fetchTajweedSurah(n)),
+      );
+      if (!mountedRef.current) return;
+      const nextTajweed = new Map<string, TajweedSegment[]>();
+      let tajweedOk = false;
+      for (const res of tajweedResults) {
+        if (res.status === 'fulfilled') {
+          tajweedOk = true;
+          for (const v of res.value.verses) {
+            nextTajweed.set(`${res.value.surah}:${v.ayahInSurah}`, v.segments);
+          }
+        }
+      }
+      setTajweedByKey(nextTajweed);
+      setTajweedFailed(!tajweedOk);
+      setTajweedLoading(false);
     } catch (e) {
       if (mountedRef.current) {
         setPageError(e instanceof Error ? e.message : s.loadFailed);
@@ -567,6 +665,14 @@ export default function QuranBookScreen({
     setTafsir(null);
     setTafsirLoading(false);
     setTafsirError(null);
+  }
+
+  /** Tajweed colours on/off (persisted on this phone). */
+  function onTajweedToggle(on: boolean): void {
+    setTajweedOn(on);
+    void AsyncStorage.setItem(TAJWEED_TOGGLE_KEY, on ? 'true' : 'false').catch(
+      () => undefined,
+    );
   }
 
   const filteredSurahs = surahs.filter((su) => {
@@ -762,100 +868,22 @@ export default function QuranBookScreen({
       </View>
       {readerSub ? <Text style={styles.readerSub}>{readerSub}</Text> : null}
 
-      {/* Audio controls at the TOP of the reader (user request
-          2026-11-22): the play buttons sit right under the page
-          label, above the mushaf page — visible without scrolling. */}
-      <PlayerCard
-        dark
-        title={shared.playerTitle}
-        note={s.playerNote}
-        time={audio.mode === 'tilawat' && audio.page === page ? audio.time : 0}
-        duration={audio.mode === 'tilawat' && audio.page === page ? audio.duration : 0}
-        timeLabel={
-          audio.mode === 'tilawat' && audio.page === page && audio.duration > 0
-            ? `${fmtTime(audio.duration)} · Page ${page}`
-            : `Page ${page}`
-        }
-        playing={audio.mode === 'tilawat' && audio.page === page && audio.playing}
-        busy={audio.busy && audio.mode === 'tilawat' && audio.page === page}
-        onToggle={() => {
-          if (audio.mode === 'tilawat' && audio.page === page) {
-            toggleQuranAudio();
-          } else {
-            void startQuranPage(page, 'tilawat');
-          }
-        }}
+      {/* Tilawah player at the TOP of the reader (user request
+          2026-11-22): the play controls sit right under the page
+          label, above the mushaf page — visible without scrolling.
+          Full player: play/pause, prev/next ayah, seek bar, speed,
+          repeat, sleep timer, reciter picker, auto-play, translation
+          toggle — all wired to the global audio manager. */}
+      <TilawahPlayer
+        lang={lang}
+        page={page}
+        ayahs={mushaf?.ayahs ?? []}
+        showTranslation={showTranslation}
+        onTranslationChange={setShowTranslation}
       />
-      <PlayerCard
-        title={shared.urduTitle}
-        note={s.urduNote}
-        time={audio.mode === 'urdu' && audio.page === page ? audio.time : 0}
-        duration={audio.mode === 'urdu' && audio.page === page ? audio.duration : 0}
-        timeLabel={
-          audio.mode === 'urdu' && audio.page === page && audio.duration > 0
-            ? `${fmtTime(audio.duration)} · Page ${page}`
-            : `Page ${page}`
-        }
-        playing={audio.mode === 'urdu' && audio.page === page && audio.playing}
-        busy={audio.busy && audio.mode === 'urdu' && audio.page === page}
-        onToggle={() => {
-          if (audio.mode === 'urdu' && audio.page === page) {
-            toggleQuranAudio();
-          } else {
-            void startQuranPage(page, 'urdu');
-          }
-        }}
-      />
-      {audio.busy && audio.mode ? (
-        <Text style={styles.audioLoading}>{s.audioLoading}</Text>
-      ) : null}
-      {audio.error ? <Text style={T.error}>{audio.error}</Text> : null}
-
-      {/* Auto-play: tilawat → tarjuma → next page, and mark done. */}
-      <View style={styles.autoRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.autoTitle}>{s.autoPlay}</Text>
-          <Text style={styles.autoNote}>{s.autoPlayNote}</Text>
-        </View>
-        <Switch value={audio.autoPlay} onValueChange={setQuranAutoPlay} />
-      </View>
-
-      {/* Seek + prev/next ayah + stop — works even off this page. */}
-      {audio.hasAudio ? (
-        <View style={styles.seekRow}>
-          <PillButton label="−10s" small variant="ghost" onPress={() => seekQuranBy(-10)} />
-          <PillButton label="⏮" small variant="ghost" onPress={() => prevQuranAyah()} />
-          <PillButton label="⏭" small variant="ghost" onPress={() => nextQuranAyah()} />
-          <PillButton label="+10s" small variant="ghost" onPress={() => seekQuranBy(10)} />
-          <PillButton
-            label={s.stopAudio}
-            small
-            variant="ghost"
-            onPress={() => stopQuranAudio()}
-          />
-        </View>
-      ) : null}
-      <Text style={T.note}>
-        Tilawat: {reciterFor(audio.reciterId).name} (EveryAyah) ·{' '}
-        {reciterFor(audio.reciterId).bitrate}
-      </Text>
       <Text style={T.note}>
         {s.urduAudioCredit} · {URDU_AUDIO.bitrate}
       </Text>
-
-      {/* Reciter picker — tilawat only; the Urdu tarjuma voice never changes. */}
-      <Text style={styles.sectionTitle}>{s.reciterTitle}</Text>
-      <View style={styles.reciterRow}>
-        {QURAN_RECITERS.map((r) => (
-          <Chip
-            key={r.id}
-            label={r.name}
-            selected={audio.reciterId === r.id}
-            onPress={() => void setQuranReciter(r.id)}
-          />
-        ))}
-      </View>
-      <Text style={T.note}>{s.reciterNote}</Text>
 
       {/* Next page right below the play controls (user request
           2026-11-22) — the same Next also sits below the mushaf
@@ -885,59 +913,152 @@ export default function QuranBookScreen({
         </View>
       ) : mushaf ? (
         <>
-          <View style={styles.mushaf}>
-            <View style={styles.mushafInner}>
+          {/* Tajweed colours: on/off + legend (King Fahd palette). */}
+          <View style={styles.tajweedRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.autoTitle}>{shared.tajweedTitle}</Text>
+              <Text style={styles.autoNote}>{shared.tajweedNote}</Text>
+            </View>
+            <Switch value={tajweedOn} onValueChange={onTajweedToggle} />
+            <PillButton
+              label={legendOpen ? shared.tajweedHideLegend : shared.tajweedLegend}
+              small
+              variant="ghost"
+              onPress={() => setLegendOpen((v) => !v)}
+            />
+          </View>
+          {tajweedLoading ? (
+            <Text style={styles.audioLoading}>{shared.tajweedLoading}</Text>
+          ) : null}
+          {tajweedFailed && tajweedOn ? (
+            <Text style={T.error}>{shared.tajweedFailed}</Text>
+          ) : null}
+          {legendOpen ? (
+            <View style={styles.legendCard}>
+              {TAJWEED_FAMILIES.map((fam) => (
+                <View key={fam.family}>
+                  <Text style={styles.legendFam}>
+                    {shared[tajweedFamilyLabelKey(fam.family)]}
+                  </Text>
+                  {fam.rules.map((r) => (
+                    <View key={r.id} style={styles.legendRow}>
+                      <View
+                        style={[
+                          styles.legendDot,
+                          { backgroundColor: tajweedColour(r.id, th.dark) },
+                        ]}
+                      />
+                      <Text style={styles.legendText}>
+                        {(shared as Record<string, string>)[`tajweedRule_${r.id}`] ??
+                          r.id}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ))}
+              <Text style={T.note}>{shared.tajweedTafkheemNote}</Text>
+            </View>
+          ) : null}
+
+          <View style={[styles.mushaf, th.dark && styles.mushafDark]}>
+            <View style={[styles.mushafInner, th.dark && styles.mushafInnerDark]}>
               <View style={styles.stripe} />
-              <Text style={styles.pageNo}>— {page} —</Text>
+              <Text style={[styles.pageNo, th.dark && { color: '#A7C3B6' }]}>
+                — {page} —
+              </Text>
               {segments.map((seg) => {
                 const startsHere = seg.ayahs[0]?.numberInSurah === 1;
                 // Surah Al-Fatiha's ayah 1 IS the Bismillah: it is shown
                 // as the separate Bismillah line, not again in the flow.
                 const flowAyahs =
                   seg.surah.number === 1 && startsHere ? seg.ayahs.slice(1) : seg.ayahs;
+                // Surah 1's Bismillah line, tajweed-coloured when on.
+                const bismillahSegs =
+                  seg.surah.number === 1 && tajweedOn
+                    ? tajweedByKey.get('1:1')
+                    : undefined;
                 return (
                   <View key={`${seg.surah.number}-${seg.ayahs[0]?.numberInSurah ?? 0}`}>
                     {startsHere ? (
                       <View style={styles.bandOuter}>
-                        <View style={styles.surahBand}>
-                          <Text style={styles.surahBandArabic}>
+                        <View style={[styles.surahBand, th.dark && styles.surahBandDark]}>
+                          <Text
+                            style={[
+                              styles.surahBandArabic,
+                              th.dark && { color: MUSHAF_INK_DARK },
+                            ]}
+                          >
                             ۞ {seg.surah.name} ۞
+                          </Text>
+                          <Text
+                            style={[styles.surahBandMeta, th.dark && { color: '#A7C3B6' }]}
+                          >
+                            Surah {seg.surah.number} · {seg.surah.englishName} ·{' '}
+                            {seg.surah.numberOfAyahs} {s.aayatWord} ·{' '}
+                            {seg.surah.revelationType === 'Meccan' ? s.mecca : s.medina}
                           </Text>
                         </View>
                       </View>
                     ) : null}
                     {startsHere && seg.surah.number !== 9 ? (
-                      <Text style={styles.bismillah}>
-                        {BISMILLAH}
+                      <Text style={[styles.bismillah, th.dark && { color: MUSHAF_INK_DARK }]}>
+                        {bismillahSegs && bismillahSegs.length > 0 ? (
+                          <TajweedSpans segments={bismillahSegs} dark={th.dark} />
+                        ) : (
+                          BISMILLAH
+                        )}
                         {seg.surah.number === 1 ? (
-                          <Text style={styles.marker}> {toArabicIndic(1)} </Text>
+                          <Text style={[styles.marker, th.dark && styles.markerDark]}>
+                            {' '}۝ {toArabicIndic(1)}{' '}
+                          </Text>
                         ) : null}
                       </Text>
                     ) : null}
-                    <Text style={styles.ayahFlow}>
-                      {flowAyahs.map((a) => (
-                        <Text
-                          key={a.number}
-                          style={audio.playingAyah === a.number ? styles.ayahPlaying : undefined}
-                        >
-                          {a.text.trim()}{' '}
-                          <Text style={styles.marker}>
-                            {' '}
-                            {toArabicIndic(a.numberInSurah)}{' '}
-                          </Text>{' '}
-                        </Text>
-                      ))}
+                    <Text style={[styles.ayahFlow, th.dark && { color: MUSHAF_INK_DARK }]}>
+                      {flowAyahs.map((a) => {
+                        const segs = tajweedOn
+                          ? tajweedByKey.get(`${a.surah.number}:${a.numberInSurah}`)
+                          : undefined;
+                        const playing = audio.playingAyah === a.number;
+                        return (
+                          <Text
+                            key={a.number}
+                            style={
+                              playing
+                                ? {
+                                    backgroundColor: th.dark
+                                      ? 'rgba(251,217,190,0.22)'
+                                      : PLAYING_BG,
+                                  }
+                                : undefined
+                            }
+                          >
+                            {segs && segs.length > 0 ? (
+                              <TajweedSpans segments={segs} dark={th.dark} />
+                            ) : (
+                              a.text.trim()
+                            )}{' '}
+                            <Text style={[styles.marker, th.dark && styles.markerDark]}>
+                              {' '}۝ {toArabicIndic(a.numberInSurah)}{' '}
+                            </Text>{' '}
+                          </Text>
+                        );
+                      })}
                     </Text>
                   </View>
                 );
               })}
               <View style={styles.stripe} />
               <View style={styles.mushafFoot}>
-                <Text style={styles.footText}>PARA {firstAyah?.juz ?? ''}</Text>
-                <Text style={styles.footText}>
+                <Text style={[styles.footText, th.dark && { color: '#A7C3B6' }]}>
+                  PARA {firstAyah?.juz ?? ''}
+                </Text>
+                <Text style={[styles.footText, th.dark && { color: '#A7C3B6' }]}>
                   SURAH {firstSeg?.surah.englishName.toUpperCase() ?? ''}
                 </Text>
-                <Text style={styles.footText}>PAGE {page}</Text>
+                <Text style={[styles.footText, th.dark && { color: '#A7C3B6' }]}>
+                  PAGE {page}
+                </Text>
               </View>
             </View>
           </View>
@@ -991,7 +1112,17 @@ export default function QuranBookScreen({
           </View>
           {pageJumpMsg ? <Text style={T.error}>{pageJumpMsg}</Text> : null}
 
-          <Text style={styles.sectionTitle}>{shared.rdTarjumaH}</Text>
+          <View style={styles.tarjumaHead}>
+            <Text style={styles.sectionTitle}>{shared.rdTarjumaH}</Text>
+            <PillButton
+              label={
+                showTranslation ? shared.tilawahHideTarjuma : shared.tilawahShowTarjuma
+              }
+              small
+              variant="ghost"
+              onPress={() => setShowTranslation((v) => !v)}
+            />
+          </View>
           {tarjumaFailed ? <Text style={T.error}>{s.tarjumaUnavailable}</Text> : null}
           {mushaf.ayahs.map((a) => (
             <View
@@ -1001,15 +1132,22 @@ export default function QuranBookScreen({
                 audio.playingAyah === a.number && styles.ayahRowPlaying,
               ]}
             >
+              <Text style={styles.ayahLabel}>
+                Surah {a.surah.englishName} · Ayah {a.numberInSurah}
+              </Text>
               <Text style={styles.ayahArabic}>{a.text.trim()}</Text>
-              {translitByGlobal.get(a.number) ? (
-                <Text style={styles.translit}>{translitByGlobal.get(a.number)}</Text>
-              ) : null}
-              {urduByGlobal.get(a.number) ? (
-                <Text style={styles.urduText}>{urduByGlobal.get(a.number)}</Text>
-              ) : null}
-              {englishByGlobal.get(a.number) ? (
-                <Text style={styles.english}>{englishByGlobal.get(a.number)}</Text>
+              {showTranslation ? (
+                <>
+                  {translitByGlobal.get(a.number) ? (
+                    <Text style={styles.translit}>{translitByGlobal.get(a.number)}</Text>
+                  ) : null}
+                  {urduByGlobal.get(a.number) ? (
+                    <Text style={styles.urduText}>{urduByGlobal.get(a.number)}</Text>
+                  ) : null}
+                  {englishByGlobal.get(a.number) ? (
+                    <Text style={styles.english}>{englishByGlobal.get(a.number)}</Text>
+                  ) : null}
+                </>
               ) : null}
               <View style={styles.tafsirBtnRow}>
                 <PillButton
@@ -1097,76 +1235,6 @@ function latestEntry(
   return best ?? null;
 }
 
-/** One audio player card (preview §11): round 52px play button,
- * title, progress bar, current / total times, note. */
-function PlayerCard({
-  dark = false,
-  title,
-  note,
-  time,
-  duration,
-  timeLabel,
-  playing,
-  busy,
-  onToggle,
-}: {
-  dark?: boolean;
-  title: string;
-  note: string;
-  time: number;
-  duration: number;
-  timeLabel: string;
-  playing: boolean;
-  busy: boolean;
-  onToggle: () => void;
-}) {
-  const pct = duration > 0 ? Math.min(1, time / duration) : 0;
-  return (
-    <View style={[styles.player, dark ? styles.playerDark : styles.playerLight]}>
-      <View style={styles.playerRow}>
-        <Pressable
-          onPress={onToggle}
-          style={[styles.playBtn, dark ? styles.playBtnPeach : styles.playBtnTeal]}
-          accessibilityRole="button"
-          accessibilityLabel={playing ? 'Stop' : 'Play'}
-        >
-          {busy ? (
-            <ActivityIndicator color={dark ? C.peachText : C.white} />
-          ) : (
-            <Text style={[styles.playIcon, dark ? styles.playIconPeach : styles.playIconTeal]}>
-              {playing ? '■' : '▶'}
-            </Text>
-          )}
-        </Pressable>
-        <View style={styles.playerBody}>
-          <Text style={[styles.playerTitle, dark && styles.playerTitleDark]}>{title}</Text>
-          <View
-            style={[styles.playerTrack, dark ? styles.playerTrackDark : styles.playerTrackLight]}
-          >
-            <View
-              style={[
-                styles.playerFill,
-                {
-                  width: `${pct * 100}%`,
-                  backgroundColor: dark ? C.peachMid : C.teal500,
-                },
-              ]}
-            />
-          </View>
-          <View style={styles.playerTimes}>
-            <Text style={[styles.playerTime, dark && styles.playerTimeDark]}>
-              {fmtTime(time)}
-            </Text>
-            <Text style={[styles.playerTime, dark && styles.playerTimeDark]}>{timeLabel}</Text>
-          </View>
-        </View>
-      </View>
-      <Text style={[styles.playerNote, dark ? styles.playerNoteDark : styles.playerNoteLight]}>
-        {note}
-      </Text>
-    </View>
-  );
-}
 
 /** Reader view for the 'reader' route (App.tsx) — opens at the
  * last-read surah's first page, else page 1. */
@@ -1341,7 +1409,62 @@ const styles = StyleSheet.create({
     backgroundColor: C.teal100,
     borderRadius: 13,
   },
-  ayahPlaying: { color: C.teal500 },
+  markerDark: { color: '#A7C3B6', backgroundColor: 'rgba(255,255,255,0.12)' },
+  mushafDark: { backgroundColor: MUSHAF_BG_DARK, borderColor: '#155E4E' },
+  mushafInnerDark: { backgroundColor: MUSHAF_BG_DARK, borderColor: '#155E4E' },
+  surahBandDark: { backgroundColor: '#0E4A3E', borderColor: '#155E4E' },
+  surahBandMeta: {
+    fontFamily: F.sans,
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: C.teal700,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  /* ---- Tajweed toggle + legend ---- */
+  tajweedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: C.white,
+    borderRadius: S.radius,
+    borderWidth: 1,
+    borderColor: C.line,
+    padding: 14,
+    marginTop: 12,
+  },
+  legendCard: {
+    backgroundColor: C.white,
+    borderRadius: S.radius,
+    borderWidth: 1,
+    borderColor: C.line,
+    padding: 16,
+    marginTop: 12,
+  },
+  legendFam: {
+    fontFamily: F.sans,
+    fontSize: 14,
+    fontWeight: '800',
+    color: C.ink,
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  legendRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 3 },
+  legendDot: { width: 14, height: 14, borderRadius: 7, flexShrink: 0 },
+  legendText: { fontFamily: F.sans, fontSize: 13.5, color: C.ink },
+  /* ---- Tarjuma list head ---- */
+  tarjumaHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  ayahLabel: {
+    fontFamily: F.sans,
+    fontSize: 12,
+    fontWeight: '800',
+    color: C.teal700,
+    marginBottom: 4,
+  },
   mushafFoot: {
     flexDirection: 'row',
     justifyContent: 'space-between',

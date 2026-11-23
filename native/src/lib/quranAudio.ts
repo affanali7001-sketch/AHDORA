@@ -41,9 +41,17 @@
  * removing so the old audio stops immediately.
  *
  * Sleep timer (setQuranSleepTimer): minutes (a timeout that stops
- * playback) or 'para-end' (the auto-play chain stops after the
- * current Juz's last page instead of advancing). Applies to page
- * playback AND Life Ayahs (same player, same stop path).
+ * playback), 'surah-end' (the chain stops after the page holding
+ * the current surah's last ayah) or 'para-end' (the auto-play chain
+ * stops after the current Juz's last page instead of advancing).
+ * Applies to page playback AND Life Ayahs (same player, same stop
+ * path).
+ *
+ * Playback speed (setQuranPlaybackRate, 0.5–2x) applies to the
+ * current player and every player created after; repeat
+ * (setQuranRepeatMode) is off, the current ayah again, or the
+ * surah on the current page again (page-scoped — playback is
+ * page-based). Both persist in AsyncStorage.
  *
  * All recording calls (recordListened / recordRead) are wrapped in
  * try/catch — they need login and must never break playback.
@@ -78,16 +86,29 @@ export type QuranAudioState = {
   sleepTimer: string | null;
   /** EveryAyah folder id of the tilawat reciter in use. */
   reciterId: string;
+  /** Current playback speed (0.5–2). Applied to every new player. */
+  playbackRate: number;
+  /** Repeat mode: off, repeat the current ayah, or repeat the
+   * surah on the current page (page-scoped — playback is page-based). */
+  repeatMode: QuranRepeatMode;
 };
 
-/** Sleep timer option: stop after N minutes, or when the current Para (Juz) ends. */
+/** Repeat mode for Tilawah playback. */
+export type QuranRepeatMode = 'off' | 'ayah' | 'surah';
+
+/** Playback speeds offered by the Tilawah player. */
+export const QURAN_PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+
+/** Sleep timer option: stop after N minutes, when the current
+ * Surah ends, or when the current Para (Juz) ends. */
 export type QuranSleepTimerOption =
   | null
   | { kind: 'minutes'; minutes: number }
+  | { kind: 'surah-end' }
   | { kind: 'para-end' };
 
 /** Minute choices offered by the UI for the sleep timer. */
-export const QURAN_SLEEP_TIMER_MINUTES = [15, 30, 60] as const;
+export const QURAN_SLEEP_TIMER_MINUTES = [5, 10, 15, 30, 60] as const;
 
 /* ------------------------- tilawat reciters ------------------------- */
 /**
@@ -179,6 +200,12 @@ let title = '';
 let autoPlay = true;
 /** Tilawat reciter in use (persisted; Alafasy until the user picks one). */
 let reciterId = DEFAULT_QURAN_RECITER_ID;
+const RATE_STORAGE_KEY = 'ahdora:quran:rate';
+const REPEAT_STORAGE_KEY = 'ahdora:quran:repeat';
+/** Current playback speed (persisted; 1 until the user picks one). */
+let playbackRate = 1;
+/** Current repeat mode (persisted; off until the user picks one). */
+let repeatMode: QuranRepeatMode = 'off';
 let isPlaying = false;
 let busy = false;
 let error: string | null = null;
@@ -225,6 +252,7 @@ const listeners = new Set<(s: QuranAudioState) => void>();
 function sleepTimerLabel(): string | null {
   if (!sleepTimer) return null;
   if (sleepTimer.kind === 'minutes') return `${sleepTimer.minutes} min`;
+  if (sleepTimer.kind === 'surah-end') return 'Surah khatm';
   return 'Para khatm';
 }
 
@@ -243,6 +271,8 @@ function snapshot(): QuranAudioState {
     hasAudio,
     sleepTimer: sleepTimerLabel(),
     reciterId,
+    playbackRate,
+    repeatMode,
   };
 }
 
@@ -322,6 +352,71 @@ export async function setQuranReciter(id: string): Promise<void> {
   emit(true);
 }
 
+/** Current playback speed (synchronous; loadQuranPlaybackPrefs first restores the saved one). */
+export function getQuranPlaybackRate(): number {
+  return playbackRate;
+}
+
+/** Current repeat mode (synchronous). */
+export function getQuranRepeatMode(): QuranRepeatMode {
+  return repeatMode;
+}
+
+/**
+ * Restore the saved playback speed + repeat mode from AsyncStorage.
+ * Call once from the Quran Book screen on mount alongside
+ * loadQuranReciter. Unknown saved values fall back to 1x / off.
+ * Never throws.
+ */
+export async function loadQuranPlaybackPrefs(): Promise<void> {
+  try {
+    const [savedRate, savedRepeat] = await Promise.all([
+      AsyncStorage.getItem(RATE_STORAGE_KEY),
+      AsyncStorage.getItem(REPEAT_STORAGE_KEY),
+    ]);
+    const rate = Number.parseFloat(savedRate ?? '');
+    if (QURAN_PLAYBACK_RATES.some((r) => r === rate)) playbackRate = rate;
+    if (savedRepeat === 'ayah' || savedRepeat === 'surah' || savedRepeat === 'off') {
+      repeatMode = savedRepeat;
+    }
+  } catch {
+    /* Keep the defaults — playback must never break on storage. */
+  }
+  emit(true);
+}
+
+/**
+ * Set the playback speed (0.5–2x). Persisted, applied to the
+ * current player immediately (if any) and to every player created
+ * after this call. Unknown values are ignored. Never throws.
+ */
+export function setQuranPlaybackRate(rate: number): void {
+  if (!QURAN_PLAYBACK_RATES.some((r) => r === rate)) return;
+  playbackRate = rate;
+  if (player) {
+    try {
+      player.setPlaybackRate(rate);
+    } catch {
+      /* Status listener will correct the state on the next update. */
+    }
+  }
+  void AsyncStorage.setItem(RATE_STORAGE_KEY, String(rate)).catch(() => undefined);
+  emit(true);
+}
+
+/**
+ * Set the repeat mode. Persisted; applies from the ayah/queue
+ * currently playing. 'ayah' replays the current ayah when it ends;
+ * 'surah' restarts the tilawat of the current page when its queue
+ * ends (page-scoped — playback is page-based, so a surah that spans
+ * pages repeats its portion on this page). Never throws.
+ */
+export function setQuranRepeatMode(mode: QuranRepeatMode): void {
+  repeatMode = mode;
+  void AsyncStorage.setItem(REPEAT_STORAGE_KEY, mode).catch(() => undefined);
+  emit(true);
+}
+
 /** Clear the sleep timer (timeout + flag). Called on every real stop. */
 function clearSleepTimer(): void {
   if (sleepTimerHandle !== null) {
@@ -334,10 +429,12 @@ function clearSleepTimer(): void {
 /**
  * Sleep timer. Minutes: stops playback when the timeout fires (the
  * timeout is cleared when a new timer is set or playback stops).
- * 'para-end': the auto-play chain stops after the current Juz's last
- * page instead of advancing (checked in onQueueFinished). Setting
- * null cancels the timer. Applies to page playback and Life Ayahs
- * alike — both go through the same stop path.
+ * 'surah-end': the auto-play chain stops after the page that holds
+ * the current surah's last ayah finishes (checked in
+ * onQueueFinished). 'para-end': the auto-play chain stops after the
+ * current Juz's last page instead of advancing (checked in
+ * onQueueFinished). Setting null cancels the timer. Applies to page
+ * playback and Life Ayahs alike — both go through the same stop path.
  */
 export function setQuranSleepTimer(option: QuranSleepTimerOption): void {
   clearSleepTimer();
@@ -448,6 +545,12 @@ async function playAt(index: number, gen: number): Promise<void> {
 
   const tryLoad = (uri: string): AudioPlayer => {
     const p = createAudioPlayer({ uri }, { updateInterval: 500 });
+    // Playback speed: the picked rate applies to every new player.
+    try {
+      p.setPlaybackRate(playbackRate);
+    } catch {
+      /* Rate stays 1x for this player — never break playback. */
+    }
     let retried = false;
     p.addListener('playbackStatusUpdate', (status) => {
       // Stale player (replaced by a newer start/skip) — ignore.
@@ -457,10 +560,20 @@ async function playAt(index: number, gen: number): Promise<void> {
         try {
           if (item.fallbackUri && uri === item.uri) {
             p.replace({ uri: item.fallbackUri });
+            try {
+              p.setPlaybackRate(playbackRate);
+            } catch {
+              /* Ignore. */
+            }
             p.play();
           } else if (!retried) {
             retried = true;
             p.replace({ uri });
+            try {
+              p.setPlaybackRate(playbackRate);
+            } catch {
+              /* Ignore. */
+            }
             p.play();
           } else {
             error = AUDIO_FAILED;
@@ -482,6 +595,11 @@ async function playAt(index: number, gen: number): Promise<void> {
       if (typeof status.duration === 'number') duration = status.duration;
       if (status.didJustFinish) {
         if (duration > 0) pageSeconds += duration;
+        // Repeat ayah: the same ayah plays again instead of advancing.
+        if (repeatMode === 'ayah') {
+          void playAt(queueIndex, gen);
+          return;
+        }
         void playAt(queueIndex + 1, gen);
         return;
       }
@@ -601,6 +719,19 @@ async function onQueueFinished(gen: number): Promise<void> {
     }
   }
   if (gen !== generation) return;
+  // Repeat surah (page-scoped): restart the tilawat of this page
+  // instead of the tarjuma chain or advancing. Beats autoPlay-off:
+  // the user explicitly asked for the repeat.
+  if (repeatMode === 'surah' && finishedMushaf) {
+    mode = 'tilawat';
+    title = pageTitle('tilawat', finishedPage, finishedMushaf);
+    queue = buildQueue(finishedMushaf, 'tilawat');
+    queueIndex = 0;
+    busy = true;
+    emit(true);
+    await playAt(0, gen);
+    return;
+  }
   if (!autoPlay) {
     stopInternal();
     return;
@@ -632,6 +763,18 @@ async function onQueueFinished(gen: number): Promise<void> {
       /* Never break playback. */
     }
     if (gen !== generation) return;
+    // 'surah-end' sleep timer: stop after the page that holds a
+    // surah's last ayah finishes, instead of advancing.
+    if (
+      sleepTimer?.kind === 'surah-end' &&
+      finishedMushaf &&
+      finishedMushaf.ayahs.some(
+        (a) => a.numberInSurah >= a.surah.numberOfAyahs,
+      )
+    ) {
+      stopInternal();
+      return;
+    }
     // 'para-end' sleep timer: stop after this Juz's last page
     // instead of advancing to the next page.
     if (

@@ -15,9 +15,13 @@
  *
  * Sleep timer: wired to the real API in quranAudio.ts —
  * setQuranSleepTimer(option) where the option is null (Off),
- * { kind: 'minutes', minutes } or { kind: 'para-end' }. The
- * manager's state.sleepTimer is the human label ("15 min" /
- * "Para khatm"); getQuranSleepTimer() returns the live option.
+ * { kind: 'minutes', minutes }, { kind: 'surah-end' } or
+ * { kind: 'para-end' }. The manager's state.sleepTimer is the human
+ * label ("15 min" / "Surah khatm" / "Para khatm");
+ * getQuranSleepTimer() returns the live option. Speed and repeat
+ * drive the same manager (setQuranPlaybackRate /
+ * setQuranRepeatMode), so this screen and the Quran Book's Tilawah
+ * player always agree.
  *
  * Labels: global strings (stringsFor) where they exist; the few
  * labels with no global key live in the local STRINGS record below,
@@ -38,6 +42,7 @@ import { stringsFor, type AppLanguage } from '../lib/strings';
 import { C, F, L, S, T } from '../lib/theme';
 import { Chip, EmptyState, PillButton, Switch } from '../components/ui';
 import {
+  QURAN_PLAYBACK_RATES,
   getQuranAudioState,
   getQuranSleepTimer,
   nextQuranAyah,
@@ -45,12 +50,15 @@ import {
   seekQuranBy,
   seekQuranTo,
   setQuranAutoPlay,
+  setQuranPlaybackRate,
+  setQuranRepeatMode,
   setQuranSleepTimer,
   startQuranPage,
   stopQuranAudio,
   subscribeQuranAudio,
   toggleQuranAudio,
   type QuranAudioState,
+  type QuranRepeatMode,
   type QuranSleepTimerOption,
 } from '../lib/quranAudio';
 import {
@@ -74,12 +82,16 @@ const STRINGS: Record<
     autoPlay: string;
     autoPlayNote: string;
     sleepOff: string;
+    sleep5: string;
+    sleep10: string;
     sleep15: string;
     sleep30: string;
     sleep60: string;
+    sleepSurah: string;
     sleepPara: string;
     sleepPending: string;
     sleepStopsIn: (v: string) => string;
+    sleepStopsSurah: string;
     sleepStopsPara: string;
   }
 > = {
@@ -90,12 +102,16 @@ const STRINGS: Record<
     autoPlayNote:
       'Tilawat → Urdu tarjuma → next page, automatically. The page is marked as done.',
     sleepOff: 'Off',
+    sleep5: '5 min',
+    sleep10: '10 min',
     sleep15: '15 min',
     sleep30: '30 min',
     sleep60: '1 hour',
+    sleepSurah: 'Surah end',
     sleepPara: 'Para end',
     sleepPending: 'Sleep timer is coming soon — the controls above already work.',
     sleepStopsIn: (v: string) => `Stops in ${v}.`,
+    sleepStopsSurah: 'Stops when this surah ends.',
     sleepStopsPara: 'Stops when this para ends.',
   },
   hi: {
@@ -105,12 +121,16 @@ const STRINGS: Record<
     autoPlayNote:
       'Tilawat → Urdu tarjuma → agla page, apne aap. Page padha hua mark ho jayega.',
     sleepOff: 'Band',
+    sleep5: '5 min',
+    sleep10: '10 min',
     sleep15: '15 min',
     sleep30: '30 min',
     sleep60: '1 ghanta',
+    sleepSurah: 'Surah khatm',
     sleepPara: 'Paara khatm',
     sleepPending: 'Sleep timer jald aa raha hai — upar wale controls pehle se kaam karte hain.',
     sleepStopsIn: (v: string) => `${v} baad band ho jayega.`,
+    sleepStopsSurah: 'Surah khatm hote hi band ho jayega.',
     sleepStopsPara: 'Paara khatm hote hi band ho jayega.',
   },
 };
@@ -132,16 +152,34 @@ function toArabicIndic(n: number): string {
 /* Sleep timer — real API in quranAudio.ts                             */
 /* ------------------------------------------------------------------ */
 
-/** One sleep-timer choice: minutes, stop at the end of the para, or off. */
-type SleepChoice = number | 'para-end' | null;
+/** One sleep-timer choice: minutes, stop at the end of the surah
+ * or para, or off. */
+type SleepChoice = number | 'surah-end' | 'para-end' | null;
 
-const SLEEP_OPTIONS: { value: SleepChoice; key: 'sleepOff' | 'sleep15' | 'sleep30' | 'sleep60' | 'sleepPara' }[] = [
+const SLEEP_OPTIONS: {
+  value: SleepChoice;
+  key:
+    | 'sleepOff'
+    | 'sleep5'
+    | 'sleep10'
+    | 'sleep15'
+    | 'sleep30'
+    | 'sleep60'
+    | 'sleepSurah'
+    | 'sleepPara';
+}[] = [
   { value: null, key: 'sleepOff' },
+  { value: 5, key: 'sleep5' },
+  { value: 10, key: 'sleep10' },
   { value: 15, key: 'sleep15' },
   { value: 30, key: 'sleep30' },
   { value: 60, key: 'sleep60' },
+  { value: 'surah-end', key: 'sleepSurah' },
   { value: 'para-end', key: 'sleepPara' },
 ];
+
+/** Repeat cycle: off → ayah → surah → off. */
+const REPEAT_CYCLE: QuranRepeatMode[] = ['off', 'ayah', 'surah'];
 
 /* ------------------------------------------------------------------ */
 /* Mushaf page — same rendering as the Quran Book reader               */
@@ -283,7 +321,9 @@ export default function NowPlayingScreen({ lang, goTo }: ScreenProps) {
       ? null
       : liveTimer.kind === 'para-end'
         ? 'para-end'
-        : liveTimer.minutes;
+        : liveTimer.kind === 'surah-end'
+          ? 'surah-end'
+          : liveTimer.minutes;
 
   function chooseSleep(value: SleepChoice) {
     const option: QuranSleepTimerOption =
@@ -291,7 +331,9 @@ export default function NowPlayingScreen({ lang, goTo }: ScreenProps) {
         ? null
         : value === 'para-end'
           ? { kind: 'para-end' }
-          : { kind: 'minutes', minutes: value };
+          : value === 'surah-end'
+            ? { kind: 'surah-end' }
+            : { kind: 'minutes', minutes: value };
     try {
       setQuranSleepTimer(option);
     } catch {
@@ -304,7 +346,21 @@ export default function NowPlayingScreen({ lang, goTo }: ScreenProps) {
       ? null
       : activeTimer === 'para-end'
         ? s.sleepStopsPara
-        : s.sleepStopsIn(`${activeTimer} min`);
+        : activeTimer === 'surah-end'
+          ? s.sleepStopsSurah
+          : s.sleepStopsIn(`${activeTimer} min`);
+
+  /** Repeat: off → ayah → surah → off (same manager as the Tilawah player). */
+  const repeatLabel =
+    audio.repeatMode === 'ayah'
+      ? shared.tilawahRepeatAyah
+      : audio.repeatMode === 'surah'
+        ? shared.tilawahRepeatSurah
+        : shared.tilawahRepeatOff;
+  function cycleRepeat(): void {
+    const idx = REPEAT_CYCLE.indexOf(audio.repeatMode);
+    setQuranRepeatMode(REPEAT_CYCLE[(idx + 1) % REPEAT_CYCLE.length] ?? 'off');
+  }
 
   if (!audio.hasAudio) {
     return (
@@ -438,6 +494,34 @@ export default function NowPlayingScreen({ lang, goTo }: ScreenProps) {
               onPress={() => chooseSleep(opt.value)}
             />
           ))}
+        </View>
+      </View>
+
+      {/* Speed + repeat — same manager as the Quran Book's Tilawah
+          player, so both screens always agree. */}
+      <View style={styles.sleepCard}>
+        <View style={styles.sleepHead}>
+          <Text style={styles.sleepTitle}>{shared.tilawahSpeed}</Text>
+        </View>
+        <View style={styles.chipRow}>
+          {QURAN_PLAYBACK_RATES.map((r) => (
+            <Chip
+              key={r}
+              label={`${r}x`}
+              selected={audio.playbackRate === r}
+              onPress={() => setQuranPlaybackRate(r)}
+            />
+          ))}
+        </View>
+        <View style={styles.sleepHead}>
+          <Text style={styles.sleepTitle}>{shared.tilawahRepeat}</Text>
+        </View>
+        <View style={styles.chipRow}>
+          <Chip
+            label={repeatLabel}
+            selected={audio.repeatMode !== 'off'}
+            onPress={cycleRepeat}
+          />
         </View>
       </View>
 
