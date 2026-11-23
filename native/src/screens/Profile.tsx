@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { apiFetch, changePassword } from '../lib/api';
-import { isDeviceAdminActive, isDeviceAdminAvailable, openDeviceAdminSecuritySettings, requestDeviceAdminActivation } from '../lib/deviceAdmin';
+import { isDeviceAdminAvailable, checkAdminSetup, openAppInfoSettings, openDeviceAdminSecuritySettings, requestDeviceAdminActivation } from '../lib/deviceAdmin';
 import type { ScreenProps } from '../lib/nav';
 import { stringsFor, type AppLanguage } from '../lib/strings';
 import { loadMinimal, saveMinimal } from '../lib/minimal';
@@ -106,6 +106,17 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
   // Security-settings fallback, instead of silently doing nothing.
   const [adminError, setAdminError] = useState<string | null>(null);
   const [adminBusy, setAdminBusy] = useState(false);
+  /** True when the module is present but the receiver is NOT in
+      this build — a reinstall-the-APK problem, not a user step. */
+  const [adminReceiverMissing, setAdminReceiverMissing] = useState(false);
+  /** True when the user came back from the system activation
+      screen and the admin is STILL off — that is the Android 13+
+      "restricted settings" block (sideloaded APK), and the screen
+      must say so with the manual steps, not stay silent. */
+  const [adminReturnHint, setAdminReturnHint] = useState(false);
+  /** Set when the toggle was tapped and the system screen opened;
+      cleared when the admin is found active. */
+  const triedActivationRef = useRef(false);
   /** True after the first load finished — later reloads (e.g. coming
       back from the system activation screen) must NOT flash the whole
       screen to a spinner: that flash is exactly what the user saw as
@@ -149,16 +160,38 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
     // on a real APK. The toggle must NEVER depend on the server:
     // the local, on-device checks run first, in their own block,
     // so a failing network call cannot disable them.
+    //
+    // 2026-11-24 (Batch 4): the toggle STILL would not turn on
+    // after that fix. The receiver and the module were verified
+    // present in the Run #53 APK (manifest + dex + policy XML all
+    // there), so the failure is not the build — it is Android 13+
+    // "restricted settings": a sideloaded APK (installed outside
+    // the Play Store) cannot activate Device Admin until the user
+    // allows restricted settings (Settings → Apps → AHDORA → ⋮ →
+    // Allow restricted settings). The switch therefore shows the
+    // exact manual steps when the admin is off, and the return
+    // from the system screen is checked properly (below).
     try {
-      const [adminActive, minimalStored, permDetail] = await Promise.all([
-        isDeviceAdminActive(),
+      const [setup, minimalStored, permDetail] = await Promise.all([
+        checkAdminSetup(),
         loadMinimal(uid),
         getNotificationPermissionDetail(),
       ]);
-      setAdminAvailable(isDeviceAdminAvailable());
-      setUninstall(adminActive);
+      const available = isDeviceAdminAvailable();
+      setAdminAvailable(available);
+      setUninstall(setup.active);
+      setAdminReceiverMissing(available && !setup.receiverPresent);
       setMinimal(minimalStored);
       setNotifPermOff(permDetail.status !== 'granted');
+      if (setup.active) {
+        // Activation worked — clear the failed-attempt hint.
+        triedActivationRef.current = false;
+        setAdminReturnHint(false);
+      } else if (triedActivationRef.current) {
+        // Came back from the system screen and it is still off:
+        // show the restricted-settings steps, not silence.
+        setAdminReturnHint(true);
+      }
     } catch {
       // Even if a local check throws, report the module's real
       // availability so the switch is not left disabled by default.
@@ -234,6 +267,7 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
     if (adminBusy) return;
     setAdminBusy(true);
     setAdminError(null);
+    setAdminReturnHint(false);
     try {
       const res = await requestDeviceAdminActivation();
       if (!res.opened) {
@@ -243,14 +277,26 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
         return;
       }
       // The system screen opened; the AppState listener re-reads
-      // the real state when the user comes back. Re-check once
-      // more after a short delay in case the return was fast.
+      // the real state when the user comes back. Re-check twice:
+      // the old single 1.2s check fired while the user was still
+      // reading the system screen (before they could tap
+      // Activate), so a successful activation looked like a
+      // failure. The 6s check catches a slow tap; the AppState
+      // listener catches the return itself.
+      triedActivationRef.current = true;
       setTimeout(() => {
         void load();
-      }, 1200);
+      }, 1500);
+      setTimeout(() => {
+        void load();
+      }, 6000);
     } finally {
       setAdminBusy(false);
     }
+  }
+
+  async function openAppInfo() {
+    await openAppInfoSettings();
   }
 
   async function openAdminSecuritySettings() {
@@ -417,6 +463,40 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
                     small
                     onPress={() => void toggleUninstall()}
                     disabled={adminBusy}
+                  />
+                  <PillButton
+                    label={s.pfUninstallOpenSecurity}
+                    small
+                    variant="ghost"
+                    onPress={() => void openAdminSecuritySettings()}
+                  />
+                </View>
+              </View>
+            ) : null}
+            {adminReceiverMissing ? (
+              <Text style={[T.error, { marginTop: 8 }]}>{s.pfUninstallNoReceiver}</Text>
+            ) : null}
+            {adminReturnHint && !uninstall ? (
+              <Text style={[T.error, { marginTop: 8 }]}>{s.pfUninstallStillOff}</Text>
+            ) : null}
+            {/* The switch alone cannot turn protection on for an
+                app installed outside the Play Store: Android 13+
+                blocks Device Admin until restricted settings are
+                allowed. Show the exact steps + the two manual
+                doors (App settings holds the ⋮ → Allow restricted
+                settings menu; Security settings holds the Device
+                admin apps list) whenever the admin is off, so the
+                user is never left with a dead toggle. */}
+            {adminAvailable && !uninstall && !adminReceiverMissing ? (
+              <View>
+                <Text style={[styles.honestNote, th.dark && styles.mutedDark]}>
+                  {s.pfUninstallRestricted}
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                  <PillButton
+                    label={s.pfUninstallOpenAppSettings}
+                    small
+                    onPress={() => void openAppInfo()}
                   />
                   <PillButton
                     label={s.pfUninstallOpenSecurity}

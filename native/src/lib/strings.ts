@@ -915,6 +915,11 @@ const en = {
     'The device-admin part is missing from this build — install the latest APK again. If it still fails, tell us.',
   pfUninstallRetry: 'Try again',
   pfUninstallOpenSecurity: 'Open Security settings',
+  pfUninstallRestricted:
+    'If the switch will not turn on: Android blocks Device Admin for apps installed outside the Play Store. Open Settings → Apps → AHDORA → ⋮ → Allow restricted settings, then try the switch again.',
+  pfUninstallOpenAppSettings: 'Open app settings',
+  pfUninstallStillOff:
+    'Still off after the system screen — allow restricted settings first (steps above), then try the switch again.',
   // ---- lock screen + sleep warning notification (preview STR) ----
   lockTitle: 'It\'s prayer time',
   lockBody: 'All apps are blocked. Pray, then tap the button below — everything unlocks.',
@@ -1826,6 +1831,11 @@ const hi: typeof en = {
     'Is build me device-admin wala hissa missing hai — latest APK dobara install karo. Phir bhi na ho to batao.',
   pfUninstallRetry: 'Dobara try karo',
   pfUninstallOpenSecurity: 'Security settings kholo',
+  pfUninstallRestricted:
+    'Agar switch on nahi hota: Play Store ke bahar se install ki gayi app ke liye Android Device Admin ko rokta hai. Settings → Apps → AHDORA → ⋮ → Allow restricted settings karo, phir switch dobara dabao.',
+  pfUninstallOpenAppSettings: 'App settings kholo',
+  pfUninstallStillOff:
+    'System screen ke baad bhi off hai — pehle restricted settings allow karo (upar steps), phir switch dobara dabao.',
   // ---- lock screen + sleep warning notification (preview STR) ----
   lockTitle: 'Namaz ka waqt hai',
   lockBody: 'Saari apps band hain. Namaz padh kar aao, phir neeche button dabao — sab unlock ho jayega.',

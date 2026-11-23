@@ -10,12 +10,27 @@
 //   * isAdminActive() — asks DevicePolicyManager whether
 //     AhdoraDeviceAdminReceiver is currently an active device admin.
 //     The Profile toggle shows THIS real state, never a saved flag.
+//   * checkAdminSetup() — { receiverPresent, active } in one call,
+//     so the Profile screen can tell a missing receiver (a build
+//     problem) from a not-yet-activated admin (a user step).
 //   * openDeviceAdminSettings() — opens Android's own activation
 //     screen (ACTION_ADD_DEVICE_ADMIN) for the receiver. Activation
 //     can never be silent: the system screen appears and the user
 //     must tap Activate. When the admin is already active the same
 //     screen shows Deactivate, which is how protection is switched
 //     off — deliberately through the system, not one tap in the app.
+//   * openAppInfoSettings() — opens Settings → Apps → AHDORA, whose
+//     ⋮ menu holds "Allow restricted settings". Android 13+ blocks
+//     Device Admin for apps installed outside the Play Store until
+//     that is allowed — that is why a tap on the switch alone could
+//     never turn protection on for a sideloaded APK.
+//
+// The receiver class is addressed by fully-qualified name string,
+// not imported: the module must still compile if the receiver file
+// is ever missing (admin then simply never activates). No policies
+// are requested — the admin only makes uninstall need the extra step
+// of switching it off first. It cannot stop a deliberate uninstall;
+// no app on stock Android can.
 //
 // The receiver class is addressed by fully-qualified name string,
 // not imported: the module must still compile if the receiver file
@@ -29,12 +44,12 @@
 // a try/catch and falls back to null.
 package app
 
-import android.app.Activity
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import expo.modules.kotlin.modules.Module
@@ -44,6 +59,49 @@ import expo.modules.kotlin.modules.ModuleDefinition
 private const val RECEIVER_CLASS_SUFFIX = ".admin.AhdoraDeviceAdminReceiver"
 
 class AhdoraAdmin : Module() {
+  /** Is the receiver actually declared in this build? (A missing
+   * receiver is a build problem, not a user problem — the JS side
+   * shows a different message for it.) */
+  private fun receiverExists(context: Context, admin: ComponentName): Boolean {
+    return try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        context.packageManager.getReceiverInfo(
+          admin,
+          PackageManager.ComponentInfoFlags.of(0),
+        )
+      } else {
+        @Suppress("DEPRECATION")
+        context.packageManager.getReceiverInfo(admin, 0)
+      }
+      true
+    } catch (_: PackageManager.NameNotFoundException) {
+      false
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  /** Start a system intent from the current Activity when there is
+   * one (the reliable path), else from the React context with
+   * NEW_TASK. The old code cast the React context to Activity —
+   * that cast is always null, so every intent went through the
+   * fallback path. */
+  private fun launchIntent(intent: Intent): Boolean {
+    val context = appContext.reactContext ?: return false
+    return try {
+      val activity = appContext.currentActivity
+      if (activity != null) {
+        activity.startActivity(intent)
+      } else {
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+      }
+      true
+    } catch (_: Exception) {
+      false
+    }
+  }
+
   override fun definition() = ModuleDefinition {
     Name("AhdoraAdmin")
 
@@ -53,6 +111,33 @@ class AhdoraAdmin : Module() {
         ?: return@AsyncFunction false
       val admin = ComponentName(context, context.packageName + RECEIVER_CLASS_SUFFIX)
       dpm.isAdminActive(admin)
+    }
+
+    /**
+     * Full setup state in one call, so the Profile screen can tell
+     * the user EXACTLY what is wrong: the receiver is missing from
+     * the build (reinstall the latest APK) vs the admin simply not
+     * activated yet (tap the switch / allow restricted settings).
+     * Returns { receiverPresent, active } — both false when the
+     * module itself is unavailable.
+     */
+    AsyncFunction("checkAdminSetup") {
+      val context = appContext.reactContext
+        ?: return@AsyncFunction mapOf<String, Any>(
+          "receiverPresent" to false,
+          "active" to false,
+        )
+      val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+      val admin = ComponentName(context, context.packageName + RECEIVER_CLASS_SUFFIX)
+      val active = try {
+        dpm?.isAdminActive(admin) == true
+      } catch (_: Exception) {
+        false
+      }
+      mapOf<String, Any>(
+        "receiverPresent" to receiverExists(context, admin),
+        "active" to active,
+      )
     }
 
     /**
@@ -88,23 +173,7 @@ class AhdoraAdmin : Module() {
         // plugin never declared it, ACTION_ADD_DEVICE_ADMIN has
         // nothing to activate and startActivity throws — check
         // first so the failure is reported, not swallowed.
-        val receiverExists = try {
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.packageManager.getReceiverInfo(
-              admin,
-              PackageManager.ComponentInfoFlags.of(0),
-            )
-          } else {
-            @Suppress("DEPRECATION")
-            context.packageManager.getReceiverInfo(admin, 0)
-          }
-          true
-        } catch (_: PackageManager.NameNotFoundException) {
-          false
-        } catch (_: Exception) {
-          false
-        }
-        if (!receiverExists) {
+        if (!receiverExists(context, admin)) {
           return@AsyncFunction mapOf<String, Any>(
             "opened" to false,
             "error" to "receiver-missing",
@@ -117,14 +186,29 @@ class AhdoraAdmin : Module() {
           DevicePolicyManager.EXTRA_ADD_EXPLANATION,
           "While this is on, AHDORA cannot be uninstalled. To uninstall, switch it off first."
         )
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
       }
-      return@AsyncFunction try {
-        (context as? Activity)?.startActivity(intent) ?: context.startActivity(intent)
+      return@AsyncFunction if (launchIntent(intent)) {
         mapOf<String, Any>("opened" to true)
-      } catch (_: Exception) {
+      } else {
         mapOf<String, Any>("opened" to false, "error" to "start-failed")
       }
+    }
+
+    /**
+     * Opens this app's own info page (Settings → Apps → AHDORA) —
+     * the page whose ⋮ menu holds "Allow restricted settings".
+     * Android 13+ blocks Device Admin for apps installed outside
+     * the Play Store until that is allowed, so a tap on the
+     * Profile switch alone can never turn protection on: the user
+     * must allow restricted settings first, then tap the switch
+     * again. Returns true only when the page was actually launched.
+     */
+    AsyncFunction("openAppInfoSettings") {
+      val context = appContext.reactContext ?: return@AsyncFunction false
+      val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+        data = Uri.parse("package:" + context.packageName)
+      }
+      launchIntent(intent)
     }
 
     /**
@@ -135,15 +219,8 @@ class AhdoraAdmin : Module() {
      */
     AsyncFunction("openSecuritySettings") {
       val context = appContext.reactContext ?: return@AsyncFunction false
-      val intent = Intent(Settings.ACTION_SECURITY_SETTINGS).apply {
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-      }
-      try {
-        (context as? Activity)?.startActivity(intent) ?: context.startActivity(intent)
-        true
-      } catch (_: Exception) {
-        false
-      }
+      val intent = Intent(Settings.ACTION_SECURITY_SETTINGS)
+      launchIntent(intent)
     }
   }
 }

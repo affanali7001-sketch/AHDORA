@@ -28,6 +28,8 @@ import { requireNativeModule } from 'expo';
 
 type AhdoraAdminNativeModule = {
   isAdminActive: () => Promise<boolean>;
+  /** { receiverPresent, active } in one call (see checkAdminSetup). */
+  checkAdminSetup: () => Promise<{ receiverPresent?: unknown; active?: unknown }>;
   /**
    * Opens Android's own device-admin activation screen and reports
    * what actually happened: { opened: true } when the system screen
@@ -37,6 +39,8 @@ type AhdoraAdminNativeModule = {
    * looked exactly like a successful one until the toggle never moved.
    */
   openDeviceAdminSettings: () => Promise<{ opened?: unknown; error?: unknown }>;
+  /** Opens this app's own info page (Settings → Apps → AHDORA). */
+  openAppInfoSettings: () => Promise<boolean>;
   /** Opens the system Security settings page (fallback path). */
   openSecuritySettings: () => Promise<boolean>;
 };
@@ -78,6 +82,36 @@ export type AdminActivationResult = {
   error?: 'receiver-missing' | 'start-failed' | 'unavailable' | 'unknown';
 };
 
+export type AdminSetupStatus = {
+  /** False when the native module is missing (Expo Go / iOS) or
+   * when the receiver is not in this build. */
+  receiverPresent: boolean;
+  /** True only while the receiver is an active device admin. */
+  active: boolean;
+};
+
+/**
+ * Full setup state in one call: is the receiver in this build, and
+ * is it active? Lets the Profile screen tell a missing receiver (a
+ * build problem — reinstall the latest APK) from a not-yet-activated
+ * admin (a user step — tap the switch, or allow restricted settings
+ * first). Returns { receiverPresent: false, active: false } when
+ * the native module is missing.
+ */
+export async function checkAdminSetup(): Promise<AdminSetupStatus> {
+  const m = getNativeModule();
+  if (!m) return { receiverPresent: false, active: false };
+  try {
+    const res = await m.checkAdminSetup();
+    return {
+      receiverPresent: res?.receiverPresent === true,
+      active: res?.active === true,
+    };
+  } catch {
+    return { receiverPresent: false, active: false };
+  }
+}
+
 /**
  * Opens Android's own device-admin screen for AHDORA. If the admin
  * is not active it shows Activate; if it is active it shows
@@ -105,6 +139,24 @@ export async function requestDeviceAdminActivation(): Promise<AdminActivationRes
     };
   } catch {
     return { opened: false, error: 'unknown' };
+  }
+}
+
+/**
+ * Opens this app's own info page (Settings → Apps → AHDORA) —
+ * the page whose ⋮ menu holds "Allow restricted settings".
+ * Android 13+ blocks Device Admin for apps installed outside the
+ * Play Store until that is allowed, so this is the step a tap on
+ * the Profile switch alone can never do. Returns false when the
+ * native module is unavailable or the page could not be opened.
+ */
+export async function openAppInfoSettings(): Promise<boolean> {
+  const m = getNativeModule();
+  if (!m) return false;
+  try {
+    return (await m.openAppInfoSettings()) === true;
+  } catch {
+    return false;
   }
 }
 
