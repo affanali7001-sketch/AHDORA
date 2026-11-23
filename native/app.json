@@ -27,6 +27,7 @@
       "expo-asset",
       "./plugins/withBundleInDebug",
       "./plugins/withAhdoraBlock",
+      "./plugins/withAhdoraAdmin",
       "expo-font",
       "expo-splash-screen",
       "expo-video",

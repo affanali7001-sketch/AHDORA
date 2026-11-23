@@ -4,9 +4,10 @@
  * Akkalkuwa" (REAL, from the user's profile — parts that are missing
  * are simply left out, never invented). No email, no verified line,
  * no dark card. Peach "Edit profile" → Onboarding, ghost "Namaz ke
- * time badlo" → Prayer. Settings card: Uninstall protection (a REAL
- * setting saved on the phone, with an honest note that actually
- * stopping an uninstall needs the native module), Language (→
+ * time badlo" → Prayer. Settings card: Uninstall protection (REAL
+ * Device Admin — the switch shows the live admin state from
+ * DevicePolicyManager and tapping it opens Android's own activation
+ * screen; it never was, and never pretends to be, a saved flag), Language (→
  * language screen), Notifications (→ Notifications), Password badlo
  * (REAL — POST /api/auth/forgot-password sends the reset link to the
  * user's own email and shows the real response). Points & badges card
@@ -16,9 +17,9 @@
  * /api/auth/account with password confirmation, then logout).
  */
 import { useCallback, useEffect, useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { apiFetch, changePassword } from '../lib/api';
+import { isDeviceAdminActive, isDeviceAdminAvailable, requestDeviceAdminActivation } from '../lib/deviceAdmin';
 import type { ScreenProps } from '../lib/nav';
 import { stringsFor, type AppLanguage } from '../lib/strings';
 import { loadMinimal, saveMinimal } from '../lib/minimal';
@@ -42,8 +43,6 @@ import {
   type ProfileData,
   type RewardsSummary,
 } from '../lib/apiSocial';
-
-const UNINSTALL_KEY = '@ahdora/profile/uninstallProtection';
 
 /** Local strings for the Minimal toggle (Tasbeeh pattern — strings.ts untouched). */
 const STRINGS: Record<AppLanguage, { minimalT: string; minimalS: string }> = {
@@ -95,6 +94,9 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [rewards, setRewards] = useState<RewardsSummary | null>(null);
   const [uninstall, setUninstall] = useState(false);
+  // False in Expo Go / on iOS, where the native admin module does
+  // not exist — the switch is then disabled and the note says so.
+  const [adminAvailable, setAdminAvailable] = useState(false);
   const [minimal, setMinimal] = useState(false);
   // Live notification-permission state for the Notifications row:
   // when permission is missing the row says so honestly, so the
@@ -119,16 +121,22 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
     setLoading(true);
     setError('');
     try {
-      const [prof, rw, stored, minimalStored, permDetail] = await Promise.all([
+      const [prof, rw, adminActive, minimalStored, permDetail] = await Promise.all([
         getProfile(),
         rewardsSummary(),
-        AsyncStorage.getItem(UNINSTALL_KEY),
+        isDeviceAdminActive(),
         loadMinimal(uid),
         getNotificationPermissionDetail(),
       ]);
       setProfile(prof.profile);
       setRewards(rw);
-      if (stored !== null) setUninstall(stored === 'true');
+      // The switch shows the REAL Device Admin state, never a saved
+      // flag: true only while AHDORA is an active device admin.
+      // (The old AsyncStorage flag '@ahdora/profile/uninstallProtection'
+      // did nothing at all — it is no longer read or written. A stale
+      // value left on the phone from an older build is inert.)
+      setAdminAvailable(isDeviceAdminAvailable());
+      setUninstall(adminActive);
       setMinimal(minimalStored);
       setNotifPermOff(permDetail.status !== 'granted');
     } catch (e) {
@@ -142,13 +150,29 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
     void load();
   }, [load]);
 
-  async function toggleUninstall(value: boolean) {
-    setUninstall(value);
-    try {
-      await AsyncStorage.setItem(UNINSTALL_KEY, value ? 'true' : 'false');
-    } catch {
-      // Kept in memory for this session; the note below stays honest.
-    }
+  // The toggle opens Android Settings, where the user activates (or
+  // deactivates) the admin and comes back. Re-check the real admin
+  // state every time the app comes back to the foreground — the
+  // AppBlock screen uses this same pattern for its permissions.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void load();
+    });
+    return () => sub.remove();
+  }, [load]);
+
+  /**
+   * The switch shows the REAL native state and never flips itself:
+   * tapping it opens Android's own device-admin screen, where the
+   * user taps Activate (or Deactivate when it is already on).
+   * Android never lets an app activate an admin silently. The switch
+   * updates when the app comes back (see the AppState listener).
+   * Turning OFF also goes through that system screen on purpose —
+   * a one-tap off inside the app would make the protection
+   * meaningless. In Expo Go the module is missing and this is a no-op.
+   */
+  function toggleUninstall() {
+    requestDeviceAdminActivation();
   }
 
   async function toggleMinimal(value: boolean) {
@@ -279,8 +303,24 @@ export default function ProfileScreen({ lang, goTo, user, onLogout }: ScreenProp
                 <Text style={[styles.rowLabel, th.dark && styles.textDark]}>{s.pfUninstallT}</Text>
                 <Text style={[styles.rowSub, th.dark && styles.mutedDark]}>{s.pfUninstallS}</Text>
               </View>
-              <Switch value={uninstall} onValueChange={(v) => void toggleUninstall(v)} />
+              <Switch
+                value={uninstall}
+                disabled={!adminAvailable}
+                onValueChange={() => toggleUninstall()}
+              />
             </View>
+            <Text
+              style={[
+                uninstall && adminAvailable ? styles.okNote : styles.honestNote,
+                th.dark && styles.mutedDark,
+              ]}
+            >
+              {adminAvailable
+                ? uninstall
+                  ? s.pfUninstallOn
+                  : s.pfUninstallOff
+                : s.pfUninstallNeedApk}
+            </Text>
             <Text style={[styles.honestNote, th.dark && styles.mutedDark]}>{s.pfUninstallNote}</Text>
             <View style={[styles.row, th.dark && styles.rowDark]}>
               <View style={styles.rowText}>

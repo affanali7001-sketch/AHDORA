@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Device-admin policies for AHDORA uninstall protection.
+     Intentionally EMPTY: this admin requests no policies at all
+     (no password rules, no lock, no wipe). It exists only so that
+     Android refuses to uninstall the app while the admin is active —
+     uninstalling first needs the admin switched off in Settings. -->
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-policies />
+</device-admin>
