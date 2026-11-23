@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -185,6 +186,19 @@ export default function AppBlockScreen({ lang, goTo }: ScreenProps) {
     void load();
   }, [load]);
 
+  // The permission buttons open Android Settings, where the user
+  // grants the permission and comes back. Before this, the screen
+  // kept showing the OLD status (e.g. "not granted") until the
+  // user tapped Refresh by hand — it looked as if granting had
+  // done nothing. Re-check permissions and re-sync the config
+  // every time the app comes back to the foreground.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void load();
+    });
+    return () => sub.remove();
+  }, [load]);
+
   const lockedPrayer = useMemo(() => currentPrayerLock(config, now), [config, now]);
   const sleepIn = useMemo(() => minutesUntilSleep(config, now), [config, now]);
   const sleepWarning = sleepIn !== null && sleepIn > 0 && sleepIn <= 5;
@@ -223,6 +237,10 @@ export default function AppBlockScreen({ lang, goTo }: ScreenProps) {
     if (ok) {
       setConfig(toSave);
       setSavedMsg(s.abSaved);
+      // Keep the permission rows truthful after a save (the user
+      // may have granted something in Settings just before this).
+      const st = await getAppBlockStatus();
+      if (st) setStatus(st);
     } else {
       setErrorMsg(s.abSaveFailed);
     }

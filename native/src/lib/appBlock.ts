@@ -251,10 +251,14 @@ export async function syncScheduleFromServer(
 
   try {
     const { profile } = await getProfile();
-    const start = normalizeHHmm(profile?.sleepStartTime);
-    const end = normalizeHHmm(profile?.sleepEndTime);
-    if (start) config.sleep_start = start;
-    if (end) config.sleep_end = end;
+    // The profile is the source of truth for the sleep window: write
+    // what it says, including clearing a window the user removed.
+    // Before this, a missing sleep time left the OLD window in the
+    // native config, so apps kept blocking at a sleep time the user
+    // had already changed. (A failed fetch keeps the old window —
+    // the catch below — rather than wiping it on a network error.)
+    config.sleep_start = normalizeHHmm(profile?.sleepStartTime ?? profile?.sleepTime);
+    config.sleep_end = normalizeHHmm(profile?.sleepEndTime);
   } catch {
     // Keep the previously saved sleep window.
   }

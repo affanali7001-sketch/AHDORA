@@ -6,6 +6,8 @@ import android.content.SharedPreferences
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -14,11 +16,9 @@ import android.view.accessibility.AccessibilityEvent
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
-import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Calendar
-import java.util.Date
 import java.util.Locale
 
 /**
@@ -27,8 +27,9 @@ import java.util.Locale
  * Enforces blocking by watching the foreground app. When blocking is active
  * and the foreground app is blocked, a full-screen overlay is shown.
  *
- * Two modes (both driven by SharedPreferences written by the JS side via
- * the AhdoraBlock inline module — same PREFS_NAME and keys):
+ * Two modes (both driven by the single "config" JSON blob in
+ * SharedPreferences, written by the JS side via the AhdoraBlock
+ * inline module — same PREFS_NAME, field names are the KEY_* values):
  *  - PRAYER: at namaz time, ALL apps are blocked (except the allowlist)
  *    until the user taps "Haan, maine namaz padh li", which records that
  *    prayer as prayed for today and removes the overlay.
@@ -82,16 +83,40 @@ class AhdoraBlockService : AccessibilityService() {
   private var overlayView: View? = null
   private var overlayMode: String? = null // "prayer" or "sleep"
   private var overlayPrayerName: String? = null
+  /** Last foreground package seen, for the periodic re-check below. */
+  private var lastPkg: String? = null
+  private val handler = Handler(Looper.getMainLooper())
+  /**
+   * Accessibility events only fire when the foreground window CHANGES.
+   * Without this, blocking would never start if the user is already
+   * inside a blocked app when the sleep window (or a prayer lock)
+   * begins, and a sleep overlay would never lift when the window
+   * ends while the app is still in front. Re-evaluate the last
+   * foreground package every minute so time-based windows are
+   * enforced and released even with no window change.
+   */
+  private val recheckRunnable = object : Runnable {
+    override fun run() {
+      try {
+        lastPkg?.let { evaluate(it) }
+      } catch (_: Exception) {
+        // Never crash the service on a re-check failure.
+      }
+      handler.postDelayed(this, 60_000L)
+    }
+  }
 
   override fun onServiceConnected() {
     super.onServiceConnected()
     windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+    handler.postDelayed(recheckRunnable, 60_000L)
   }
 
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
     if (event == null) return
     if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
     val pkg = event.packageName?.toString() ?: return
+    lastPkg = pkg
     try {
       evaluate(pkg)
     } catch (_: Exception) {
@@ -104,6 +129,7 @@ class AhdoraBlockService : AccessibilityService() {
   }
 
   override fun onDestroy() {
+    handler.removeCallbacks(recheckRunnable)
     removeOverlay()
     super.onDestroy()
   }
@@ -111,10 +137,63 @@ class AhdoraBlockService : AccessibilityService() {
   private fun prefs(): SharedPreferences =
     getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+  /**
+   * ROOT CAUSE (fixed 2026-11-23): the JS bridge (AhdoraBlock inline
+   * module) writes the WHOLE config as ONE JSON string under the
+   * single key "config" (see setConfig/getConfig). This service used
+   * to read each field as its own SharedPreferences key
+   * (getBoolean("blocking_enabled"), getString("prayer_times"), …) —
+   * keys the bridge never writes — so every read fell back to its
+   * default: blocking_enabled=false, empty blocked list, no sleep
+   * window. The service therefore NEVER blocked anything, no matter
+   * which permissions the user granted. All config reads below go
+   * through this one blob now; the keys above are only the field
+   * names inside that JSON object.
+   */
+  private fun readConfig(): JSONObject? {
+    val raw = prefs().getString("config", null) ?: return null
+    if (raw.isEmpty()) return null
+    return try {
+      JSONObject(raw)
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  private fun configBool(cfg: JSONObject, key: String, default: Boolean): Boolean =
+    if (cfg.has(key)) cfg.optBoolean(key, default) else default
+
+  private fun configString(cfg: JSONObject, key: String): String? {
+    val v = cfg.optString(key, "")
+    return if (v.isEmpty()) null else v
+  }
+
+  private fun configInt(cfg: JSONObject, key: String, default: Int): Int =
+    cfg.optInt(key, default)
+
+  private fun configStringList(cfg: JSONObject, key: String): List<String> {
+    val arr = cfg.optJSONArray(key) ?: return emptyList()
+    return List(arr.length()) { arr.optString(it) }.filter { it.isNotEmpty() }
+  }
+
+  private fun configPrayed(cfg: JSONObject): Map<String, String> {
+    val obj = cfg.optJSONObject(KEY_PRAYED) ?: return emptyMap()
+    val out = mutableMapOf<String, String>()
+    val keys = obj.keys()
+    while (keys.hasNext()) {
+      val k = keys.next()
+      out[k] = obj.optString(k)
+    }
+    return out
+  }
+
   /** Decide whether [pkg] should be blocked right now; show/remove overlay. */
   private fun evaluate(pkg: String) {
-    val p = prefs()
-    if (!p.getBoolean(KEY_BLOCKING_ENABLED, false)) {
+    val cfg = readConfig() ?: run {
+      removeOverlay()
+      return
+    }
+    if (!configBool(cfg, KEY_BLOCKING_ENABLED, false)) {
       removeOverlay()
       return
     }
@@ -124,15 +203,15 @@ class AhdoraBlockService : AccessibilityService() {
     }
     val now = Calendar.getInstance()
     // Prayer lock: blocks ALL apps.
-    val prayer = currentPrayerLock(p, now)
+    val prayer = currentPrayerLock(cfg, now)
     if (prayer != null) {
       showOverlay("prayer", prayer)
       return
     }
     // Sleep block: blocks only the user-picked packages.
-    if (isSleepWindow(p, now) && p.getBoolean(KEY_SLEEP_BLOCK_ENABLED, false)) {
-      val blocked = readStringSet(p, KEY_BLOCKED_PACKAGES)
-      val youtubeAllowed = p.getBoolean(KEY_YOUTUBE_ALLOWED, false)
+    if (isSleepWindow(cfg, now) && configBool(cfg, KEY_SLEEP_BLOCK_ENABLED, false)) {
+      val blocked = configStringList(cfg, KEY_BLOCKED_PACKAGES).toSet()
+      val youtubeAllowed = configBool(cfg, KEY_YOUTUBE_ALLOWED, false)
       if (blocked.contains(pkg) && !(youtubeAllowed && pkg == PKG_YOUTUBE)) {
         showOverlay("sleep", null)
         return
@@ -146,13 +225,13 @@ class AhdoraBlockService : AccessibilityService() {
    * A prayer locks from its time until time + grace minutes, unless the
    * user already confirmed that prayer today.
    */
-  private fun currentPrayerLock(p: SharedPreferences, now: Calendar): String? {
-    if (!p.getBoolean(KEY_PRAYER_BLOCK_ENABLED, false)) return null
-    val times = readStringList(p, KEY_PRAYER_TIMES)
-    val names = readStringList(p, KEY_PRAYER_NAMES)
+  private fun currentPrayerLock(cfg: JSONObject, now: Calendar): String? {
+    if (!configBool(cfg, KEY_PRAYER_BLOCK_ENABLED, false)) return null
+    val times = configStringList(cfg, KEY_PRAYER_TIMES)
+    val names = configStringList(cfg, KEY_PRAYER_NAMES)
     if (times.isEmpty()) return null
-    val grace = p.getInt(KEY_PRAYER_GRACE_MIN, DEFAULT_GRACE_MIN)
-    val prayed = readPrayed(p)
+    val grace = configInt(cfg, KEY_PRAYER_GRACE_MIN, DEFAULT_GRACE_MIN)
+    val prayed = configPrayed(cfg)
     val today = dateKey(now)
     for (i in times.indices) {
       val name = names.getOrNull(i) ?: "Namaz"
@@ -165,9 +244,9 @@ class AhdoraBlockService : AccessibilityService() {
   }
 
   /** True when [now] falls inside the sleep window (handles overnight). */
-  private fun isSleepWindow(p: SharedPreferences, now: Calendar): Boolean {
-    val startStr = p.getString(KEY_SLEEP_START, null) ?: return false
-    val endStr = p.getString(KEY_SLEEP_END, null) ?: return false
+  private fun isSleepWindow(cfg: JSONObject, now: Calendar): Boolean {
+    val startStr = configString(cfg, KEY_SLEEP_START) ?: return false
+    val endStr = configString(cfg, KEY_SLEEP_END) ?: return false
     val start = parseHHmm(startStr) ?: return false
     val end = parseHHmm(endStr) ?: return false
     val nowMin = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
@@ -202,41 +281,19 @@ class AhdoraBlockService : AccessibilityService() {
   private fun dateKey(cal: Calendar): String =
     SimpleDateFormat("yyyy-MM-dd", Locale.US).format(cal.time)
 
-  private fun readStringList(p: SharedPreferences, key: String): List<String> {
-    val raw = p.getString(key, null) ?: return emptyList()
-    return try {
-      val arr = JSONArray(raw)
-      List(arr.length()) { arr.optString(it) }.filter { it.isNotEmpty() }
-    } catch (_: Exception) {
-      emptyList()
-    }
-  }
-
-  private fun readStringSet(p: SharedPreferences, key: String): Set<String> =
-    readStringList(p, key).toSet()
-
-  private fun readPrayed(p: SharedPreferences): Map<String, String> {
-    val raw = p.getString(KEY_PRAYED, null) ?: return emptyMap()
-    return try {
-      val obj = JSONObject(raw)
-      val out = mutableMapOf<String, String>()
-      val keys = obj.keys()
-      while (keys.hasNext()) {
-        val k = keys.next()
-        out[k] = obj.optString(k)
-      }
-      out
-    } catch (_: Exception) {
-      emptyMap()
-    }
-  }
-
   private fun recordPrayed(prayerName: String) {
+    // The "prayed" map lives INSIDE the "config" blob (the bridge's
+    // confirmPrayer edits the same blob). Writing it as a separate
+    // SharedPreferences key — as this used to do — meant the service
+    // and the bridge each kept their own copy and neither saw the
+    // other's unlock.
     val p = prefs()
+    val cfg = readConfig() ?: JSONObject()
     val today = dateKey(Calendar.getInstance())
-    val map = readPrayed(p).toMutableMap()
+    val map = configPrayed(cfg).toMutableMap()
     map[prayerName] = today
-    p.edit().putString(KEY_PRAYED, JSONObject(map as Map<*, *>).toString()).apply()
+    cfg.put(KEY_PRAYED, JSONObject(map as Map<*, *>))
+    p.edit().putString("config", cfg.toString()).apply()
   }
 
   // ---- Overlay ----

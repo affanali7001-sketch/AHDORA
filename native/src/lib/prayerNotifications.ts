@@ -35,6 +35,19 @@
  *   Android 13+: the prompt does not appear until at least one
  *   channel exists.
  *
+ * SLEEP WARNINGS (same system, second channel 'ahdora-sleep'):
+ * before this file had them, NOTHING was ever scheduled at sleep
+ * time — the Sleep screen's warning switch only saved a local flag,
+ * so no warning could ever arrive. refreshSleepWarnings() below
+ * schedules the real thing: a notification at the sleep time itself
+ * and, when the 5-minute warning is on, one 5 minutes before it —
+ * for today and tomorrow, from the real sleep schedule. The same
+ * best-effort limit as prayer alerts applies (Android 12+ may shift
+ * a non-exact alarm by a few minutes; this code does not request
+ * SCHEDULE_EXACT_ALARM). Sleep warnings have their own id list, so
+ * cancelling prayer alerts never cancels sleep warnings or vice
+ * versa.
+ *
  * Every function here never throws: failures resolve to a safe
  * default (false / 'undetermined' / 0 scheduled) so a notification
  * problem can never break a screen.
@@ -49,11 +62,18 @@ import {
   type PrayerName,
   type PrayerTimesResponse,
 } from './apiCore';
+import { getProfile } from './apiSocial';
 import { playAdhanForAlert } from './adhanAudio';
 
 const CHANNEL_ID = 'ahdora-prayer';
 const IDS_KEY = '@ahdora/notif/prayerIds';
 const ENABLED_KEY = '@ahdora/notif/prayerEnabled';
+/** Sleep-setting flags, owned by the Sleep screen (same keys it reads). */
+export const SLEEP_BLOCK_KEY = '@ahdora/sleep/blockApps';
+export const SLEEP_WARN_KEY = '@ahdora/sleep/warn5min';
+/** Sleep warnings live on their own channel + id list (see header). */
+const SLEEP_CHANNEL_ID = 'ahdora-sleep';
+const SLEEP_IDS_KEY = '@ahdora/notif/sleepIds';
 /** Deep teal from the app theme (C.teal700) — on-brand, no new colour. */
 const TEAL = '#0B4A41';
 
@@ -347,6 +367,224 @@ export async function refreshPrayerNotifications(): Promise<RefreshResult> {
     return { scheduled: ids.length, status: 'ok' };
   } catch {
     return { scheduled: 0, status: 'no-times' };
+  }
+}
+
+/** Create the Android sleep channel (no-op on other platforms / on failure). */
+async function ensureSleepChannel(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  try {
+    await Notifications.setNotificationChannelAsync(SLEEP_CHANNEL_ID, {
+      name: 'Sleep reminders',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: TEAL,
+    });
+  } catch {
+    // Scheduling falls back to the system default channel.
+  }
+}
+
+async function readSleepIds(): Promise<string[]> {
+  try {
+    const raw = await AsyncStorage.getItem(SLEEP_IDS_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+async function storeSleepIds(ids: string[]): Promise<void> {
+  try {
+    await AsyncStorage.setItem(SLEEP_IDS_KEY, JSON.stringify(ids));
+  } catch {
+    // Best effort only; the next cancel simply cannot find a stale id.
+  }
+}
+
+export type SleepWarningStatus = 'ok' | 'disabled' | 'no-permission' | 'no-schedule';
+
+export type SleepWarningState = {
+  scheduled: number;
+  status: SleepWarningStatus;
+  /** Soonest warning that will fire (5-min or sleep-time, whichever is first). */
+  nextWarning: Date | null;
+  /** Next 5-minutes-before warning, or null when that warning is off / passed. */
+  nextEarly: Date | null;
+  /** Next sleep-time warning, or null when it is off / passed. */
+  nextAtTime: Date | null;
+};
+
+const EMPTY_SLEEP_STATE: SleepWarningState = {
+  scheduled: 0,
+  status: 'no-schedule',
+  nextWarning: null,
+  nextEarly: null,
+  nextAtTime: null,
+};
+
+/** Cancel every scheduled AHDORA sleep warning. Never throws. */
+export async function cancelSleepWarnings(): Promise<void> {
+  ensureHandler();
+  const ids = await readSleepIds();
+  await Promise.all(
+    ids.map((id) =>
+      Notifications.cancelScheduledNotificationAsync(id).catch(() => undefined),
+    ),
+  );
+  await storeSleepIds([]);
+}
+
+/**
+ * Schedule the REAL sleep warnings from the real sleep schedule:
+ * one notification at the sleep time itself, and — when the
+ * 5-minute warning is on — one 5 minutes before it. Both are
+ * scheduled for today and tomorrow (whichever times are still in
+ * the future), so the warning survives a day without opening the
+ * app, exactly like the prayer alerts. The sleep-time warning is
+ * scheduled when either sleep switch is on (warning or bedtime
+ * block); the 5-minute warning only when the warning switch is on.
+ * When neither switch is on, or there is no sleep time, any
+ * previously scheduled sleep warnings are cancelled and nothing
+ * new is scheduled. Returns what was actually scheduled and the
+ * real next warning time (null when none). Never throws.
+ */
+export async function refreshSleepWarnings(
+  sleepStart: string | null,
+  warn5min: boolean,
+  blockApps: boolean,
+): Promise<SleepWarningState> {
+  ensureHandler();
+  try {
+    if (!sleepStart || (!warn5min && !blockApps)) {
+      await cancelSleepWarnings();
+      return {
+        ...EMPTY_SLEEP_STATE,
+        status: !sleepStart ? 'no-schedule' : 'disabled',
+      };
+    }
+    if ((await getNotificationPermissionStatus()) !== 'granted') {
+      await cancelSleepWarnings();
+      return { ...EMPTY_SLEEP_STATE, status: 'no-permission' };
+    }
+    await ensureSleepChannel();
+    await cancelSleepWarnings();
+    const ids: string[] = [];
+    const now = new Date();
+    let nextEarly: Date | null = null;
+    let nextAtTime: Date | null = null;
+    for (let dayOffset = 0; dayOffset <= 1; dayOffset++) {
+      const at = timeToDate(sleepStart, dayOffset);
+      if (!at) return { ...EMPTY_SLEEP_STATE, status: 'no-schedule' };
+      if (at.getTime() > now.getTime()) {
+        try {
+          const id = await Notifications.scheduleNotificationAsync({
+            content: {
+              title: 'Sone ka waqt ho gaya',
+              body: 'Neend ka waqt hai — apps ab band hain. Phone rakh do.',
+              data: { type: 'sleep', kind: 'at-time' },
+              sound: 'default',
+              color: TEAL,
+            },
+            trigger: {
+              type: Notifications.SchedulableTriggerInputTypes.DATE,
+              date: at,
+              channelId: SLEEP_CHANNEL_ID,
+            },
+          });
+          ids.push(id);
+          if (!nextAtTime) nextAtTime = at;
+        } catch {
+          // One warning failing must not block the other.
+        }
+      }
+      if (warn5min) {
+        const early = new Date(at.getTime() - 5 * 60 * 1000);
+        if (early.getTime() > now.getTime()) {
+          try {
+            const id = await Notifications.scheduleNotificationAsync({
+              content: {
+                title: 'Sone ka waqt — 5 minute bache hain',
+                body: 'Apps band kar do, warna AHDORA sone ke waqt band kar dega.',
+                data: { type: 'sleep', kind: 'early' },
+                sound: 'default',
+                color: TEAL,
+              },
+              trigger: {
+                type: Notifications.SchedulableTriggerInputTypes.DATE,
+                date: early,
+                channelId: SLEEP_CHANNEL_ID,
+              },
+            });
+            ids.push(id);
+            if (!nextEarly) nextEarly = early;
+          } catch {
+            // One warning failing must not block the other.
+          }
+        }
+      }
+    }
+    await storeSleepIds(ids);
+    const soonest = [nextEarly, nextAtTime]
+      .filter((d): d is Date => d !== null)
+      .sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
+    return { scheduled: ids.length, status: 'ok', nextWarning: soonest, nextEarly, nextAtTime };
+  } catch {
+    return { ...EMPTY_SLEEP_STATE, status: 'no-schedule' };
+  }
+}
+
+/**
+ * No-arg refresh for app startup: reads the real sleep schedule
+ * from the profile and the two Sleep-screen flags from storage,
+ * then (re-)schedules the sleep warnings. This is the one-liner
+ * App.tsx startup should call next to refreshPrayerNotifications.
+ * Never throws.
+ */
+export async function refreshSleepWarningsFromStorage(): Promise<SleepWarningState> {
+  try {
+    const [{ profile }, warnRaw, blockRaw] = await Promise.all([
+      getProfile(),
+      AsyncStorage.getItem(SLEEP_WARN_KEY),
+      AsyncStorage.getItem(SLEEP_BLOCK_KEY),
+    ]);
+    const start =
+      typeof profile?.sleepStartTime === 'string'
+        ? profile.sleepStartTime
+        : typeof profile?.sleepTime === 'string'
+          ? profile.sleepTime
+          : null;
+    return refreshSleepWarnings(start, warnRaw !== 'false', blockRaw === 'true');
+  } catch {
+    return { ...EMPTY_SLEEP_STATE };
+  }
+}
+
+/**
+ * Fire a REAL sleep warning right now through the real sleep
+ * channel (the Sleep screen's test button). Returns true only
+ * when the notification was actually handed to the OS. Never throws.
+ */
+export async function sendSleepTestNotification(): Promise<boolean> {
+  ensureHandler();
+  try {
+    if ((await getNotificationPermissionStatus()) !== 'granted') return false;
+    await ensureSleepChannel();
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: 'Sone ka waqt — 5 minute bache hain',
+        body: 'Ye ek asal test warning hai — sleep warning isi tarah aayegi.',
+        data: { type: 'sleep', kind: 'test' },
+        sound: 'default',
+        color: TEAL,
+      },
+      trigger: null,
+    });
+    return true;
+  } catch {
+    return false;
   }
 }
 

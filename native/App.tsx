@@ -37,7 +37,7 @@ import {
 import { Amiri_400Regular, Amiri_700Bold } from '@expo-google-fonts/amiri';
 import { logout, restoreSession, setOnUnauthorized, type AuthUser } from './src/lib/api';
 import { loadProfileWithCompletion } from './src/lib/apiCore';
-import { refreshPrayerNotifications } from './src/lib/prayerNotifications';
+import { refreshPrayerNotifications, refreshSleepWarningsFromStorage } from './src/lib/prayerNotifications';
 import { DARK, initAppTheme, useAppTheme } from './src/lib/appTheme';
 import { PILL_NAV, type ScreenId, type ScreenProps } from './src/lib/nav';
 import { stringsFor, type AppLanguage } from './src/lib/strings';
@@ -178,6 +178,9 @@ export default function App() {
           // app open (fire-and-forget; it no-ops when alerts are off
           // or permission is not granted, and never blocks login).
           void refreshPrayerNotifications();
+          // Re-schedule sleep warnings too (same fire-and-forget;
+          // no-ops when no sleep time is set or permission missing).
+          void refreshSleepWarningsFromStorage();
         }
         setRestoringSession(false);
       })

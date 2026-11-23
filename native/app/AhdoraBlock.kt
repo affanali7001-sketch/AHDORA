@@ -26,7 +26,6 @@ import android.app.Activity
 import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Process
@@ -36,6 +35,20 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import org.json.JSONArray
 import org.json.JSONObject
+
+/** Packages the blocker must never touch — mirrored in AhdoraBlockService. */
+private val NEVER_BLOCKABLE = setOf(
+  "com.android.systemui",
+  "com.android.settings",
+  "com.android.dialer",
+  "com.google.android.dialer",
+  "com.samsung.android.dialer",
+  "com.google.android.apps.dialer",
+  "com.android.phone",
+  "com.android.server.telecom",
+  "com.android.emergency",
+  "com.google.android.apps.safetyhub"
+)
 
 class AhdoraBlock : Module() {
   override fun definition() = ModuleDefinition {
@@ -93,13 +106,18 @@ class AhdoraBlock : Module() {
         val activityInfo = info.activityInfo ?: continue
         val packageName = activityInfo.packageName ?: continue
         if (packageName == context.packageName) continue
+        // Only the packages the blocker must never touch are hidden
+        // (calls / emergency / System UI / Settings — the same set
+        // the service never blocks). Everything else is pickable,
+        // INCLUDING preinstalled system apps: the old FLAG_SYSTEM
+        // filter hid YouTube, Chrome and Gmail from the picker, so
+        // the user could never select the very apps he wanted to
+        // block at sleep time.
+        if (packageName in NEVER_BLOCKABLE) continue
         val appInfo = try {
           pm.getApplicationInfo(packageName, 0)
         } catch (e: PackageManager.NameNotFoundException) {
           null
-        }
-        if (appInfo != null && appInfo.flags and ApplicationInfo.FLAG_SYSTEM != 0) {
-          continue
         }
         val label = pm.getApplicationLabel(appInfo ?: continue).toString()
         val obj = JSONObject()
