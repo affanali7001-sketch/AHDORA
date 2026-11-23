@@ -18,11 +18,11 @@ import {
   ActivityIndicator,
   BackHandler,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useFonts } from 'expo-font';
@@ -279,19 +279,22 @@ export default function App() {
   // (or loading failed, in which case the system font is the fallback).
   if (!fontsLoaded && !fontError) {
     return (
-      <SafeAreaView style={[styles.safe, th.dark && { backgroundColor: DARK.bg }]}>
-        <ExpoStatusBar style={th.dark ? 'light' : 'dark'} />
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={C.teal700} />
-        </View>
-      </SafeAreaView>
+      <SafeAreaProvider>
+        <SafeAreaView style={[styles.safe, th.dark && { backgroundColor: DARK.bg }]}>
+          <ExpoStatusBar style={th.dark ? 'light' : 'dark'} />
+          <View style={styles.center}>
+            <ActivityIndicator size="large" color={C.teal700} />
+          </View>
+        </SafeAreaView>
+      </SafeAreaProvider>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.safe, th.dark && { backgroundColor: DARK.bg }]}>
-      <ExpoStatusBar style={th.dark ? 'light' : 'dark'} />
-      {checkingOnboarding || restoringSession ? (
+    <SafeAreaProvider>
+      <SafeAreaView style={[styles.safe, th.dark && { backgroundColor: DARK.bg }]}>
+        <ExpoStatusBar style={th.dark ? 'light' : 'dark'} />
+        {checkingOnboarding || restoringSession ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={C.teal700} />
           <Text style={styles.loadingText}>{s.loading}</Text>
@@ -342,7 +345,8 @@ export default function App() {
           ) : null}
         </View>
       )}
-    </SafeAreaView>
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 
@@ -471,8 +475,9 @@ const styles = StyleSheet.create({
   },
   pillTextActive: { color: C.teal900 },
   backBar: {
-    // Same top clearance as the screens (S.screenTop) so the button
-    // sits BELOW the status bar (time/battery), never under it.
+    // Top clearance comes from the root SafeAreaView's real status-bar
+    // inset (SafeAreaProvider) + S.screenTop — the button sits BELOW
+    // the status bar (time/battery), never under it.
     paddingHorizontal: 20,
     paddingTop: S.screenTop,
     paddingBottom: 6,

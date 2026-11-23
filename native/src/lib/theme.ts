@@ -43,7 +43,11 @@ export const S = {
   radiusSm: 16, // input radius (preview .field input)
   radiusLg: 24, // teal-head radius
   gap: 12,
-  screenTop: 52,
+  // Top clearance INSIDE the root SafeAreaView (which now supplies
+  // the real status-bar inset on Android — see App.tsx). 20 + the
+  // real inset ≈ the old 52 on a normal phone, without pushing
+  // buttons under the status bar on tall-notch phones.
+  screenTop: 20,
   screenBottom: 24, // pill nav is in-flow now (was 108 for the floating pill)
 } as const;
 

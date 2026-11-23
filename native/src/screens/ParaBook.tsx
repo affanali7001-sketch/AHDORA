@@ -251,7 +251,15 @@ type PageCacheEntry = {
 export default function ParaBookScreen({ lang }: ScreenProps) {
   const s = STRINGS[lang];
   const shared = stringsFor(lang);
-  const { width: pageWidth } = useWindowDimensions();
+  const { width: pageWidth, height: winHeight } = useWindowDimensions();
+  // The book gets a GUARANTEED height (55% of the screen, at least
+  // 400dp): the old flex:1 book was squeezed to ~0 by the ~350dp
+  // player above it, so the mushaf page vanished and only the music
+  // showed. The leaf turns around the book's own left edge, so its
+  // width is the book width (screen minus the reader's side padding),
+  // not the full screen width.
+  const bookHeight = Math.max(400, Math.round(winHeight * 0.55));
+  const bookWidth = pageWidth - S.pad * 2;
   const [view, setView] = useState<'list' | 'reader'>('list');
   const [juz, setJuz] = useState<number | null>(null);
   const [index, setIndex] = useState(0);
@@ -294,11 +302,11 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
   const leafTransform = useMemo(
     () => [
       { perspective: 900 },
-      { translateX: -pageWidth / 2 },
+      { translateX: -bookWidth / 2 },
       { rotateY: leafRotateY },
-      { translateX: pageWidth / 2 },
+      { translateX: bookWidth / 2 },
     ],
-    [pageWidth, leafRotateY],
+    [bookWidth, leafRotateY],
   );
 
   useEffect(() => {
@@ -701,8 +709,20 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
         } · ${firstSurah.numberOfAyahs} ${s.aayatWord} · ${s.paraWord} ${firstAyah.juz}`
       : null;
 
+  // The WHOLE reader scrolls, exactly like the Quran Book: header,
+  // player, mushaf page, page controls, Next Para — all in one scroll
+  // flow. The old fixed flex column let the ~350dp player squeeze
+  // the flex:1 book to nothing (only the music showed, no page), and
+  // crammed the page buttons at the very bottom under the pill nav.
+  // Now the book has a guaranteed height (see bookHeight above) so
+  // the page is always visible, and every button lives inside the
+  // scroll content — always above the pill nav, always tappable.
   return (
-    <View style={styles.reader}>
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={L.scroll}
+      onScrollBeginDrag={pauseFollow}
+    >
       <View style={styles.readerTop}>
         <PillButton label={s.backToList} variant="ghost" small onPress={() => setView('list')} />
         <View style={styles.readerHead}>
@@ -719,28 +739,25 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
       </View>
 
       {/* The SAME Tilawah player as the Quran Book (Mihrab layout):
-          one player at the top of the reader, above the book — the
-          old top audio card and the per-page PlayerCards below the
-          tarjuma were duplicate players and are gone; every control
-          they had (play tilawat/tarjuma, seek, auto-play, speed,
-          repeat, sleep, reciter) lives in this one player. */}
-      <View style={styles.playerWrap}>
-        <TilawahPlayer
-          lang={lang}
-          page={currentPage}
-          ayahs={currentMushaf?.ayahs ?? []}
-          showTranslation={showTranslation}
-          onTranslationChange={setShowTranslation}
-          followPaused={followPausedAyah !== null}
-          onFollowResume={resumeFollow}
-          onOpenList={() => setView('list')}
-        />
-      </View>
+          one compact player at the top of the reader, above the book.
+          Every control the old per-page players had (play
+          tilawat/tarjuma, seek, auto-play, speed, repeat, sleep,
+          reciter) lives in this one player. */}
+      <TilawahPlayer
+        lang={lang}
+        page={currentPage}
+        ayahs={currentMushaf?.ayahs ?? []}
+        showTranslation={showTranslation}
+        onTranslationChange={setShowTranslation}
+        followPaused={followPausedAyah !== null}
+        onFollowResume={resumeFollow}
+        onOpenList={() => setView('list')}
+      />
       <Text style={T.note}>
         {s.urduAudioCredit} · {URDU_AUDIO.bitrate}
       </Text>
 
-      <View style={styles.book} {...panResponder.panHandlers}>
+      <View style={[styles.book, { height: bookHeight }]} {...panResponder.panHandlers}>
         {/* Base layer: the page underneath the turn. Keyed by page
             so it remounts (scroll back to top) when the page changes. */}
         <View key={basePageNum} style={styles.baseLayer}>
@@ -771,7 +788,7 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
         {flip && leafIndex !== null && leafPageNum !== null ? (
           <Animated.View
             pointerEvents="none"
-            style={[styles.leaf, { width: pageWidth, transform: leafTransform }]}
+            style={[styles.leaf, { width: bookWidth, transform: leafTransform }]}
           >
             <View style={[styles.face, { backfaceVisibility: 'hidden' }]}>
               {renderBookPage(
@@ -840,7 +857,27 @@ export default function ParaBookScreen({ lang }: ScreenProps) {
           style={styles.flipBtn}
         />
       </View>
-    </View>
+
+      {/* Next Para, right after the page controls and inside the
+          scroll flow — always above the pill nav and tappable, never
+          crammed at the very bottom under it. Shown on the para's
+          last page (the done card above already carries it when the
+          audio finishes the para). */}
+      {index >= pageCount - 1 && !paraDone ? (
+        j.number < 30 ? (
+          <View style={styles.nextParaWrap}>
+            <PillButton
+              label={s.nextParaBtn(j.number + 1)}
+              variant="peach"
+              block
+              onPress={() => openJuz(j.number + 1)}
+            />
+          </View>
+        ) : (
+          <Text style={styles.doneBody}>{s.allDone}</Text>
+        )
+      ) : null}
+    </ScrollView>
   );
 }
 
@@ -1082,9 +1119,8 @@ const styles = StyleSheet.create({
   juzName: { fontFamily: F.sans, fontSize: 16, fontWeight: '700', color: C.ink },
   juzSub: { fontFamily: F.sans, fontSize: 13, color: C.muted, marginTop: 2 },
   juzArabic: { fontFamily: F.arabic, fontSize: 24, color: C.teal700 },
-  /* ---- Reader ---- */
-  reader: { flex: 1, backgroundColor: C.ice, paddingTop: S.screenTop },
-  readerTop: { paddingHorizontal: S.pad },
+  /* ---- Reader (scrolls as one, like the Quran Book) ---- */
+  readerTop: {},
   readerHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1099,7 +1135,11 @@ const styles = StyleSheet.create({
   },
   pageTagText: { fontFamily: F.sans, fontSize: 11, fontWeight: '800', color: C.peachInk },
   readerSub: { fontFamily: F.sans, fontSize: 13, color: C.muted, marginTop: 4 },
-  book: { flex: 1, marginTop: 12 },
+  /* The book keeps a guaranteed height (set inline from the window
+     height) — never flex:1, so the player above it can never squeeze
+     it to nothing. The page inside scrolls; the leaf turns within
+     these bounds. */
+  book: { marginTop: 12 },
   baseLayer: { flex: 1 },
   /* Turning leaf: absolutely positioned over the base, pivoting on
    * the spine (left edge). Width is set inline to the page width. */
@@ -1132,11 +1172,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingHorizontal: S.pad,
     paddingTop: 10,
-    paddingBottom: S.screenBottom,
+    paddingBottom: 0,
   },
   flipBtn: { flex: 1 },
+  nextParaWrap: { marginTop: 12 },
   flipLabel: {
     fontFamily: F.sans,
     fontSize: 12.5,
@@ -1148,7 +1188,6 @@ const styles = StyleSheet.create({
     backgroundColor: C.teal900,
     borderRadius: S.radius,
     padding: 16,
-    marginHorizontal: S.pad,
     marginTop: 10,
   },
   doneTitle: { fontFamily: F.sans, fontSize: 16, fontWeight: '800', color: C.white },
@@ -1327,11 +1366,6 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     marginTop: 3,
   },
-  /* ---- Tilawah player (reader): the ONE player sits above the
-     book, so the play controls are visible the moment the reader
-     opens. The player card carries its own margin — this wrapper
-     only insets it to the reader's padding. ---- */
-  playerWrap: { marginHorizontal: S.pad },
   pageFooter: {
     fontFamily: F.sans,
     fontSize: 12.5,
