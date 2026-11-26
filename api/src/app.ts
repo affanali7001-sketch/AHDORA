@@ -11,6 +11,7 @@ import { authRouter } from './routes/auth.js';
 import { profileRouter } from './routes/profile.js';
 import { requireAuth } from './middleware/auth.js';
 import { requireCsrf } from './middleware/csrf.js';
+import { requireHttps } from './middleware/requireHttps.js';
 import { sanitizeInput } from './middleware/sanitize.js';
 import { salahRouter } from './routes/salah.js';
 import { prayerRouter } from './routes/prayer.js';
@@ -29,6 +30,16 @@ export const app = express();
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
+
+// Production only: redirect plain-HTTP requests to HTTPS (301) so
+// Google sees one canonical https:// URL instead of separate http://
+// pages. Heroku terminates TLS and forwards X-Forwarded-Proto; with
+// `trust proxy` set above, `req.secure` is correct and this cannot
+// loop. Localhost is exempt inside the middleware, and development
+// never reaches this branch.
+if (isProduction) {
+  app.use(requireHttps);
+}
 
 // Helmet with a strict policy. The API serves JSON only (no HTML, no
 // inline scripts), so `default-src 'none'` + `frame-ancestors 'none'`
